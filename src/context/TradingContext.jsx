@@ -5,9 +5,11 @@ import { TradingContext } from './tradingState'
 const SLOT_SIZE = 2000
 const MAX_POSITIONS = 5
 const STORAGE_KEY = 'spapple_state'
+const STORAGE_VERSION = 2
 
 const initialState = {
-  capital: 10000,
+  version: STORAGE_VERSION,
+  capital: 30000,
   vault: 0,
   positions: [],
   history: [],
@@ -27,10 +29,16 @@ function loadInitialState() {
 
     const parsedState = JSON.parse(storedState)
 
+    if (parsedState.version !== STORAGE_VERSION) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(initialState))
+      return initialState
+    }
+
     const capital = Number(parsedState.capital)
     const vault = Number(parsedState.vault)
 
     return {
+      version: STORAGE_VERSION,
       capital: Number.isFinite(capital) ? capital : initialState.capital,
       vault: Number.isFinite(vault) ? vault : initialState.vault,
       positions: Array.isArray(parsedState.positions)
@@ -172,6 +180,7 @@ export function TradingProvider({ children }) {
 
       return {
         ...current,
+        version: STORAGE_VERSION,
         capital: roundPrice(capital),
         vault: roundPrice(vault),
         positions: activePositions,

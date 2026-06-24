@@ -5,6 +5,7 @@ import { TradingProvider } from './context/TradingContext'
 import MainLayout from './layouts/MainLayout'
 import Dashboard from './pages/Dashboard'
 import Diary from './pages/Diary'
+import Explanation from './pages/Explanation'
 import Login from './pages/Login'
 import Portfolio from './pages/Portfolio'
 import Scanner from './pages/Scanner'
@@ -55,6 +56,7 @@ function AppRoutes() {
         <Route path="scanner" element={<Scanner />} />
         <Route path="portafoglio" element={<Portfolio />} />
         <Route path="diario" element={<Diary />} />
+        <Route path="spiegazione" element={<Explanation />} />
         <Route path="impostazioni" element={<Settings />} />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

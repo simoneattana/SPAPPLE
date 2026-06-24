@@ -2,6 +2,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import {
   BarChart3,
   BookOpen,
+  Info,
   LayoutDashboard,
   LogOut,
   Radar,
@@ -16,6 +17,7 @@ const navigationItems = [
   { label: 'Scanner di Mercato', to: '/scanner', icon: Radar },
   { label: 'Portafoglio', to: '/portafoglio', icon: Wallet },
   { label: 'Diario Trading', to: '/diario', icon: BookOpen },
+  { label: 'Cos’è Spapple', to: '/spiegazione', icon: Info },
   { label: 'Impostazioni', to: '/impostazioni', icon: Settings },
 ]
 
