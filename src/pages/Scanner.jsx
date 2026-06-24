@@ -13,6 +13,7 @@ import {
   TableRow,
 } from '../components/ui/Table'
 import { useToast } from '../components/ui/useToast'
+import { useTrading } from '../context/useTrading'
 import { fetchMarketData } from '../services/api'
 
 const EUROPEAN_TICKERS = ['ENEL.MI', 'ISP.MI', 'RACE.MI', 'STLAM.MI', 'UCG.MI']
@@ -56,6 +57,8 @@ export default function Scanner() {
   const [error, setError] = useState('')
   const [results, setResults] = useState([])
   const { toast } = useToast()
+  const { executeTrade, positions, maxPositions } = useTrading()
+  const slotsFull = positions.length >= maxPositions
 
   const filteredResults = useMemo(
     () => results.filter(isActionableResult),
@@ -82,11 +85,32 @@ export default function Scanner() {
     }
   }
 
-  const handlePrepareOrder = (row) => {
-    console.log(row)
-    toast({
-      title: `Ordine per ${row.ticker} pronto`,
-    })
+  const handleExecuteTrade = (row) => {
+    const type = row.rsi < 30 ? 'LONG' : 'SHORT'
+
+    try {
+      const trade = executeTrade(row.ticker, row.currentPrice, row.atr, type)
+      toast({
+        title: `Ordine ${type === 'LONG' ? 'Long' : 'Short'} su ${trade.ticker} eseguito`,
+      })
+    } catch (tradeError) {
+      toast({
+        title: tradeError.message,
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const actionLabel = (row) => {
+    if (row.rsi < 30) {
+      return 'Acquista (Long)'
+    }
+
+    if (row.rsi > 70) {
+      return 'Vendi (Short)'
+    }
+
+    return 'Nessuna azione'
   }
 
   return (
@@ -178,9 +202,10 @@ export default function Scanner() {
                     <Button
                       size="sm"
                       variant="ghost"
-                      onClick={() => handlePrepareOrder(row)}
+                      disabled={slotsFull}
+                      onClick={() => handleExecuteTrade(row)}
                     >
-                      Prepara Ordine
+                      {actionLabel(row)}
                     </Button>
                   </TableCell>
                 </TableRow>

@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from './services/AuthContext'
 import { ToastProvider } from './components/ui/Toast'
+import { TradingProvider } from './context/TradingContext'
 import MainLayout from './layouts/MainLayout'
 import Dashboard from './pages/Dashboard'
 import Login from './pages/Login'
@@ -63,7 +64,9 @@ export default function App() {
   return (
     <AuthProvider>
       <ToastProvider>
-        <AppRoutes />
+        <TradingProvider>
+          <AppRoutes />
+        </TradingProvider>
       </ToastProvider>
     </AuthProvider>
   )

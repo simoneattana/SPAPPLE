@@ -6,39 +6,49 @@ import {
   ShieldCheck,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card'
+import { useTrading } from '../context/useTrading'
 
-const kpis = [
-  {
-    title: 'Capitale Operativo',
-    value: '€ 10.000,00',
-    detail: 'Liquidità disponibile',
-    icon: BadgeEuro,
-    accent: 'text-[#deff9a]',
-  },
-  {
-    title: 'Salvadanaio Profitti',
-    value: '€ 0,00',
-    detail: 'Profitti consolidati',
-    icon: PiggyBank,
-    accent: 'text-[#deff9a]',
-  },
-  {
-    title: 'Posizioni Attive',
-    value: '0 / 5 Slot',
-    detail: 'Capacità operativa',
-    icon: ChartNoAxesCombined,
-    accent: 'text-slate-200',
-  },
-  {
-    title: 'Stato Sistema',
-    value: 'In attesa di scansione EOD',
-    detail: 'Controllo giornaliero',
-    icon: ShieldCheck,
-    accent: 'text-[#deff9a]',
-  },
-]
+const currencyFormatter = new Intl.NumberFormat('it-IT', {
+  style: 'currency',
+  currency: 'EUR',
+})
 
 export default function Dashboard() {
+  const { capital, vault, positions, maxPositions } = useTrading()
+  const kpis = [
+    {
+      title: 'Capitale Operativo',
+      value: currencyFormatter.format(capital),
+      detail: 'Liquidità disponibile',
+      icon: BadgeEuro,
+      accent: 'text-[#deff9a]',
+    },
+    {
+      title: 'Salvadanaio Profitti',
+      value: currencyFormatter.format(vault),
+      detail: 'Profitti consolidati',
+      icon: PiggyBank,
+      accent: 'text-[#deff9a]',
+    },
+    {
+      title: 'Posizioni Attive',
+      value: `${positions.length} / ${maxPositions} Slot`,
+      detail: 'Capacità operativa',
+      icon: ChartNoAxesCombined,
+      accent: 'text-slate-200',
+    },
+    {
+      title: 'Stato Sistema',
+      value:
+        positions.length > 0
+          ? 'Forward test in corso'
+          : 'In attesa di scansione EOD',
+      detail: 'Controllo giornaliero',
+      icon: ShieldCheck,
+      accent: 'text-[#deff9a]',
+    },
+  ]
+
   return (
     <div className="flex flex-1 flex-col gap-7">
       <header className="rounded-lg border border-slate-800 bg-[#090b10] p-5 shadow-xl shadow-black/20">
