@@ -43,6 +43,14 @@ function SignalBadge({ rsi }) {
   return <Badge>NEUTRALE</Badge>
 }
 
+function WatchlistBadge({ row }) {
+  if (isActionableResult(row)) {
+    return <SignalBadge rsi={row.rsi} />
+  }
+
+  return <Badge>NESSUN SEGNALE</Badge>
+}
+
 export default function Scanner() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -135,7 +143,10 @@ export default function Scanner() {
               70.
             </p>
           </div>
-          <Badge>{filteredResults.length} segnali</Badge>
+          <div className="flex flex-wrap gap-2">
+            <Badge>{results.length} scansionati</Badge>
+            <Badge>{filteredResults.length} segnali</Badge>
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
@@ -195,6 +206,53 @@ export default function Scanner() {
           ) : null}
         </CardContent>
       </Card>
+
+      {results.length > 0 ? (
+        <Card className="overflow-hidden">
+          <CardHeader className="items-center justify-between gap-4 border-b border-slate-800">
+            <div>
+              <CardTitle>Universo scansionato</CardTitle>
+              <p className="mt-2 text-sm text-slate-500">
+                Tutti i ticker analizzati con dati reali Yahoo Finance e
+                indicatori calcolati localmente.
+              </p>
+            </div>
+            <Badge>{results.length} titoli</Badge>
+          </CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>Ticker</TableHead>
+                  <TableHead>Prezzo Chiusura</TableHead>
+                  <TableHead>RSI (14)</TableHead>
+                  <TableHead>P/E</TableHead>
+                  <TableHead>Volatilità (ATR)</TableHead>
+                  <TableHead>Stato</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {results.map((row) => (
+                  <TableRow key={`universo-${row.ticker}`}>
+                    <TableCell className="font-semibold text-white">
+                      {row.ticker}
+                    </TableCell>
+                    <TableCell>
+                      {currencyFormatter.format(row.currentPrice)}
+                    </TableCell>
+                    <TableCell>{numberFormatter.format(row.rsi)}</TableCell>
+                    <TableCell>{numberFormatter.format(row.pe)}</TableCell>
+                    <TableCell>{numberFormatter.format(row.atr)}</TableCell>
+                    <TableCell>
+                      <WatchlistBadge row={row} />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      ) : null}
     </div>
   )
 }
