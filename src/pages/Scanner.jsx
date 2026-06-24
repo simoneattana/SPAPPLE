@@ -28,7 +28,13 @@ const numberFormatter = new Intl.NumberFormat('it-IT', {
 })
 
 function isActionableResult(row) {
-  return row.peRatio > 0 && (row.rsi14 < 30 || row.rsi14 > 70)
+  const hasExtremeRsi = row.rsi14 < 30 || row.rsi14 > 70
+
+  if (row.peRatio === null) {
+    return hasExtremeRsi
+  }
+
+  return row.peRatio > 0 && hasExtremeRsi
 }
 
 function SignalBadge({ rsi }) {
@@ -66,7 +72,7 @@ export default function Scanner() {
       console.error(apiError)
       setError(apiError.message)
       toast({
-        title: 'Errore API: Controlla la connessione o la chiave',
+        title: 'Errore dati: Controlla la connessione o EODHD',
         variant: 'destructive',
       })
     } finally {
@@ -95,6 +101,9 @@ export default function Scanner() {
             Analisi EOD su prezzo di chiusura, RSI, ATR e rapporto P/E con dati
             reali da API.
           </p>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-[#deff9a]">
+            Piano EODHD Free: P/E non incluso, filtro fondamentale sospeso.
+          </p>
         </div>
 
         <Button onClick={handleScan} disabled={loading}>
@@ -122,7 +131,7 @@ export default function Scanner() {
 
       {error ? (
         <div className="rounded-lg border border-[#ef8f8f]/35 bg-[#ef8f8f]/10 p-4 text-sm text-[#ef8f8f]">
-          Errore API: Controlla la connessione o la chiave
+          Errore dati: Controlla la connessione o EODHD
         </div>
       ) : null}
 
@@ -131,8 +140,8 @@ export default function Scanner() {
           <div>
             <CardTitle>Risultati filtrati</CardTitle>
             <p className="mt-2 text-sm text-slate-500">
-              Sono visibili solo società profittevoli con RSI sotto 30 o sopra
-              70.
+              Sono visibili segnali con RSI sotto 30 o sopra 70. Il filtro P/E
+              si applica solo quando il dato fondamentale è disponibile.
             </p>
           </div>
           <Badge>{filteredResults.length} segnali</Badge>
@@ -154,11 +163,20 @@ export default function Scanner() {
               {filteredResults.map((row) => (
                 <TableRow key={row.ticker}>
                   <TableCell className="font-semibold text-white">
-                    {row.ticker}
+                    <span>{row.ticker}</span>
+                    {row.dataSymbol ? (
+                      <span className="mt-1 block text-xs font-normal text-slate-500">
+                        {row.dataSymbol}
+                      </span>
+                    ) : null}
                   </TableCell>
                   <TableCell>{currencyFormatter.format(row.closePrice)}</TableCell>
                   <TableCell>{numberFormatter.format(row.rsi14)}</TableCell>
-                  <TableCell>{numberFormatter.format(row.peRatio)}</TableCell>
+                  <TableCell>
+                    {row.peRatio === null
+                      ? 'Non incluso'
+                      : numberFormatter.format(row.peRatio)}
+                  </TableCell>
                   <TableCell>{numberFormatter.format(row.atr14)}</TableCell>
                   <TableCell>
                     <SignalBadge rsi={row.rsi14} />
@@ -187,8 +205,8 @@ export default function Scanner() {
                   Nessun segnale operativo disponibile
                 </p>
                 <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
-                  Avvia una scansione EOD. Verranno mostrati solo ticker con P/E
-                  positivo e RSI in area estrema.
+                  Avvia una scansione EOD. Verranno mostrati solo ticker con RSI
+                  in area estrema.
                 </p>
               </div>
             </div>

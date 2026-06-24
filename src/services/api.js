@@ -1,39 +1,74 @@
-const API_BASE_URL = 'https://financialmodelingprep.com/stable'
+const EODHD_PROXY_URL = '/api/eodhd/eod'
 const MIN_HISTORY_LENGTH = 15
 
-function getApiKey() {
-  const apiKey = import.meta.env.VITE_API_KEY
-
-  if (!apiKey) {
-    throw new Error('Chiave API mancante')
-  }
-
-  return apiKey
+const EODHD_SYMBOLS = {
+  'ENEL.MI': {
+    symbol: '0NRE.LSE',
+    label: 'Enel SpA',
+    note: 'Listing EODHD LSE in EUR',
+  },
+  'ISP.MI': {
+    symbol: 'IES.XETRA',
+    label: 'Intesa Sanpaolo S.p.A.',
+    note: 'Listing EODHD XETRA in EUR',
+  },
+  'RACE.MI': {
+    symbol: '2FE.XETRA',
+    label: 'Ferrari N.V.',
+    note: 'Listing EODHD XETRA in EUR',
+  },
+  'STLAM.MI': {
+    symbol: 'STLAP.PA',
+    label: 'Stellantis N.V.',
+    note: 'Listing EODHD Paris in EUR',
+  },
+  'UCG.MI': {
+    symbol: 'CRIN.XETRA',
+    label: 'UniCredit S.p.A.',
+    note: 'Listing EODHD XETRA in EUR',
+  },
 }
 
-async function fetchJson(url) {
+function resolveEodhdSymbol(ticker) {
+  const mappedSymbol = EODHD_SYMBOLS[ticker]
+
+  if (!mappedSymbol) {
+    throw new Error(`Ticker EODHD non configurato per ${ticker}`)
+  }
+
+  return mappedSymbol
+}
+
+async function fetchEodHistory(ticker, mappedSymbol) {
+  const url = `${EODHD_PROXY_URL}?symbol=${encodeURIComponent(mappedSymbol.symbol)}`
   const response = await fetch(url)
   const text = await response.text()
 
   if (!response.ok) {
-    throw new Error(text || `Richiesta API fallita con stato ${response.status}`)
+    throw new Error(text || `${ticker}: richiesta EODHD fallita`)
   }
 
+  let data
   try {
-    const data = JSON.parse(text)
-
-    if (data?.['Error Message'] || data?.error) {
-      throw new Error(data['Error Message'] || data.error)
-    }
-
-    return data
-  } catch (error) {
-    if (error instanceof SyntaxError) {
-      throw new Error(text || 'Risposta API non valida')
-    }
-
-    throw error
+    data = JSON.parse(text)
+  } catch {
+    throw new Error(`${ticker}: risposta EODHD non valida`)
   }
+
+  if (!Array.isArray(data) || data.length < MIN_HISTORY_LENGTH) {
+    throw new Error(`${ticker}: storico EODHD insufficiente`)
+  }
+
+  return data
+    .map((item) => ({
+      date: item.date,
+      open: assertNumber(item.open, `${ticker}: apertura`),
+      high: assertNumber(item.high, `${ticker}: massimo`),
+      low: assertNumber(item.low, `${ticker}: minimo`),
+      close: assertNumber(item.close, `${ticker}: chiusura`),
+      volume: assertNumber(item.volume, `${ticker}: volume`),
+    }))
+    .sort((a, b) => new Date(a.date) - new Date(b.date))
 }
 
 function assertNumber(value, label) {
@@ -44,33 +79,6 @@ function assertNumber(value, label) {
   }
 
   return number
-}
-
-function assertArray(data, label) {
-  if (!Array.isArray(data) || data.length === 0) {
-    throw new Error(`${label} non disponibile`)
-  }
-
-  return data
-}
-
-function normalizeHistory(historyData, ticker) {
-  const history = assertArray(historyData, `Storico EOD per ${ticker}`)
-    .map((item) => ({
-      date: item.date,
-      open: assertNumber(item.open, `Apertura EOD per ${ticker}`),
-      high: assertNumber(item.high, `Massimo EOD per ${ticker}`),
-      low: assertNumber(item.low, `Minimo EOD per ${ticker}`),
-      close: assertNumber(item.close, `Chiusura EOD per ${ticker}`),
-      volume: assertNumber(item.volume, `Volume EOD per ${ticker}`),
-    }))
-    .sort((a, b) => new Date(a.date) - new Date(b.date))
-
-  if (history.length < MIN_HISTORY_LENGTH) {
-    throw new Error(`Storico EOD insufficiente per ${ticker}`)
-  }
-
-  return history
 }
 
 function calculateRsi(history, period = 14) {
@@ -132,40 +140,21 @@ function calculateAtr(history, period = 14) {
   return atr
 }
 
-function extractPeRatio(metricsData, ticker) {
-  const metrics = assertArray(metricsData, `Metriche fondamentali per ${ticker}`)[0]
-  const earningsYield = assertNumber(
-    metrics.earningsYieldTTM,
-    `Earnings Yield TTM per ${ticker}`,
-  )
-
-  if (earningsYield === 0) {
-    throw new Error(`P/E non calcolabile per ${ticker}`)
-  }
-
-  return 1 / earningsYield
-}
-
-async function fetchTickerData(ticker, apiKey) {
-  const encodedTicker = encodeURIComponent(ticker)
-  const historyUrl = `${API_BASE_URL}/historical-price-eod/full?symbol=${encodedTicker}&apikey=${apiKey}`
-  const metricsUrl = `${API_BASE_URL}/key-metrics-ttm?symbol=${encodedTicker}&apikey=${apiKey}`
-
-  const [historyData, metricsData] = await Promise.all([
-    fetchJson(historyUrl),
-    fetchJson(metricsUrl),
-  ])
-
-  const history = normalizeHistory(historyData, ticker)
+async function fetchTickerData(ticker) {
+  const mappedSymbol = resolveEodhdSymbol(ticker)
+  const history = await fetchEodHistory(ticker, mappedSymbol)
   const latestBar = history.at(-1)
 
   return {
     ticker,
+    dataSymbol: mappedSymbol.symbol,
+    label: mappedSymbol.label,
+    note: mappedSymbol.note,
     closePrice: latestBar.close,
     rsi14: calculateRsi(history, 14),
     atr14: calculateAtr(history, 14),
-    peRatio: extractPeRatio(metricsData, ticker),
-    source: 'Financial Modeling Prep',
+    peRatio: null,
+    source: 'EODHD',
     eodDate: latestBar.date,
   }
 }
@@ -175,6 +164,5 @@ export async function fetchMarketData(tickers) {
     throw new Error('Lista ticker non valida')
   }
 
-  const apiKey = getApiKey()
-  return Promise.all(tickers.map((ticker) => fetchTickerData(ticker, apiKey)))
+  return Promise.all(tickers.map((ticker) => fetchTickerData(ticker)))
 }
