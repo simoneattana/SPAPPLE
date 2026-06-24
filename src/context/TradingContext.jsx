@@ -1,8 +1,10 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { fetchLatestPrice } from '../services/api'
 import { TradingContext } from './tradingState'
 
 const SLOT_SIZE = 2000
 const MAX_POSITIONS = 5
+const STORAGE_KEY = 'spapple_state'
 
 const initialState = {
   capital: 10000,
@@ -13,6 +15,34 @@ const initialState = {
 
 function roundPrice(value) {
   return Number(value.toFixed(4))
+}
+
+function loadInitialState() {
+  try {
+    const storedState = localStorage.getItem(STORAGE_KEY)
+
+    if (!storedState) {
+      return initialState
+    }
+
+    const parsedState = JSON.parse(storedState)
+
+    const capital = Number(parsedState.capital)
+    const vault = Number(parsedState.vault)
+
+    return {
+      capital: Number.isFinite(capital) ? capital : initialState.capital,
+      vault: Number.isFinite(vault) ? vault : initialState.vault,
+      positions: Array.isArray(parsedState.positions)
+        ? parsedState.positions
+        : initialState.positions,
+      history: Array.isArray(parsedState.history)
+        ? parsedState.history
+        : initialState.history,
+    }
+  } catch {
+    return initialState
+  }
 }
 
 function buildTrade(ticker, price, atr, type) {
@@ -37,7 +67,11 @@ function buildTrade(ticker, price, atr, type) {
 }
 
 export function TradingProvider({ children }) {
-  const [state, setState] = useState(initialState)
+  const [state, setState] = useState(loadInitialState)
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+  }, [state])
 
   const executeTrade = useCallback((ticker, price, atr, type) => {
     if (!['LONG', 'SHORT'].includes(type)) {
@@ -63,24 +97,88 @@ export function TradingProvider({ children }) {
     return trade
   }, [state.capital, state.positions.length])
 
-  const runEOD = useCallback(() => {
+  const runEOD = useCallback(async () => {
+    const positionsWithPrices = await Promise.all(
+      state.positions.map(async (position) => ({
+        position,
+        latestPrice: await fetchLatestPrice(position.ticker),
+      })),
+    )
+
     setState((current) => {
-      const positions = current.positions.map((position) => {
+      let capital = current.capital
+      let vault = current.vault
+      const activePositions = []
+      const closedTrades = []
+
+      current.positions.forEach((position) => {
+        const priceData = positionsWithPrices.find(
+          (item) => item.position.id === position.id,
+        )
+        const latestPrice = priceData?.latestPrice
         const updatedPosition = {
           ...position,
           daysHeld: position.daysHeld + 1,
         }
 
-        console.log('Valutazione EOD posizione', updatedPosition)
-        return updatedPosition
+        if (!Number.isFinite(latestPrice)) {
+          console.log('Valutazione EOD posizione', updatedPosition)
+          activePositions.push(updatedPosition)
+          return
+        }
+
+        const quantity = position.invested / position.entryPrice
+        const long = position.type === 'LONG'
+        const pnlEur = long
+          ? (latestPrice - position.entryPrice) * quantity
+          : (position.entryPrice - latestPrice) * quantity
+        const isWin = long
+          ? latestPrice >= position.takeProfit
+          : latestPrice <= position.takeProfit
+        const isLoss = long
+          ? latestPrice <= position.stopLoss
+          : latestPrice >= position.stopLoss
+
+        console.log('Valutazione EOD posizione', {
+          ...updatedPosition,
+          latestPrice,
+          pnlEur,
+          isWin,
+          isLoss,
+        })
+
+        if (!isWin && !isLoss) {
+          activePositions.push(updatedPosition)
+          return
+        }
+
+        const roundedPnl = roundPrice(pnlEur)
+
+        if (isWin) {
+          capital += position.invested
+          vault += Math.max(roundedPnl, 0)
+        } else {
+          capital += Math.max(position.invested - Math.abs(roundedPnl), 0)
+        }
+
+        closedTrades.push({
+          ticker: position.ticker,
+          type: position.type,
+          pnlEur: roundedPnl,
+          result: isWin ? 'WIN' : 'LOSS',
+          exitDate: new Date().toISOString(),
+        })
       })
 
       return {
         ...current,
-        positions,
+        capital: roundPrice(capital),
+        vault: roundPrice(vault),
+        positions: activePositions,
+        history: [...closedTrades, ...current.history],
       }
     })
-  }, [])
+  }, [state.positions])
 
   const value = useMemo(
     () => ({

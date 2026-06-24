@@ -113,6 +113,17 @@ async function fetchTickerData(ticker) {
   }
 }
 
+export async function fetchLatestPrice(ticker) {
+  const encodedTicker = encodeURIComponent(ticker)
+  const chartData = await fetchJson(
+    `/api/yahoo/chart?symbol=${encodedTicker}`,
+    `${ticker} prezzo aggiornato`,
+  )
+  const history = extractChartHistory(chartData, ticker)
+
+  return history.at(-1).close
+}
+
 export async function fetchMarketData(tickers) {
   if (!Array.isArray(tickers) || tickers.length === 0) {
     throw new Error('Lista ticker non valida')

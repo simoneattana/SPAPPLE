@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import {
   BarChart3,
+  BookOpen,
   LayoutDashboard,
   LogOut,
   Radar,
@@ -14,6 +15,7 @@ const navigationItems = [
   { label: 'Dashboard', to: '/dashboard', icon: LayoutDashboard },
   { label: 'Scanner di Mercato', to: '/scanner', icon: Radar },
   { label: 'Portafoglio', to: '/portafoglio', icon: Wallet },
+  { label: 'Diario Trading', to: '/diario', icon: BookOpen },
   { label: 'Impostazioni', to: '/impostazioni', icon: Settings },
 ]
 

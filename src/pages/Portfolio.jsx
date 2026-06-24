@@ -1,4 +1,5 @@
-import { CalendarClock, Play, Target, Wallet } from 'lucide-react'
+import { useState } from 'react'
+import { CalendarClock, Loader2, Play, Target, Wallet } from 'lucide-react'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card'
@@ -37,12 +38,24 @@ function Metric({ label, value }) {
 export default function Portfolio() {
   const { positions, capital, vault, runEOD, maxPositions } = useTrading()
   const { toast } = useToast()
+  const [runningEOD, setRunningEOD] = useState(false)
 
-  const handleRunEOD = () => {
-    runEOD()
-    toast({
-      title: 'Motore EOD eseguito. Giorni aggiornati.',
-    })
+  const handleRunEOD = async () => {
+    setRunningEOD(true)
+
+    try {
+      await runEOD()
+      toast({
+        title: 'Elaborazione EOD completata. Posizioni aggiornate.',
+      })
+    } catch (error) {
+      toast({
+        title: error.message || 'Errore durante il Motore EOD',
+        variant: 'destructive',
+      })
+    } finally {
+      setRunningEOD(false)
+    }
   }
 
   return (
@@ -60,8 +73,15 @@ export default function Portfolio() {
           </p>
         </div>
 
-        <Button onClick={handleRunEOD} disabled={positions.length === 0}>
-          <Play className="h-4 w-4" />
+        <Button
+          onClick={handleRunEOD}
+          disabled={positions.length === 0 || runningEOD}
+        >
+          {runningEOD ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Play className="h-4 w-4" />
+          )}
           Esegui Motore EOD (Fine Giornata)
         </Button>
       </header>
