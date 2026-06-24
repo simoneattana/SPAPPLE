@@ -1,60 +1,125 @@
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
-function eodhdProxyPlugin(apiKey) {
+let yahooAuth = null
+
+async function getYahooAuth() {
+  if (yahooAuth) {
+    return yahooAuth
+  }
+
+  const cookieResponse = await fetch('https://fc.yahoo.com', {
+    redirect: 'manual',
+    headers: {
+      'user-agent': 'Mozilla/5.0',
+    },
+  })
+  const cookie = cookieResponse.headers.get('set-cookie')?.split(';')[0] ?? ''
+
+  if (!cookie) {
+    throw new Error('Cookie Yahoo non disponibile')
+  }
+
+  const crumbResponse = await fetch(
+    'https://query1.finance.yahoo.com/v1/test/getcrumb',
+    {
+      headers: {
+        cookie,
+        'user-agent': 'Mozilla/5.0',
+      },
+    },
+  )
+  const crumb = await crumbResponse.text()
+
+  if (!crumbResponse.ok || !crumb || crumb.includes('Unauthorized')) {
+    throw new Error('Crumb Yahoo non disponibile')
+  }
+
+  yahooAuth = { cookie, crumb }
+  return yahooAuth
+}
+
+async function proxyYahooJson(response, url, headers = {}) {
+  const yahooResponse = await fetch(url, {
+    headers: {
+      accept: 'application/json',
+      'user-agent': 'Mozilla/5.0',
+      ...headers,
+    },
+  })
+  const text = await yahooResponse.text()
+
+  if (!yahooResponse.ok) {
+    response.statusCode = yahooResponse.status
+    response.end(text || 'Richiesta Yahoo fallita')
+    return
+  }
+
+  response.setHeader('content-type', 'application/json; charset=utf-8')
+  response.end(text)
+}
+
+function yahooProxyPlugin() {
   return {
-    name: 'spapple-eodhd-proxy',
+    name: 'spapple-yahoo-proxy',
     configureServer(server) {
-      server.middlewares.use('/api/eodhd/eod', async (request, response) => {
+      server.middlewares.use('/api/yahoo/chart', async (request, response) => {
         const requestUrl = new URL(request.url, 'http://localhost')
         const symbol = requestUrl.searchParams.get('symbol')
 
-        if (!apiKey) {
-          response.statusCode = 500
-          response.end('Chiave EODHD mancante')
+        if (!symbol) {
+          response.statusCode = 400
+          response.end('Ticker Yahoo mancante')
           return
         }
+
+        const yahooUrl = new URL(
+          `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`,
+        )
+        yahooUrl.searchParams.set('range', '3mo')
+        yahooUrl.searchParams.set('interval', '1d')
+
+        try {
+          await proxyYahooJson(response, yahooUrl)
+        } catch (error) {
+          response.statusCode = 502
+          response.end(error.message || 'Yahoo non raggiungibile')
+        }
+      })
+
+      server.middlewares.use('/api/yahoo/summary', async (request, response) => {
+        const requestUrl = new URL(request.url, 'http://localhost')
+        const symbol = requestUrl.searchParams.get('symbol')
 
         if (!symbol) {
           response.statusCode = 400
-          response.end('Ticker EODHD mancante')
+          response.end('Ticker Yahoo mancante')
           return
         }
 
-        const eodhdUrl = new URL(
-          `https://eodhd.com/api/eod/${encodeURIComponent(symbol)}`,
-        )
-        eodhdUrl.searchParams.set('api_token', apiKey)
-        eodhdUrl.searchParams.set('fmt', 'json')
-        eodhdUrl.searchParams.set('period', 'd')
-        eodhdUrl.searchParams.set('order', 'a')
-
         try {
-          const eodhdResponse = await fetch(eodhdUrl)
-          const text = await eodhdResponse.text()
+          const { cookie, crumb } = await getYahooAuth()
+          const yahooUrl = new URL(
+            `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}`,
+          )
+          yahooUrl.searchParams.set(
+            'modules',
+            'summaryDetail,defaultKeyStatistics,price',
+          )
+          yahooUrl.searchParams.set('crumb', crumb)
 
-          if (!eodhdResponse.ok) {
-            response.statusCode = eodhdResponse.status
-            response.end(text || 'Richiesta EODHD fallita')
-            return
-          }
-
-          response.setHeader('content-type', 'application/json; charset=utf-8')
-          response.end(text)
+          await proxyYahooJson(response, yahooUrl, { cookie })
         } catch (error) {
+          yahooAuth = null
           response.statusCode = 502
-          response.end(error.message || 'EODHD non raggiungibile')
+          response.end(error.message || 'Yahoo non raggiungibile')
         }
       })
     },
   }
 }
 
-export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), '')
-
-  return {
-    plugins: [react(), tailwindcss(), eodhdProxyPlugin(env.EODHD_API_KEY)],
-  }
+export default defineConfig({
+  plugins: [react(), tailwindcss(), yahooProxyPlugin()],
 })
