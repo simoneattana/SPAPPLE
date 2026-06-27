@@ -35,6 +35,24 @@ function Metric({ label, value }) {
   )
 }
 
+function PnlMetric({ value }) {
+  const pnl = Number(value)
+  const color = pnl >= 0 ? 'text-[#deff9a]' : 'text-[#ef8f8f]'
+
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+      <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
+        P/L Latente
+      </p>
+      <p className={`mt-2 text-base font-semibold ${color}`}>
+        {Number.isFinite(pnl)
+          ? currencyFormatter.format(pnl)
+          : 'In attesa EOD'}
+      </p>
+    </div>
+  )
+}
+
 export default function Portfolio() {
   const { positions, capital, vault, runEOD, maxPositions } = useTrading()
   const { toast } = useToast()
@@ -148,6 +166,15 @@ export default function Portfolio() {
                   label="Stop Loss"
                   value={currencyFormatter.format(position.stopLoss)}
                 />
+                <Metric
+                  label="Ultimo Prezzo EOD"
+                  value={
+                    Number.isFinite(Number(position.latestPrice))
+                      ? currencyFormatter.format(position.latestPrice)
+                      : 'Non ancora aggiornato'
+                  }
+                />
+                <PnlMetric value={position.unrealizedPnl} />
                 <Metric
                   label="ATR Ingresso"
                   value={numberFormatter.format(position.atrAtEntry)}

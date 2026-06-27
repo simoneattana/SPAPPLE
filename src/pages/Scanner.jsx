@@ -57,7 +57,16 @@ export default function Scanner() {
   const [error, setError] = useState('')
   const [results, setResults] = useState([])
   const { toast } = useToast()
-  const { executeTrade, positions, maxPositions } = useTrading()
+  const {
+    automationEnabled,
+    executeAutomatedTrades,
+    executeTrade,
+    positions,
+    maxPositions,
+    recordScanComplete,
+    recordScanError,
+    recordScanStart,
+  } = useTrading()
   const slotsFull = positions.length >= maxPositions
 
   const filteredResults = useMemo(
@@ -69,13 +78,32 @@ export default function Scanner() {
     setLoading(true)
     setError('')
     setResults([])
+    recordScanStart(EUROPEAN_TICKERS.length)
 
     try {
       const marketData = await fetchMarketData(EUROPEAN_TICKERS)
+      const actionableRows = marketData.filter(isActionableResult)
+
       setResults(marketData)
+      recordScanComplete({
+        scannedCount: marketData.length,
+        signalCount: actionableRows.length,
+      })
+
+      if (automationEnabled && actionableRows.length > 0) {
+        const { openedTrades } = executeAutomatedTrades(actionableRows)
+
+        toast({
+          title:
+            openedTrades.length > 0
+              ? `Pilota automatico: ${openedTrades.length} posizioni aperte`
+              : 'Pilota automatico: nessuna posizione aperta',
+        })
+      }
     } catch (apiError) {
       console.error(apiError)
       setError(apiError.message)
+      recordScanError(apiError.message)
       toast({
         title: 'Errore dati: Controlla la connessione o Yahoo Finance',
         variant: 'destructive',
@@ -100,6 +128,9 @@ export default function Scanner() {
       })
     }
   }
+
+  const isTickerAlreadyOpen = (ticker) =>
+    positions.some((position) => position.ticker === ticker)
 
   const actionLabel = (row) => {
     if (row.rsi < 30) {
@@ -202,10 +233,12 @@ export default function Scanner() {
                     <Button
                       size="sm"
                       variant="ghost"
-                      disabled={slotsFull}
+                      disabled={slotsFull || isTickerAlreadyOpen(row.ticker)}
                       onClick={() => handleExecuteTrade(row)}
                     >
-                      {actionLabel(row)}
+                      {isTickerAlreadyOpen(row.ticker)
+                        ? 'Già in portafoglio'
+                        : actionLabel(row)}
                     </Button>
                   </TableCell>
                 </TableRow>

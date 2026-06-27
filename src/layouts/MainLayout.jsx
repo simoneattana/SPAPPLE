@@ -10,6 +10,7 @@ import {
   Wallet,
 } from 'lucide-react'
 import { Button } from '../components/ui/Button'
+import { SystemSidebar } from '../components/SystemSidebar'
 import { useAuth } from '../services/useAuth'
 
 const navigationItems = [
@@ -78,7 +79,7 @@ export default function MainLayout() {
       </aside>
 
       <main className="min-h-screen lg:pl-72">
-        <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-5 py-5 sm:px-7 lg:px-10 lg:py-8">
+        <div className="mx-auto flex min-h-screen w-full max-w-[104rem] flex-col px-5 py-5 sm:px-7 lg:px-10 lg:py-8">
           <div className="mb-5 flex items-center justify-between border-b border-slate-800 pb-5 lg:hidden">
             <div>
               <p className="text-base font-semibold tracking-[0.2em] text-white">
@@ -92,7 +93,10 @@ export default function MainLayout() {
               <LogOut className="h-4 w-4" />
             </Button>
           </div>
-          <Outlet />
+          <div className="grid flex-1 gap-7 xl:grid-cols-[minmax(0,1fr)_22rem]">
+            <Outlet />
+            <SystemSidebar />
+          </div>
         </div>
       </main>
     </div>
