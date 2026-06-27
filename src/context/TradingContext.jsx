@@ -27,6 +27,7 @@ const initialState = {
   lastScanAt: null,
   lastScanCount: 0,
   lastSignalCount: 0,
+  lastScanResults: [],
   engineStatus: 'In attesa',
 }
 
@@ -88,6 +89,9 @@ function loadInitialState() {
       lastSignalCount: Number.isFinite(Number(parsedState.lastSignalCount))
         ? Number(parsedState.lastSignalCount)
         : initialState.lastSignalCount,
+      lastScanResults: Array.isArray(parsedState.lastScanResults)
+        ? parsedState.lastScanResults
+        : initialState.lastScanResults,
       engineStatus: parsedState.engineStatus || initialState.engineStatus,
     }
   } catch {
@@ -129,12 +133,9 @@ export function TradingProvider({ children }) {
   }, [state])
 
   const updateTradingState = useCallback((updater) => {
-    setState((current) => {
-      const nextState = updater(current)
-      stateRef.current = nextState
-
-      return nextState
-    })
+    const nextState = updater(stateRef.current)
+    stateRef.current = nextState
+    setState(nextState)
   }, [])
 
   const recordActivity = useCallback((activity) => {
@@ -178,12 +179,13 @@ export function TradingProvider({ children }) {
     }))
   }, [updateTradingState])
 
-  const recordScanComplete = useCallback(({ scannedCount, signalCount }) => {
+  const recordScanComplete = useCallback(({ scannedCount, signalCount, results }) => {
     updateTradingState((current) => ({
       ...current,
       lastScanAt: new Date().toISOString(),
       lastScanCount: scannedCount,
       lastSignalCount: signalCount,
+      lastScanResults: Array.isArray(results) ? results : current.lastScanResults,
       engineStatus:
         signalCount > 0
           ? 'Segnali disponibili'

@@ -3,6 +3,7 @@ import {
   BadgeEuro,
   ChartNoAxesCombined,
   PiggyBank,
+  Radar,
   ShieldCheck,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card'
@@ -14,7 +15,23 @@ const currencyFormatter = new Intl.NumberFormat('it-IT', {
 })
 
 export default function Dashboard() {
-  const { capital, vault, positions, maxPositions } = useTrading()
+  const {
+    automationEnabled,
+    capital,
+    engineStatus,
+    lastScanAt,
+    lastScanCount,
+    lastSignalCount,
+    maxPositions,
+    positions,
+    vault,
+  } = useTrading()
+  const lastScanText = lastScanAt
+    ? new Intl.DateTimeFormat('it-IT', {
+        dateStyle: 'short',
+        timeStyle: 'short',
+      }).format(new Date(lastScanAt))
+    : 'Non ancora eseguita'
   const kpis = [
     {
       title: 'Capitale Operativo',
@@ -39,11 +56,8 @@ export default function Dashboard() {
     },
     {
       title: 'Stato Sistema',
-      value:
-        positions.length > 0
-          ? 'Forward test in corso'
-          : 'In attesa di scansione EOD',
-      detail: 'Controllo giornaliero',
+      value: engineStatus,
+      detail: automationEnabled ? 'Pilota automatico attivo' : 'Pilota manuale',
       icon: ShieldCheck,
       accent: 'text-[#deff9a]',
     },
@@ -58,12 +72,20 @@ export default function Dashboard() {
               Dashboard operativo
             </p>
             <h1 className="mt-3 text-2xl font-semibold text-white sm:text-3xl">
-              Indice Eurozona vs SMA200: Valutazione in corso...
+              Spapple sta monitorando capitale, segnali e posizioni
             </h1>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-500">
+              Ultima scansione: {lastScanText}. Segnali trovati:{' '}
+              {lastSignalCount} su {lastScanCount} titoli analizzati.
+            </p>
           </div>
           <div className="flex items-center gap-2 rounded-lg border border-[#deff9a]/25 bg-[#deff9a]/10 px-3 py-2 text-sm font-medium text-[#deff9a]">
-            <Activity className="h-4 w-4" />
-            Monitoraggio attivo
+            {automationEnabled ? (
+              <Activity className="h-4 w-4" />
+            ) : (
+              <Radar className="h-4 w-4" />
+            )}
+            {automationEnabled ? 'Pilota automatico ON' : 'Pilota automatico OFF'}
           </div>
         </div>
       </header>

@@ -42,7 +42,7 @@ const routineSteps = [
   },
   {
     title: 'Approvi gli Ordini',
-    text: 'Dalla tabella dei risultati, scegli quali titoli inserire in portafoglio cliccando su "Acquista" o "Vendi". L’app scalerà 2.000€ per ogni click.',
+    text: 'Dalla tabella dei risultati, scegli quali titoli inserire in portafoglio cliccando su "Acquista" per una posizione Long o "Apri Short" per una posizione al ribasso. L’app scalerà 2.000€ per ogni click.',
   },
   {
     title: 'Il Check Serale',

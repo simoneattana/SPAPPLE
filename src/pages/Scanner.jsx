@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BookOpenText, Loader2, Play, SearchX } from 'lucide-react'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
@@ -113,6 +113,10 @@ const glossaryItems = [
     description: 'Indicatore di temperatura: sotto 30 segnala possibile rimbalzo, sopra 70 possibile eccesso.',
   },
   {
+    term: 'Short',
+    description: 'Posizione aperta al ribasso: non vendi un titolo che possiedi, simuli un’operazione che guadagna se il prezzo scende.',
+  },
+  {
     term: 'ATR',
     description: 'Misura la volatilità media e aiuta a calibrare target e stop loss.',
   },
@@ -158,7 +162,7 @@ function SignalBadge({ rsi }) {
   }
 
   if (rsi > 70) {
-    return <Badge variant="negative">VENDI (Short)</Badge>
+    return <Badge variant="negative">APRI SHORT</Badge>
   }
 
   return <Badge>NEUTRALE</Badge>
@@ -179,18 +183,21 @@ function WatchlistBadge({ row }) {
 export default function Scanner() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [results, setResults] = useState([])
+  const autoScanStarted = useRef(false)
   const { toast } = useToast()
   const {
     automationEnabled,
     executeAutomatedTrades,
     executeTrade,
+    lastScanAt,
+    lastScanResults,
     positions,
     maxPositions,
     recordScanComplete,
     recordScanError,
     recordScanStart,
   } = useTrading()
+  const [results, setResults] = useState(lastScanResults || [])
   const slotsFull = positions.length >= maxPositions
 
   const filteredResults = useMemo(
@@ -202,10 +209,21 @@ export default function Scanner() {
     [results],
   )
 
-  const handleScan = async () => {
+  useEffect(() => {
+    setResults(lastScanResults || [])
+  }, [lastScanResults])
+
+  const scanIsFromToday = useMemo(() => {
+    if (!lastScanAt) {
+      return false
+    }
+
+    return new Date(lastScanAt).toDateString() === new Date().toDateString()
+  }, [lastScanAt])
+
+  const handleScan = useCallback(async ({ automatic = false } = {}) => {
     setLoading(true)
     setError('')
-    setResults([])
     recordScanStart(EUROPEAN_TICKERS.length)
 
     try {
@@ -216,6 +234,7 @@ export default function Scanner() {
       recordScanComplete({
         scannedCount: marketData.length,
         signalCount: actionableRows.length,
+        results: marketData,
       })
 
       if (automationEnabled && actionableRows.length > 0) {
@@ -226,6 +245,10 @@ export default function Scanner() {
             openedTrades.length > 0
               ? `Pilota automatico: ${openedTrades.length} posizioni aperte`
               : 'Pilota automatico: nessuna posizione aperta',
+        })
+      } else if (automatic) {
+        toast({
+          title: 'Scansione automatica aggiornata',
         })
       }
     } catch (apiError) {
@@ -239,7 +262,26 @@ export default function Scanner() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [
+    automationEnabled,
+    executeAutomatedTrades,
+    recordScanComplete,
+    recordScanError,
+    recordScanStart,
+    toast,
+  ])
+
+  useEffect(() => {
+    const shouldAutoScan =
+      !autoScanStarted.current && (!lastScanResults?.length || !scanIsFromToday)
+
+    if (!shouldAutoScan) {
+      return
+    }
+
+    autoScanStarted.current = true
+    handleScan({ automatic: true })
+  }, [handleScan, lastScanResults?.length, scanIsFromToday])
 
   const handleExecuteTrade = (row) => {
     const type = row.rsi < 30 ? 'LONG' : 'SHORT'
@@ -247,7 +289,7 @@ export default function Scanner() {
     try {
       const trade = executeTrade(row.ticker, row.currentPrice, row.atr, type)
       toast({
-        title: `Ordine ${type === 'LONG' ? 'Long' : 'Short'} su ${trade.ticker} eseguito`,
+        title: `Posizione ${type === 'LONG' ? 'Long' : 'Short'} su ${trade.ticker} aperta`,
       })
     } catch (tradeError) {
       toast({
@@ -266,7 +308,7 @@ export default function Scanner() {
     }
 
     if (row.rsi > 70) {
-      return 'Vendi (Short)'
+      return 'Apri Short'
     }
 
     return 'Nessuna azione'
@@ -283,18 +325,18 @@ export default function Scanner() {
             Scanner di Mercato
           </h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
-            Analisi EOD su prezzo di chiusura, RSI, ATR e rapporto P/E con dati
-            reali da API.
+            Analisi EOD automatica su 80 titoli europei. I risultati restano
+            visibili dall’ultima scansione e puoi aggiornarli manualmente.
           </p>
         </div>
 
-        <Button onClick={handleScan} disabled={loading}>
+        <Button onClick={() => handleScan()} disabled={loading}>
           {loading ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
             <Play className="h-4 w-4" />
           )}
-          Avvia Scansione Mercato EOD
+          Aggiorna Scansione Mercato EOD
         </Button>
       </header>
 
@@ -322,8 +364,8 @@ export default function Scanner() {
           <div>
             <CardTitle>Risultati filtrati</CardTitle>
             <p className="mt-2 text-sm text-slate-500">
-              Sono visibili solo società profittevoli con RSI sotto 30 o sopra
-              70.
+              Sono visibili solo società profittevoli con RSI sotto 30 per Long
+              o sopra 70 per apertura Short.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -385,8 +427,8 @@ export default function Scanner() {
                   Nessun segnale operativo disponibile
                 </p>
                 <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
-                  Avvia una scansione EOD. Verranno mostrati solo ticker con P/E
-                  positivo e RSI in area estrema.
+                  Se l’aggiornamento automatico non ha trovato segnali, puoi
+                  usare il bottone manuale per ripetere la scansione EOD.
                 </p>
               </div>
             </div>
