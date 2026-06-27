@@ -113,6 +113,10 @@ const glossaryItems = [
     description: 'Indicatore di temperatura: sotto 30 segnala possibile rimbalzo, sopra 70 possibile eccesso.',
   },
   {
+    term: 'Long',
+    description: 'Posizione al rialzo: guadagna se il prezzo sale dopo l’ingresso.',
+  },
+  {
     term: 'Short',
     description: 'Posizione aperta al ribasso: non vendi un titolo che possiedi, simuli un’operazione che guadagna se il prezzo scende.',
   },
@@ -156,16 +160,49 @@ function formatNumber(value) {
     : 'Non disponibile'
 }
 
-function SignalBadge({ rsi }) {
+function StrategyBadge({ rsi }) {
   if (rsi < 30) {
-    return <Badge variant="positive">COMPRA (Long)</Badge>
+    return <Badge variant="positive">LONG / RIALZO</Badge>
   }
 
   if (rsi > 70) {
-    return <Badge variant="negative">APRI SHORT</Badge>
+    return <Badge variant="negative">SHORT / RIBASSO</Badge>
   }
 
   return <Badge>NEUTRALE</Badge>
+}
+
+function StrategyCell({ row }) {
+  const isLong = row.rsi < 30
+
+  return (
+    <div className="min-w-48">
+      <StrategyBadge rsi={row.rsi} />
+      <p className="mt-2 text-xs leading-5 text-slate-500">
+        {isLong
+          ? 'Apre una posizione che guadagna se il prezzo sale.'
+          : 'Apre una posizione che guadagna se il prezzo scende.'}
+      </p>
+    </div>
+  )
+}
+
+function ReasonCell({ row }) {
+  if (row.rsi < 30) {
+    return (
+      <p className="min-w-56 text-sm leading-6 text-slate-400">
+        RSI sotto 30: il titolo risulta molto venduto e il sistema cerca un
+        possibile rimbalzo.
+      </p>
+    )
+  }
+
+  return (
+    <p className="min-w-56 text-sm leading-6 text-slate-400">
+      RSI sopra 70: il titolo risulta molto comprato e il sistema cerca una
+      possibile discesa.
+    </p>
+  )
 }
 
 function WatchlistBadge({ row }) {
@@ -174,7 +211,7 @@ function WatchlistBadge({ row }) {
   }
 
   if (isActionableResult(row)) {
-    return <SignalBadge rsi={row.rsi} />
+    return <StrategyBadge rsi={row.rsi} />
   }
 
   return <Badge>NESSUN SEGNALE</Badge>
@@ -302,18 +339,6 @@ export default function Scanner() {
   const isTickerAlreadyOpen = (ticker) =>
     positions.some((position) => position.ticker === ticker)
 
-  const actionLabel = (row) => {
-    if (row.rsi < 30) {
-      return 'Acquista (Long)'
-    }
-
-    if (row.rsi > 70) {
-      return 'Apri Short'
-    }
-
-    return 'Nessuna azione'
-  }
-
   return (
     <div className="flex flex-1 flex-col gap-7">
       <header className="flex flex-col gap-5 rounded-lg border border-slate-800 bg-[#090b10] p-5 shadow-xl shadow-black/20 sm:flex-row sm:items-center sm:justify-between">
@@ -364,8 +389,8 @@ export default function Scanner() {
           <div>
             <CardTitle>Risultati filtrati</CardTitle>
             <p className="mt-2 text-sm text-slate-500">
-              Sono visibili solo società profittevoli con RSI sotto 30 per Long
-              o sopra 70 per apertura Short.
+              Sono visibili solo società profittevoli con RSI estremo. La
+              strategia indica se Spapple cerca rialzo o ribasso.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -383,7 +408,8 @@ export default function Scanner() {
                 <TableHead>RSI (14)</TableHead>
                 <TableHead>P/E</TableHead>
                 <TableHead>Volatilità (ATR)</TableHead>
-                <TableHead>Segnale</TableHead>
+                <TableHead>Strategia suggerita</TableHead>
+                <TableHead>Perché</TableHead>
                 <TableHead>Azione</TableHead>
               </TableRow>
             </TableHeader>
@@ -398,7 +424,10 @@ export default function Scanner() {
                   <TableCell>{formatNumber(row.pe)}</TableCell>
                   <TableCell>{formatNumber(row.atr)}</TableCell>
                   <TableCell>
-                    <SignalBadge rsi={row.rsi} />
+                    <StrategyCell row={row} />
+                  </TableCell>
+                  <TableCell>
+                    <ReasonCell row={row} />
                   </TableCell>
                   <TableCell>
                     <Button
@@ -409,7 +438,7 @@ export default function Scanner() {
                     >
                       {isTickerAlreadyOpen(row.ticker)
                         ? 'Già in portafoglio'
-                        : actionLabel(row)}
+                        : 'Apri posizione'}
                     </Button>
                   </TableCell>
                 </TableRow>
