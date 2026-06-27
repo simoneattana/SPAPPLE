@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Loader2, Play, SearchX } from 'lucide-react'
+import { BookOpenText, Loader2, Play, SearchX } from 'lucide-react'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card'
@@ -16,7 +16,111 @@ import { useToast } from '../components/ui/useToast'
 import { useTrading } from '../context/useTrading'
 import { fetchMarketData } from '../services/api'
 
-const EUROPEAN_TICKERS = ['ENEL.MI', 'ISP.MI', 'RACE.MI', 'STLAM.MI', 'UCG.MI']
+const EUROPEAN_TICKERS = [
+  'ENEL.MI',
+  'ISP.MI',
+  'RACE.MI',
+  'STLAM.MI',
+  'UCG.MI',
+  'ENI.MI',
+  'TIT.MI',
+  'G.MI',
+  'PRY.MI',
+  'MONC.MI',
+  'LDO.MI',
+  'BAMI.MI',
+  'BPE.MI',
+  'SRG.MI',
+  'TRN.MI',
+  'AIR.PA',
+  'OR.PA',
+  'MC.PA',
+  'TTE.PA',
+  'SAN.PA',
+  'BNP.PA',
+  'AI.PA',
+  'RMS.PA',
+  'CS.PA',
+  'DG.PA',
+  'RI.PA',
+  'SU.PA',
+  'CAP.PA',
+  'EN.PA',
+  'ACA.PA',
+  'SAP.DE',
+  'SIE.DE',
+  'ALV.DE',
+  'DTE.DE',
+  'MBG.DE',
+  'BMW.DE',
+  'VOW3.DE',
+  'BAS.DE',
+  'BAYN.DE',
+  'MUV2.DE',
+  'ADS.DE',
+  'DHL.DE',
+  'DBK.DE',
+  'IFX.DE',
+  'RWE.DE',
+  'ASML.AS',
+  'ADYEN.AS',
+  'INGA.AS',
+  'PHIA.AS',
+  'HEIA.AS',
+  'AKZA.AS',
+  'WKL.AS',
+  'NN.AS',
+  'SAN.MC',
+  'BBVA.MC',
+  'IBE.MC',
+  'ITX.MC',
+  'REP.MC',
+  'TEF.MC',
+  'FER.MC',
+  'CABK.MC',
+  'NESN.SW',
+  'NOVN.SW',
+  'ROG.SW',
+  'UBSG.SW',
+  'ZURN.SW',
+  'SIKA.SW',
+  'ABBN.SW',
+  'GIVN.SW',
+  'VOLV-B.ST',
+  'ERIC-B.ST',
+  'HM-B.ST',
+  'INVE-B.ST',
+  'ATCO-A.ST',
+  'NOVO-B.CO',
+  'MAERSK-B.CO',
+  'DSV.CO',
+  'NDA-FI.HE',
+  'KNEBV.HE',
+  'EQNR.OL',
+]
+
+const glossaryItems = [
+  {
+    term: 'Take Profit',
+    description: 'Prezzo target: se viene raggiunto, il sistema chiude in utile.',
+  },
+  {
+    term: 'Stop Loss',
+    description: 'Prezzo di sicurezza: se viene raggiunto, il sistema chiude per limitare la perdita.',
+  },
+  {
+    term: 'RSI',
+    description: 'Indicatore di temperatura: sotto 30 segnala possibile rimbalzo, sopra 70 possibile eccesso.',
+  },
+  {
+    term: 'ATR',
+    description: 'Misura la volatilità media e aiuta a calibrare target e stop loss.',
+  },
+  {
+    term: 'P/E',
+    description: 'Rapporto prezzo/utili: se è assente o non positivo, il titolo viene scartato.',
+  },
+]
 
 const currencyFormatter = new Intl.NumberFormat('it-IT', {
   style: 'currency',
@@ -29,7 +133,23 @@ const numberFormatter = new Intl.NumberFormat('it-IT', {
 })
 
 function isActionableResult(row) {
-  return row.pe > 0 && (row.rsi < 30 || row.rsi > 70)
+  return row.status === 'ok' && row.pe > 0 && (row.rsi < 30 || row.rsi > 70)
+}
+
+function isRejectedResult(row) {
+  return row.status !== 'ok' || !isActionableResult(row)
+}
+
+function formatCurrency(value) {
+  return value !== null && value !== undefined && Number.isFinite(Number(value))
+    ? currencyFormatter.format(value)
+    : 'Non disponibile'
+}
+
+function formatNumber(value) {
+  return value !== null && value !== undefined && Number.isFinite(Number(value))
+    ? numberFormatter.format(value)
+    : 'Non disponibile'
 }
 
 function SignalBadge({ rsi }) {
@@ -45,6 +165,10 @@ function SignalBadge({ rsi }) {
 }
 
 function WatchlistBadge({ row }) {
+  if (row.status !== 'ok') {
+    return <Badge variant="negative">SCARTATO</Badge>
+  }
+
   if (isActionableResult(row)) {
     return <SignalBadge rsi={row.rsi} />
   }
@@ -71,6 +195,10 @@ export default function Scanner() {
 
   const filteredResults = useMemo(
     () => results.filter(isActionableResult),
+    [results],
+  )
+  const rejectedResults = useMemo(
+    () => results.filter(isRejectedResult),
     [results],
   )
 
@@ -200,6 +328,7 @@ export default function Scanner() {
           </div>
           <div className="flex flex-wrap gap-2">
             <Badge>{results.length} scansionati</Badge>
+            <Badge>{rejectedResults.length} scartati</Badge>
             <Badge>{filteredResults.length} segnali</Badge>
           </div>
         </CardHeader>
@@ -222,10 +351,10 @@ export default function Scanner() {
                   <TableCell className="font-semibold text-white">
                     {row.ticker}
                   </TableCell>
-                  <TableCell>{currencyFormatter.format(row.currentPrice)}</TableCell>
-                  <TableCell>{numberFormatter.format(row.rsi)}</TableCell>
-                  <TableCell>{numberFormatter.format(row.pe)}</TableCell>
-                  <TableCell>{numberFormatter.format(row.atr)}</TableCell>
+                  <TableCell>{formatCurrency(row.currentPrice)}</TableCell>
+                  <TableCell>{formatNumber(row.rsi)}</TableCell>
+                  <TableCell>{formatNumber(row.pe)}</TableCell>
+                  <TableCell>{formatNumber(row.atr)}</TableCell>
                   <TableCell>
                     <SignalBadge rsi={row.rsi} />
                   </TableCell>
@@ -265,19 +394,22 @@ export default function Scanner() {
         </CardContent>
       </Card>
 
-      {results.length > 0 ? (
-        <Card className="overflow-hidden">
-          <CardHeader className="items-center justify-between gap-4 border-b border-slate-800">
-            <div>
-              <CardTitle>Universo scansionato</CardTitle>
-              <p className="mt-2 text-sm text-slate-500">
-                Tutti i ticker analizzati con dati reali Yahoo Finance e
-                indicatori calcolati localmente.
-              </p>
-            </div>
+      <Card className="overflow-hidden">
+        <CardHeader className="items-center justify-between gap-4 border-b border-slate-800">
+          <div>
+            <CardTitle>Diagnostica della scansione</CardTitle>
+            <p className="mt-2 text-sm text-slate-500">
+              Tutti gli 80 ticker europei analizzati, inclusi quelli scartati e
+              il motivo della decisione.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
             <Badge>{results.length} titoli</Badge>
-          </CardHeader>
-          <CardContent className="p-0">
+            <Badge>{filteredResults.length} ammessi</Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          {results.length > 0 ? (
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
@@ -287,6 +419,7 @@ export default function Scanner() {
                   <TableHead>P/E</TableHead>
                   <TableHead>Volatilità (ATR)</TableHead>
                   <TableHead>Stato</TableHead>
+                  <TableHead>Motivo</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -295,22 +428,66 @@ export default function Scanner() {
                     <TableCell className="font-semibold text-white">
                       {row.ticker}
                     </TableCell>
-                    <TableCell>
-                      {currencyFormatter.format(row.currentPrice)}
-                    </TableCell>
-                    <TableCell>{numberFormatter.format(row.rsi)}</TableCell>
-                    <TableCell>{numberFormatter.format(row.pe)}</TableCell>
-                    <TableCell>{numberFormatter.format(row.atr)}</TableCell>
+                    <TableCell>{formatCurrency(row.currentPrice)}</TableCell>
+                    <TableCell>{formatNumber(row.rsi)}</TableCell>
+                    <TableCell>{formatNumber(row.pe)}</TableCell>
+                    <TableCell>{formatNumber(row.atr)}</TableCell>
                     <TableCell>
                       <WatchlistBadge row={row} />
+                    </TableCell>
+                    <TableCell className="min-w-72 text-sm leading-6 text-slate-400">
+                      {row.reason}
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
-          </CardContent>
-        </Card>
-      ) : null}
+          ) : (
+            <div className="flex min-h-56 items-center justify-center p-8 text-center">
+              <div>
+                <p className="font-medium text-white">
+                  Diagnostica pronta per la prossima scansione
+                </p>
+                <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
+                  Dopo l’avvio vedrai per ogni ticker se è stato ammesso,
+                  scartato per RSI neutrale, scartato per P/E o escluso per dati
+                  non disponibili.
+                </p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="items-start gap-3 border-b border-slate-800">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-[#deff9a]/30 bg-[#deff9a]/10">
+              <BookOpenText className="h-5 w-5 text-[#deff9a]" />
+            </div>
+            <div>
+              <CardTitle>Legenda veloce</CardTitle>
+              <p className="mt-2 text-sm text-slate-500">
+                I termini principali che userai per leggere Scanner e
+                Portafoglio.
+              </p>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="grid gap-3 pt-5 md:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+          {glossaryItems.map((item) => (
+            <div
+              key={item.term}
+              className="rounded-lg border border-slate-800 bg-slate-950 p-4"
+            >
+              <p className="text-sm font-semibold text-white">{item.term}</p>
+              <p className="mt-2 text-sm leading-6 text-slate-400">
+                {item.description}
+              </p>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
     </div>
   )
 }

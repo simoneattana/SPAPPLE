@@ -3,6 +3,7 @@ import { ATR, RSI } from 'technicalindicators'
 const MIN_HISTORY_LENGTH = 30
 const RSI_PERIOD = 14
 const ATR_PERIOD = 14
+const REQUEST_CONCURRENCY = 8
 
 async function fetchJson(url, label) {
   const response = await fetch(url)
@@ -76,6 +77,26 @@ function extractPeRatio(summaryData, ticker) {
   return peNumber
 }
 
+function getDiagnostic(row) {
+  if (row.status === 'error') {
+    return row.reason || 'Dati non disponibili'
+  }
+
+  if (row.pe <= 0) {
+    return 'Scartato: P/E assente, nullo o negativo'
+  }
+
+  if (row.rsi >= 30 && row.rsi <= 70) {
+    return 'Scartato: RSI in zona neutrale'
+  }
+
+  if (row.rsi < 30) {
+    return 'Ammesso: società profittevole e RSI sotto 30'
+  }
+
+  return 'Ammesso: società profittevole e RSI sopra 70'
+}
+
 function calculateIndicators(history, ticker) {
   const high = history.map((bar) => bar.high)
   const low = history.map((bar) => bar.low)
@@ -110,7 +131,44 @@ async function fetchTickerData(ticker) {
     pe,
     rsi,
     atr,
+    status: 'ok',
   }
+}
+
+async function fetchTickerDiagnostic(ticker) {
+  try {
+    const row = await fetchTickerData(ticker)
+
+    return {
+      ...row,
+      reason: getDiagnostic(row),
+    }
+  } catch (error) {
+    return {
+      ticker,
+      currentPrice: null,
+      pe: null,
+      rsi: null,
+      atr: null,
+      status: 'error',
+      reason: getDiagnostic({
+        status: 'error',
+        reason: error.message || `${ticker}: dati non disponibili`,
+      }),
+    }
+  }
+}
+
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = []
+
+  for (let index = 0; index < items.length; index += limit) {
+    const batch = items.slice(index, index + limit)
+    const batchResults = await Promise.all(batch.map(mapper))
+    results.push(...batchResults)
+  }
+
+  return results
 }
 
 export async function fetchLatestPrice(ticker) {
@@ -129,5 +187,15 @@ export async function fetchMarketData(tickers) {
     throw new Error('Lista ticker non valida')
   }
 
-  return Promise.all(tickers.map((ticker) => fetchTickerData(ticker)))
+  const results = await mapWithConcurrency(
+    tickers,
+    REQUEST_CONCURRENCY,
+    fetchTickerDiagnostic,
+  )
+
+  if (results.every((row) => row.status === 'error')) {
+    throw new Error('Nessun dato reale disponibile per la scansione')
+  }
+
+  return results
 }
