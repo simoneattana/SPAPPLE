@@ -326,6 +326,7 @@ export default function Scanner({ marketId }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [closingId, setClosingId] = useState(null)
+  const [pendingManualScan, setPendingManualScan] = useState(false)
   const autoScanStarted = useRef(false)
   const { toast } = useToast()
   const {
@@ -344,6 +345,7 @@ export default function Scanner({ marketId }) {
     recordScanComplete,
     recordScanError,
     recordScanStart,
+    setActiveMarket,
   } = useTrading()
   const effectiveMarket = marketId || activeMarket
   const marketIsAligned = activeMarket === effectiveMarket
@@ -438,9 +440,15 @@ export default function Scanner({ marketId }) {
 
   const handleScan = useCallback(async ({ automatic = false } = {}) => {
     if (!marketIsAligned) {
+      if (!automatic) {
+        setPendingManualScan(true)
+        setActiveMarket(effectiveMarket)
+      }
+
       return
     }
 
+    setPendingManualScan(false)
     setLoading(true)
     setError('')
     recordScanStart(scannerConfig.universe.length)
@@ -497,7 +505,17 @@ export default function Scanner({ marketId }) {
     scannerConfig,
     toast,
     marketIsAligned,
+    effectiveMarket,
+    setActiveMarket,
   ])
+
+  useEffect(() => {
+    if (!pendingManualScan || !marketIsAligned) {
+      return
+    }
+
+    handleScan()
+  }, [handleScan, marketIsAligned, pendingManualScan])
 
   useEffect(() => {
     const shouldAutoScan =
@@ -643,13 +661,15 @@ export default function Scanner({ marketId }) {
           </p>
         </div>
 
-        <Button onClick={() => handleScan()} disabled={loading || !marketIsAligned}>
-          {loading ? (
+        <Button onClick={() => handleScan()} disabled={loading || pendingManualScan}>
+          {loading || pendingManualScan ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
             <Play className="h-4 w-4" />
           )}
-          Aggiorna Scansione {scannerConfig.copy.scanMode}
+          {pendingManualScan
+            ? 'Sincronizzo mercato...'
+            : `Aggiorna Scansione ${scannerConfig.copy.scanMode}`}
         </Button>
       </header>
 
