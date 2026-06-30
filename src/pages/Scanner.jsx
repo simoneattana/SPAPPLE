@@ -154,6 +154,16 @@ function calculatePositionPnl(position, scanRow) {
   return pnl
 }
 
+function calculatePositionPnlPct(position, pnl) {
+  const invested = Number(position.invested)
+
+  if (!Number.isFinite(invested) || invested <= 0 || !Number.isFinite(Number(pnl))) {
+    return null
+  }
+
+  return (Number(pnl) / invested) * 100
+}
+
 function StrategyBadge({ rsi }) {
   if (rsi < 30) {
     return <Badge variant="positive">LONG / RIALZO</Badge>
@@ -615,6 +625,7 @@ export default function Scanner() {
                   <TableHead>Ingresso</TableHead>
                   <TableHead>Prezzo live</TableHead>
                   <TableHead>Guadagno live</TableHead>
+                  <TableHead>P/L %</TableHead>
                   <TableHead>Target / Stop</TableHead>
                   <TableHead>Azione</TableHead>
                 </TableRow>
@@ -624,6 +635,7 @@ export default function Scanner() {
                   const scanRow = resultsByTicker.get(position.ticker)
                   const livePrice = getPositionLivePrice(position, scanRow)
                   const livePnl = calculatePositionPnl(position, scanRow)
+                  const livePnlPct = calculatePositionPnlPct(position, livePnl)
                   const pnlPositive = Number(livePnl) >= 0
 
                   return (
@@ -661,6 +673,21 @@ export default function Scanner() {
                           }
                         >
                           {formatCurrency(livePnl)}
+                        </p>
+                      </TableCell>
+                      <TableCell>
+                        <p
+                          className={
+                            Number.isFinite(Number(livePnlPct))
+                              ? pnlPositive
+                                ? 'font-semibold text-[#deff9a]'
+                                : 'font-semibold text-[#ef8f8f]'
+                              : 'text-slate-400'
+                          }
+                        >
+                          {Number.isFinite(Number(livePnlPct))
+                            ? `${formatNumber(livePnlPct)}%`
+                            : 'Non disponibile'}
                         </p>
                       </TableCell>
                       <TableCell>
