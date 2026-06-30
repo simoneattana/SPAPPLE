@@ -16,89 +16,16 @@ import {
 import { useToast } from '../components/ui/useToast'
 import { useTrading } from '../context/useTrading'
 import { fetchMarketData } from '../services/api'
-
-const EUROPEAN_TICKERS = [
-  'ENEL.MI',
-  'ISP.MI',
-  'RACE.MI',
-  'STLAM.MI',
-  'UCG.MI',
-  'ENI.MI',
-  'TIT.MI',
-  'G.MI',
-  'PRY.MI',
-  'MONC.MI',
-  'LDO.MI',
-  'BAMI.MI',
-  'BPE.MI',
-  'SRG.MI',
-  'TRN.MI',
-  'AIR.PA',
-  'OR.PA',
-  'MC.PA',
-  'TTE.PA',
-  'SAN.PA',
-  'BNP.PA',
-  'AI.PA',
-  'RMS.PA',
-  'CS.PA',
-  'DG.PA',
-  'RI.PA',
-  'SU.PA',
-  'CAP.PA',
-  'EN.PA',
-  'ACA.PA',
-  'SAP.DE',
-  'SIE.DE',
-  'ALV.DE',
-  'DTE.DE',
-  'MBG.DE',
-  'BMW.DE',
-  'VOW3.DE',
-  'BAS.DE',
-  'BAYN.DE',
-  'MUV2.DE',
-  'ADS.DE',
-  'DHL.DE',
-  'DBK.DE',
-  'IFX.DE',
-  'RWE.DE',
-  'ASML.AS',
-  'ADYEN.AS',
-  'INGA.AS',
-  'PHIA.AS',
-  'HEIA.AS',
-  'AKZA.AS',
-  'WKL.AS',
-  'NN.AS',
-  'SAN.MC',
-  'BBVA.MC',
-  'IBE.MC',
-  'ITX.MC',
-  'REP.MC',
-  'TEF.MC',
-  'FER.MC',
-  'CABK.MC',
-  'NESN.SW',
-  'NOVN.SW',
-  'ROG.SW',
-  'UBSG.SW',
-  'ZURN.SW',
-  'SIKA.SW',
-  'ABBN.SW',
-  'GIVN.SW',
-  'VOLV-B.ST',
-  'ERIC-B.ST',
-  'HM-B.ST',
-  'INVE-B.ST',
-  'ATCO-A.ST',
-  'NOVO-B.CO',
-  'MAERSK-B.CO',
-  'DSV.CO',
-  'NDA-FI.HE',
-  'KNEBV.HE',
-  'EQNR.OL',
-]
+import { EUROPEAN_TICKERS } from '../services/marketUniverse'
+import {
+  MAX_AUTO_ATR_PCT,
+  getAtrPct,
+  getAutoScore,
+  isActionableResult,
+  isAutoEligibleResult,
+  isRejectedResult,
+  sortByAutoScore,
+} from '../services/tradingRules'
 
 const glossaryItems = [
   {
@@ -145,48 +72,6 @@ const numberFormatter = new Intl.NumberFormat('it-IT', {
   maximumFractionDigits: 2,
 })
 
-const AUTO_LONG_RSI_LIMIT = 28
-const AUTO_SHORT_RSI_LIMIT = 72
-const MAX_AUTO_ATR_PCT = 6
-
-function isActionableResult(row) {
-  return row.status === 'ok' && row.pe > 0 && (row.rsi < 30 || row.rsi > 70)
-}
-
-function getAtrPct(row) {
-  if (!Number.isFinite(Number(row.atr)) || !Number.isFinite(Number(row.currentPrice))) {
-    return null
-  }
-
-  return (Number(row.atr) / Number(row.currentPrice)) * 100
-}
-
-function getAutoScore(row) {
-  const rsiDistance = row.rsi < 30 ? 30 - row.rsi : row.rsi - 70
-  const atrPct = getAtrPct(row) || 0
-
-  return rsiDistance * 10 - atrPct
-}
-
-function isAutoEligibleResult(row) {
-  if (!isActionableResult(row)) {
-    return false
-  }
-
-  const atrPct = getAtrPct(row)
-  const hasStrongRsi = row.rsi <= AUTO_LONG_RSI_LIMIT || row.rsi >= AUTO_SHORT_RSI_LIMIT
-
-  return hasStrongRsi && Number.isFinite(atrPct) && atrPct <= MAX_AUTO_ATR_PCT
-}
-
-function sortByAutoScore(rows) {
-  return [...rows].sort((left, right) => getAutoScore(right) - getAutoScore(left))
-}
-
-function isRejectedResult(row) {
-  return row.status !== 'ok' || !isActionableResult(row)
-}
-
 function formatCurrency(value) {
   return value !== null && value !== undefined && Number.isFinite(Number(value))
     ? currencyFormatter.format(value)
@@ -227,6 +112,14 @@ function StrategyCell({ row }) {
 }
 
 function ReasonCell({ row }) {
+  if (row.status !== 'ok') {
+    return (
+      <p className="min-w-56 text-sm leading-6 text-slate-400">
+        {row.reason || 'Dati non disponibili per questo ticker.'}
+      </p>
+    )
+  }
+
   if (row.rsi < 30) {
     return (
       <p className="min-w-56 text-sm leading-6 text-slate-400">
@@ -236,11 +129,63 @@ function ReasonCell({ row }) {
     )
   }
 
+  if (row.rsi <= 70) {
+    return (
+      <p className="min-w-56 text-sm leading-6 text-slate-400">
+        {row.reason || 'RSI in zona neutrale: nessun segnale operativo.'}
+      </p>
+    )
+  }
+
   return (
     <p className="min-w-56 text-sm leading-6 text-slate-400">
       RSI sopra 70: il titolo risulta molto comprato e il sistema cerca una
       possibile discesa.
     </p>
+  )
+}
+
+function TechnicalTooltip({ row }) {
+  return (
+    <div className="group relative inline-flex">
+      <Button size="sm" variant="ghost">
+        Dati tecnici
+      </Button>
+      <div className="pointer-events-none absolute left-0 top-11 z-40 hidden w-80 rounded-lg border border-slate-700 bg-[#090b10] p-4 text-left shadow-2xl shadow-black/50 group-hover:block">
+        <div className="grid grid-cols-3 gap-2">
+          <div className="rounded-lg border border-slate-800 bg-slate-950 p-2">
+            <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">
+              RSI
+            </p>
+            <p className="mt-1 text-sm font-semibold text-white">
+              {formatNumber(row.rsi)}
+            </p>
+          </div>
+          <div className="rounded-lg border border-slate-800 bg-slate-950 p-2">
+            <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">
+              P/E
+            </p>
+            <p className="mt-1 text-sm font-semibold text-white">
+              {formatNumber(row.pe)}
+            </p>
+          </div>
+          <div className="rounded-lg border border-slate-800 bg-slate-950 p-2">
+            <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">
+              ATR
+            </p>
+            <p className="mt-1 text-sm font-semibold text-white">
+              {formatNumber(row.atr)}
+            </p>
+          </div>
+        </div>
+        <p className="mt-3 text-xs uppercase tracking-[0.14em] text-slate-500">
+          Perché
+        </p>
+        <div className="mt-1 text-sm leading-6 text-slate-300">
+          <ReasonCell row={row} />
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -486,12 +431,9 @@ export default function Scanner() {
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 <TableHead>Ticker</TableHead>
-                <TableHead>Prezzo Chiusura</TableHead>
-                <TableHead>RSI (14)</TableHead>
-                <TableHead>P/E</TableHead>
-                <TableHead>Volatilità (ATR)</TableHead>
+                <TableHead>Prezzo</TableHead>
+                <TableHead>Dati</TableHead>
                 <TableHead>Strategia suggerita</TableHead>
-                <TableHead>Perché</TableHead>
                 <TableHead>Criterio pilota</TableHead>
                 <TableHead>Azione</TableHead>
               </TableRow>
@@ -503,14 +445,11 @@ export default function Scanner() {
                     <TickerInfo ticker={row.ticker} profile={row.profile} />
                   </TableCell>
                   <TableCell>{formatCurrency(row.currentPrice)}</TableCell>
-                  <TableCell>{formatNumber(row.rsi)}</TableCell>
-                  <TableCell>{formatNumber(row.pe)}</TableCell>
-                  <TableCell>{formatNumber(row.atr)}</TableCell>
                   <TableCell>
-                    <StrategyCell row={row} />
+                    <TechnicalTooltip row={row} />
                   </TableCell>
                   <TableCell>
-                    <ReasonCell row={row} />
+                    <StrategyCell row={row} />
                   </TableCell>
                   <TableCell>
                     <AutoRuleCell row={row} />
@@ -571,12 +510,9 @@ export default function Scanner() {
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
                   <TableHead>Ticker</TableHead>
-                  <TableHead>Prezzo Chiusura</TableHead>
-                  <TableHead>RSI (14)</TableHead>
-                  <TableHead>P/E</TableHead>
-                  <TableHead>Volatilità (ATR)</TableHead>
+                  <TableHead>Prezzo</TableHead>
                   <TableHead>Stato</TableHead>
-                  <TableHead>Motivo</TableHead>
+                  <TableHead>Dati e motivo</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -586,14 +522,11 @@ export default function Scanner() {
                       <TickerInfo ticker={row.ticker} profile={row.profile} />
                     </TableCell>
                     <TableCell>{formatCurrency(row.currentPrice)}</TableCell>
-                    <TableCell>{formatNumber(row.rsi)}</TableCell>
-                    <TableCell>{formatNumber(row.pe)}</TableCell>
-                    <TableCell>{formatNumber(row.atr)}</TableCell>
                     <TableCell>
                       <WatchlistBadge row={row} />
                     </TableCell>
-                    <TableCell className="min-w-72 text-sm leading-6 text-slate-400">
-                      {row.reason}
+                    <TableCell>
+                      <TechnicalTooltip row={row} />
                     </TableCell>
                   </TableRow>
                 ))}

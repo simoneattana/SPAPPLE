@@ -562,6 +562,69 @@ export function TradingProvider({ children }) {
     )
   }, [])
 
+  const closePositionManually = useCallback(async (positionId) => {
+    const snapshot = stateRef.current
+    const position = snapshot.positions.find((item) => item.id === positionId)
+
+    if (!position) {
+      throw new Error('Posizione non trovata')
+    }
+
+    const latestPrice = await fetchLatestPrice(position.ticker)
+    const quantity = position.invested / position.entryPrice
+    const long = position.type === 'LONG'
+    const pnlEur = long
+      ? (latestPrice - position.entryPrice) * quantity
+      : (position.entryPrice - latestPrice) * quantity
+    const roundedPnl = roundPrice(pnlEur)
+    const result = roundedPnl >= 0 ? 'WIN' : 'LOSS'
+    const closedTrade = {
+      ticker: position.ticker,
+      type: position.type,
+      pnlEur: roundedPnl,
+      result,
+      exitDate: new Date().toISOString(),
+      exitPrice: roundPrice(latestPrice),
+      exitReason: 'MANUALE',
+    }
+
+    updateTradingState((current) => {
+      const remainingPositions = current.positions.filter(
+        (item) => item.id !== positionId,
+      )
+      const capitalReturn =
+        roundedPnl >= 0
+          ? position.invested
+          : Math.max(position.invested - Math.abs(roundedPnl), 0)
+      const vaultGain = roundedPnl > 0 ? roundedPnl : 0
+
+      return {
+        ...current,
+        capital: roundPrice(current.capital + capitalReturn),
+        vault: roundPrice(current.vault + vaultGain),
+        positions: remainingPositions,
+        history: [closedTrade, ...current.history],
+        engineStatus:
+          remainingPositions.length > 0
+            ? 'Posizione chiusa manualmente'
+            : 'Slot liberato, ricerca nuovi segnali',
+        ...appendLogs(
+          current,
+          createActivity({
+            type: 'trade',
+            status: result === 'WIN' ? 'attention' : 'error',
+            title: 'Chiusura manuale eseguita',
+            detail: `${position.ticker}: P/L realizzato ${roundedPnl.toFixed(
+              2,
+            )}€. Avvio ricerca di un nuovo titolo appetibile.`,
+          }),
+        ),
+      }
+    })
+
+    return closedTrade
+  }, [updateTradingState])
+
   const runLiveCheck = useCallback(async ({ silent = false } = {}) => {
     const snapshot = stateRef.current
 
@@ -795,6 +858,7 @@ export function TradingProvider({ children }) {
     () => ({
       ...state,
       remoteStatus,
+      closePositionManually,
       executeTrade,
       executeAutomatedTrades,
       recordActivity,
@@ -809,6 +873,7 @@ export function TradingProvider({ children }) {
       maxPositions: MAX_POSITIONS,
     }),
     [
+      closePositionManually,
       executeTrade,
       executeAutomatedTrades,
       recordActivity,

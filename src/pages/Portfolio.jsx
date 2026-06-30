@@ -6,6 +6,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card'
 import { TickerInfo } from '../components/TickerInfo'
 import { useToast } from '../components/ui/useToast'
 import { useTrading } from '../context/useTrading'
+import { fetchMarketData } from '../services/api'
+import { EUROPEAN_TICKERS } from '../services/marketUniverse'
+import {
+  isActionableResult,
+  isAutoEligibleResult,
+  sortByAutoScore,
+} from '../services/tradingRules'
 
 const currencyFormatter = new Intl.NumberFormat('it-IT', {
   style: 'currency',
@@ -55,9 +62,22 @@ function PnlMetric({ value }) {
 }
 
 export default function Portfolio() {
-  const { positions, capital, vault, runEOD, maxPositions } = useTrading()
+  const {
+    automationEnabled,
+    closePositionManually,
+    executeAutomatedTrades,
+    positions,
+    capital,
+    vault,
+    recordScanComplete,
+    recordScanError,
+    recordScanStart,
+    runEOD,
+    maxPositions,
+  } = useTrading()
   const { toast } = useToast()
   const [runningEOD, setRunningEOD] = useState(false)
+  const [closingId, setClosingId] = useState(null)
 
   const handleRunEOD = async () => {
     setRunningEOD(true)
@@ -74,6 +94,68 @@ export default function Portfolio() {
       })
     } finally {
       setRunningEOD(false)
+    }
+  }
+
+  const refillAfterManualClose = async (closedTicker) => {
+    if (!automationEnabled) {
+      return
+    }
+
+    recordScanStart(EUROPEAN_TICKERS.length)
+
+    try {
+      const marketData = await fetchMarketData(EUROPEAN_TICKERS)
+      const actionableRows = marketData.filter(isActionableResult)
+      const automaticRows = sortByAutoScore(
+        marketData.filter(
+          (row) => isAutoEligibleResult(row) && row.ticker !== closedTicker,
+        ),
+      )
+
+      recordScanComplete({
+        scannedCount: marketData.length,
+        signalCount: actionableRows.length,
+        results: marketData,
+      })
+
+      const { openedTrades } = executeAutomatedTrades(automaticRows)
+
+      toast({
+        title:
+          openedTrades.length > 0
+            ? `Slot riempito: ${openedTrades[0].ticker} aperto dal pilota`
+            : 'Slot libero: nessun nuovo titolo abbastanza forte',
+      })
+    } catch (error) {
+      recordScanError(error.message)
+      toast({
+        title: 'Chiusura eseguita, ma nuova scansione non riuscita',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const handleManualClose = async (position) => {
+    setClosingId(position.id)
+
+    try {
+      const closedTrade = await closePositionManually(position.id)
+
+      toast({
+        title: `${position.ticker} chiuso manualmente: ${currencyFormatter.format(
+          closedTrade.pnlEur,
+        )}`,
+      })
+
+      await refillAfterManualClose(position.ticker)
+    } catch (error) {
+      toast({
+        title: error.message || 'Chiusura manuale non riuscita',
+        variant: 'destructive',
+      })
+    } finally {
+      setClosingId(null)
     }
   }
 
@@ -188,6 +270,16 @@ export default function Portfolio() {
                   label="Giorni in Portafoglio"
                   value={`${position.daysHeld} giorni`}
                 />
+                <Button
+                  variant="ghost"
+                  disabled={closingId === position.id}
+                  onClick={() => handleManualClose(position)}
+                >
+                  {closingId === position.id ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : null}
+                  Vendi ora e cerca nuovo titolo
+                </Button>
               </CardContent>
             </Card>
           ))}
