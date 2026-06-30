@@ -491,22 +491,66 @@ export async function runBackendMonitor(state) {
   }
 
   if (current.positions.length === 0) {
+    const refillErrors = []
+    let refill = null
+
+    if (current.capital >= SLOT_SIZE) {
+      try {
+        refill = await refillOpenSlots(current)
+      } catch (error) {
+        refillErrors.push(error.message || 'Ricerca nuovi titoli non riuscita')
+      }
+    }
+
+    const openedTrades = refill?.openedTrades || []
     const activity = createActivity({
       type: 'backend-monitor',
-      status: 'waiting',
-      title: 'Monitor backend in attesa',
-      detail: 'Controllo automatico eseguito: nessuna posizione aperta.',
+      status:
+        refillErrors.length > 0
+          ? 'error'
+          : openedTrades.length > 0
+            ? 'attention'
+            : 'waiting',
+      title:
+        openedTrades.length > 0
+          ? 'Nuovi slot aperti dal backend'
+          : 'Ricerca automatica completata',
+      detail:
+        refillErrors.length > 0
+          ? `Nessuna posizione aperta. Ricerca nuovi titoli non riuscita: ${refillErrors[0]}.`
+          : openedTrades.length > 0
+            ? `Nessuna posizione era aperta: ho trovato ${openedTrades.length} segnali e ho riaperto nuovi slot.`
+            : `Nessuna posizione aperta. ${
+                refill
+                  ? `${refill.scannedCount} titoli scansionati, ${refill.signalCount} segnali trovati, nessuno abbastanza forte per il pilota.`
+                  : 'Capitale operativo insufficiente per aprire nuovi slot.'
+              }`,
     })
 
     return {
       state: {
         ...current,
-        engineStatus: 'In attesa di nuova scansione',
+        capital: refill ? refill.capital : current.capital,
+        positions: refill ? refill.positions : current.positions,
+        ...(refill
+          ? {
+              lastScanAt: new Date().toISOString(),
+              lastScanCount: refill.scannedCount,
+              lastSignalCount: refill.signalCount,
+              lastScanResults: refill.marketData,
+            }
+          : {}),
+        engineStatus:
+          openedTrades.length > 0
+            ? 'Slot riempiti dal backend'
+            : 'Nessun segnale automatico disponibile',
         lastBackendCheckAt: new Date().toISOString(),
         ...appendLogs(current, activity),
       },
       closedTrades: [],
+      openedTrades,
       checkedCount: 0,
+      errors: refillErrors,
     }
   }
 
