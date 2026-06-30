@@ -128,6 +128,10 @@ const glossaryItems = [
     term: 'P/E',
     description: 'Rapporto prezzo/utili: se è assente o non positivo, il titolo viene scartato.',
   },
+  {
+    term: 'AUTO OK',
+    description: 'Il pilota automatico può aprire solo segnali con RSI molto estremo e ATR non superiore al 6%.',
+  },
 ]
 
 const currencyFormatter = new Intl.NumberFormat('it-IT', {
@@ -140,8 +144,42 @@ const numberFormatter = new Intl.NumberFormat('it-IT', {
   maximumFractionDigits: 2,
 })
 
+const AUTO_LONG_RSI_LIMIT = 28
+const AUTO_SHORT_RSI_LIMIT = 72
+const MAX_AUTO_ATR_PCT = 6
+
 function isActionableResult(row) {
   return row.status === 'ok' && row.pe > 0 && (row.rsi < 30 || row.rsi > 70)
+}
+
+function getAtrPct(row) {
+  if (!Number.isFinite(Number(row.atr)) || !Number.isFinite(Number(row.currentPrice))) {
+    return null
+  }
+
+  return (Number(row.atr) / Number(row.currentPrice)) * 100
+}
+
+function getAutoScore(row) {
+  const rsiDistance = row.rsi < 30 ? 30 - row.rsi : row.rsi - 70
+  const atrPct = getAtrPct(row) || 0
+
+  return rsiDistance * 10 - atrPct
+}
+
+function isAutoEligibleResult(row) {
+  if (!isActionableResult(row)) {
+    return false
+  }
+
+  const atrPct = getAtrPct(row)
+  const hasStrongRsi = row.rsi <= AUTO_LONG_RSI_LIMIT || row.rsi >= AUTO_SHORT_RSI_LIMIT
+
+  return hasStrongRsi && Number.isFinite(atrPct) && atrPct <= MAX_AUTO_ATR_PCT
+}
+
+function sortByAutoScore(rows) {
+  return [...rows].sort((left, right) => getAutoScore(right) - getAutoScore(left))
 }
 
 function isRejectedResult(row) {
@@ -205,6 +243,33 @@ function ReasonCell({ row }) {
   )
 }
 
+function AutoRuleCell({ row }) {
+  const atrPct = getAtrPct(row)
+
+  if (isAutoEligibleResult(row)) {
+    return (
+      <div className="min-w-52">
+        <Badge variant="positive">AUTO OK</Badge>
+        <p className="mt-2 text-xs leading-5 text-slate-500">
+          RSI forte e ATR sotto {MAX_AUTO_ATR_PCT}%. Priorità:{' '}
+          {formatNumber(getAutoScore(row))}
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-w-52">
+      <Badge>SOLO MANUALE</Badge>
+      <p className="mt-2 text-xs leading-5 text-slate-500">
+        {atrPct && atrPct > MAX_AUTO_ATR_PCT
+          ? `ATR ${formatNumber(atrPct)}%: volatilità troppo alta per il pilota.`
+          : `RSI non abbastanza estremo per il pilota automatico.`}
+      </p>
+    </div>
+  )
+}
+
 function WatchlistBadge({ row }) {
   if (row.status !== 'ok') {
     return <Badge variant="negative">SCARTATO</Badge>
@@ -241,6 +306,10 @@ export default function Scanner() {
     () => results.filter(isActionableResult),
     [results],
   )
+  const autoEligibleResults = useMemo(
+    () => sortByAutoScore(results.filter(isAutoEligibleResult)),
+    [results],
+  )
   const rejectedResults = useMemo(
     () => results.filter(isRejectedResult),
     [results],
@@ -266,6 +335,7 @@ export default function Scanner() {
     try {
       const marketData = await fetchMarketData(EUROPEAN_TICKERS)
       const actionableRows = marketData.filter(isActionableResult)
+      const automaticRows = sortByAutoScore(marketData.filter(isAutoEligibleResult))
 
       setResults(marketData)
       recordScanComplete({
@@ -274,14 +344,18 @@ export default function Scanner() {
         results: marketData,
       })
 
-      if (automationEnabled && actionableRows.length > 0) {
-        const { openedTrades } = executeAutomatedTrades(actionableRows)
+      if (automationEnabled && automaticRows.length > 0) {
+        const { openedTrades } = executeAutomatedTrades(automaticRows)
 
         toast({
           title:
             openedTrades.length > 0
               ? `Pilota automatico: ${openedTrades.length} posizioni aperte`
               : 'Pilota automatico: nessuna posizione aperta',
+        })
+      } else if (automationEnabled && actionableRows.length > 0) {
+        toast({
+          title: 'Pilota automatico: segnali presenti ma non abbastanza forti',
         })
       } else if (automatic) {
         toast({
@@ -397,6 +471,7 @@ export default function Scanner() {
             <Badge>{results.length} scansionati</Badge>
             <Badge>{rejectedResults.length} scartati</Badge>
             <Badge>{filteredResults.length} segnali</Badge>
+            <Badge>{autoEligibleResults.length} auto</Badge>
           </div>
         </CardHeader>
         <CardContent className="p-0">
@@ -410,6 +485,7 @@ export default function Scanner() {
                 <TableHead>Volatilità (ATR)</TableHead>
                 <TableHead>Strategia suggerita</TableHead>
                 <TableHead>Perché</TableHead>
+                <TableHead>Criterio pilota</TableHead>
                 <TableHead>Azione</TableHead>
               </TableRow>
             </TableHeader>
@@ -428,6 +504,9 @@ export default function Scanner() {
                   </TableCell>
                   <TableCell>
                     <ReasonCell row={row} />
+                  </TableCell>
+                  <TableCell>
+                    <AutoRuleCell row={row} />
                   </TableCell>
                   <TableCell>
                     <Button
