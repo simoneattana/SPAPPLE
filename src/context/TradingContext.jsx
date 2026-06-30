@@ -134,6 +134,26 @@ function removeClosedPositions(positions = [], history = []) {
   })
 }
 
+function resultBelongsToMarket(row, marketId) {
+  if (!row || typeof row !== 'object') {
+    return false
+  }
+
+  if (marketId === 'crypto') {
+    return row.market === 'crypto' || row.provider === 'Kraken'
+  }
+
+  return row.market !== 'crypto' && row.provider !== 'Kraken'
+}
+
+function sanitizeScanResults(results = [], marketId) {
+  if (!Array.isArray(results)) {
+    return []
+  }
+
+  return results.filter((row) => resultBelongsToMarket(row, marketId))
+}
+
 function normalizeMarketState(marketId, rawMarketState = {}) {
   const strategy = getTradingStrategy(marketId)
   const fallback = createInitialMarketState(strategy)
@@ -190,9 +210,7 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
     lastSignalCount: Number.isFinite(Number(rawMarketState.lastSignalCount))
       ? Number(rawMarketState.lastSignalCount)
       : fallback.lastSignalCount,
-    lastScanResults: Array.isArray(rawMarketState.lastScanResults)
-      ? rawMarketState.lastScanResults
-      : fallback.lastScanResults,
+    lastScanResults: sanitizeScanResults(rawMarketState.lastScanResults, marketId),
     engineStatus: rawMarketState.engineStatus || fallback.engineStatus,
     liveMonitorEnabled:
       typeof rawMarketState.liveMonitorEnabled === 'boolean'
@@ -211,9 +229,16 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
 
 function syncActiveMarketState(state) {
   const activeMarket = state.activeMarket || DEFAULT_MARKET_ID
-  const currentMarketState = normalizeMarketState(activeMarket, pickMarketState(state))
+  const rawMarkets =
+    state.markets && typeof state.markets === 'object' ? state.markets : {}
+  const rawActiveMarketState =
+    rawMarkets[activeMarket] || rawMarkets[DEFAULT_MARKET_ID]
+  const currentMarketState = normalizeMarketState(
+    activeMarket,
+    rawActiveMarketState || pickMarketState(state),
+  )
   const markets = {
-    ...(state.markets || {}),
+    ...rawMarkets,
     [activeMarket]: currentMarketState,
   }
 
