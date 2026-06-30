@@ -11,6 +11,11 @@ import {
   saveRemoteTradingState,
 } from '../services/remoteState'
 import { useAuth } from '../services/useAuth'
+import {
+  DEFAULT_MARKET_ID,
+  TRADING_STRATEGIES,
+  getTradingStrategy,
+} from '../strategies'
 import { TradingContext } from './tradingState'
 
 const MAX_POSITIONS = 5
@@ -27,9 +32,66 @@ const initialActivity = {
   createdAt: new Date().toISOString(),
 }
 
+const marketStateFields = [
+  'capital',
+  'vault',
+  'positions',
+  'history',
+  'activityLog',
+  'events',
+  'automationEnabled',
+  'lastScanAt',
+  'lastScanCount',
+  'lastSignalCount',
+  'lastScanResults',
+  'engineStatus',
+  'liveMonitorEnabled',
+  'backendMonitorEnabled',
+  'lastLiveCheckAt',
+  'lastBackendCheckAt',
+  'nextLiveCheckAt',
+]
+
+function createInitialMarketState(strategy = getTradingStrategy()) {
+  return {
+    marketId: strategy.id,
+    marketLabel: strategy.label,
+    capital: strategy.initialCapital,
+    vault: 0,
+    positions: [],
+    history: [],
+    activityLog: [initialActivity],
+    events: [initialActivity],
+    automationEnabled: true,
+    lastScanAt: null,
+    lastScanCount: 0,
+    lastSignalCount: 0,
+    lastScanResults: [],
+    engineStatus: 'In attesa',
+    liveMonitorEnabled: true,
+    backendMonitorEnabled: true,
+    lastLiveCheckAt: null,
+    lastBackendCheckAt: null,
+    nextLiveCheckAt: null,
+  }
+}
+
+const initialEquitiesState = createInitialMarketState()
+
+function createInitialMarkets() {
+  return Object.values(TRADING_STRATEGIES).reduce((markets, strategy) => {
+    markets[strategy.id] = createInitialMarketState(strategy)
+    return markets
+  }, {})
+}
+
 const initialState = {
   version: STORAGE_VERSION,
-  capital: 30000,
+  activeMarket: DEFAULT_MARKET_ID,
+  markets: createInitialMarkets(),
+  marketId: initialEquitiesState.marketId,
+  marketLabel: initialEquitiesState.marketLabel,
+  capital: initialEquitiesState.capital,
   vault: 0,
   positions: [],
   history: [],
@@ -46,6 +108,86 @@ const initialState = {
   lastLiveCheckAt: null,
   lastBackendCheckAt: null,
   nextLiveCheckAt: null,
+}
+
+function pickMarketState(state) {
+  return marketStateFields.reduce((marketState, field) => {
+    marketState[field] = state[field]
+    return marketState
+  }, {})
+}
+
+function normalizeMarketState(marketId, rawMarketState = {}) {
+  const strategy = getTradingStrategy(marketId)
+  const fallback = createInitialMarketState(strategy)
+  const capital = Number(rawMarketState.capital)
+  const vault = Number(rawMarketState.vault)
+
+  return {
+    ...fallback,
+    ...rawMarketState,
+    marketId,
+    marketLabel: strategy.label,
+    capital: Number.isFinite(capital) ? capital : fallback.capital,
+    vault: Number.isFinite(vault) ? vault : fallback.vault,
+    positions: Array.isArray(rawMarketState.positions)
+      ? rawMarketState.positions
+      : fallback.positions,
+    history: Array.isArray(rawMarketState.history)
+      ? rawMarketState.history
+      : fallback.history,
+    activityLog: Array.isArray(rawMarketState.activityLog)
+      ? rawMarketState.activityLog
+      : fallback.activityLog,
+    events: Array.isArray(rawMarketState.events)
+      ? rawMarketState.events
+      : Array.isArray(rawMarketState.activityLog)
+        ? rawMarketState.activityLog
+        : fallback.events,
+    automationEnabled:
+      typeof rawMarketState.automationEnabled === 'boolean'
+        ? rawMarketState.automationEnabled
+        : fallback.automationEnabled,
+    lastScanAt: rawMarketState.lastScanAt || fallback.lastScanAt,
+    lastScanCount: Number.isFinite(Number(rawMarketState.lastScanCount))
+      ? Number(rawMarketState.lastScanCount)
+      : fallback.lastScanCount,
+    lastSignalCount: Number.isFinite(Number(rawMarketState.lastSignalCount))
+      ? Number(rawMarketState.lastSignalCount)
+      : fallback.lastSignalCount,
+    lastScanResults: Array.isArray(rawMarketState.lastScanResults)
+      ? rawMarketState.lastScanResults
+      : fallback.lastScanResults,
+    engineStatus: rawMarketState.engineStatus || fallback.engineStatus,
+    liveMonitorEnabled:
+      typeof rawMarketState.liveMonitorEnabled === 'boolean'
+        ? rawMarketState.liveMonitorEnabled
+        : fallback.liveMonitorEnabled,
+    backendMonitorEnabled:
+      typeof rawMarketState.backendMonitorEnabled === 'boolean'
+        ? rawMarketState.backendMonitorEnabled
+        : fallback.backendMonitorEnabled,
+    lastLiveCheckAt: rawMarketState.lastLiveCheckAt || fallback.lastLiveCheckAt,
+    lastBackendCheckAt:
+      rawMarketState.lastBackendCheckAt || fallback.lastBackendCheckAt,
+    nextLiveCheckAt: rawMarketState.nextLiveCheckAt || fallback.nextLiveCheckAt,
+  }
+}
+
+function syncActiveMarketState(state) {
+  const activeMarket = state.activeMarket || DEFAULT_MARKET_ID
+  const currentMarketState = normalizeMarketState(activeMarket, pickMarketState(state))
+  const markets = {
+    ...(state.markets || {}),
+    [activeMarket]: currentMarketState,
+  }
+
+  return {
+    ...state,
+    activeMarket,
+    markets,
+    ...currentMarketState,
+  }
 }
 
 function roundPrice(value) {
@@ -75,55 +217,34 @@ function appendLogs(state, activity) {
 }
 
 function normalizeStoredState(parsedState) {
-  const capital = Number(parsedState.capital)
-  const vault = Number(parsedState.vault)
+  const activeMarket = parsedState.activeMarket || DEFAULT_MARKET_ID
+  const rawMarkets =
+    parsedState.markets && typeof parsedState.markets === 'object'
+      ? parsedState.markets
+      : {}
+  const legacyMarketState = normalizeMarketState(DEFAULT_MARKET_ID, parsedState)
+  const markets = Object.values(TRADING_STRATEGIES).reduce(
+    (normalizedMarkets, strategy) => {
+      normalizedMarkets[strategy.id] = normalizeMarketState(
+        strategy.id,
+        rawMarkets[strategy.id] ||
+          (strategy.id === DEFAULT_MARKET_ID ? legacyMarketState : {}),
+      )
+      return normalizedMarkets
+    },
+    {},
+  )
+  const activeMarketState = normalizeMarketState(
+    activeMarket,
+    markets[activeMarket] || markets[DEFAULT_MARKET_ID],
+  )
 
-  return {
+  return syncActiveMarketState({
     version: STORAGE_VERSION,
-    capital: Number.isFinite(capital) ? capital : initialState.capital,
-    vault: Number.isFinite(vault) ? vault : initialState.vault,
-    positions: Array.isArray(parsedState.positions)
-      ? parsedState.positions
-      : initialState.positions,
-    history: Array.isArray(parsedState.history)
-      ? parsedState.history
-      : initialState.history,
-    activityLog: Array.isArray(parsedState.activityLog)
-      ? parsedState.activityLog
-      : initialState.activityLog,
-    events: Array.isArray(parsedState.events)
-      ? parsedState.events
-      : Array.isArray(parsedState.activityLog)
-        ? parsedState.activityLog
-        : initialState.events,
-    automationEnabled:
-      typeof parsedState.automationEnabled === 'boolean'
-        ? parsedState.automationEnabled
-        : initialState.automationEnabled,
-    lastScanAt: parsedState.lastScanAt || initialState.lastScanAt,
-    lastScanCount: Number.isFinite(Number(parsedState.lastScanCount))
-      ? Number(parsedState.lastScanCount)
-      : initialState.lastScanCount,
-    lastSignalCount: Number.isFinite(Number(parsedState.lastSignalCount))
-      ? Number(parsedState.lastSignalCount)
-      : initialState.lastSignalCount,
-    lastScanResults: Array.isArray(parsedState.lastScanResults)
-      ? parsedState.lastScanResults
-      : initialState.lastScanResults,
-    engineStatus: parsedState.engineStatus || initialState.engineStatus,
-    liveMonitorEnabled:
-      typeof parsedState.liveMonitorEnabled === 'boolean'
-        ? parsedState.liveMonitorEnabled
-        : initialState.liveMonitorEnabled,
-    backendMonitorEnabled:
-      typeof parsedState.backendMonitorEnabled === 'boolean'
-        ? parsedState.backendMonitorEnabled
-        : initialState.backendMonitorEnabled,
-    lastLiveCheckAt: parsedState.lastLiveCheckAt || initialState.lastLiveCheckAt,
-    lastBackendCheckAt:
-      parsedState.lastBackendCheckAt || initialState.lastBackendCheckAt,
-    nextLiveCheckAt: parsedState.nextLiveCheckAt || initialState.nextLiveCheckAt,
-  }
+    activeMarket,
+    markets,
+    ...activeMarketState,
+  })
 }
 
 function loadInitialState() {
@@ -332,7 +453,7 @@ export function TradingProvider({ children }) {
   }, [isAuthenticated, state])
 
   const updateTradingState = useCallback((updater) => {
-    const nextState = updater(stateRef.current)
+    const nextState = syncActiveMarketState(updater(stateRef.current))
     stateRef.current = nextState
     setState(nextState)
   }, [])

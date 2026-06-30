@@ -12,10 +12,16 @@ import {
   calculatePositionSize,
   canOpenPosition,
 } from '../src/services/positionSizing.js'
+import {
+  DEFAULT_MARKET_ID,
+  TRADING_STRATEGIES,
+  getTradingStrategy,
+} from '../src/strategies/index.js'
 import { clearYahooAuth, fetchYahooJson, getYahooAuth } from './_yahoo.js'
 
 export const STATE_ID = 'default'
 export const STORAGE_VERSION = 4
+export { DEFAULT_MARKET_ID }
 
 const MAX_POSITIONS = 5
 const MIN_HISTORY_LENGTH = 30
@@ -23,8 +29,31 @@ const RSI_PERIOD = 14
 const ATR_PERIOD = 14
 const REQUEST_CONCURRENCY = 8
 
+const marketStateFields = [
+  'capital',
+  'vault',
+  'positions',
+  'history',
+  'activityLog',
+  'events',
+  'automationEnabled',
+  'lastScanAt',
+  'lastScanCount',
+  'lastSignalCount',
+  'lastScanResults',
+  'lastLiveCheckAt',
+  'lastBackendCheckAt',
+  'nextLiveCheckAt',
+  'engineStatus',
+  'liveMonitorEnabled',
+  'backendMonitorEnabled',
+]
+
 const initialState = {
   version: STORAGE_VERSION,
+  activeMarket: DEFAULT_MARKET_ID,
+  marketId: DEFAULT_MARKET_ID,
+  marketLabel: getTradingStrategy(DEFAULT_MARKET_ID).label,
   capital: 30000,
   vault: 0,
   positions: [],
@@ -42,6 +71,77 @@ const initialState = {
   lastBackendCheckAt: null,
   nextLiveCheckAt: null,
   engineStatus: 'In attesa',
+}
+
+function createInitialMarkets() {
+  return Object.values(TRADING_STRATEGIES).reduce((markets, strategy) => {
+    markets[strategy.id] = normalizeMarketState(strategy.id, {})
+    return markets
+  }, {})
+}
+
+function pickMarketState(state) {
+  return marketStateFields.reduce((marketState, field) => {
+    marketState[field] = state[field]
+    return marketState
+  }, {})
+}
+
+function normalizeMarketState(marketId, rawMarketState = {}) {
+  const strategy = getTradingStrategy(marketId)
+  const fallback = {
+    ...initialState,
+    marketId: strategy.id,
+    marketLabel: strategy.label,
+    capital: strategy.initialCapital,
+  }
+  const capital = Number(rawMarketState.capital)
+  const vault = Number(rawMarketState.vault)
+
+  return {
+    ...fallback,
+    ...rawMarketState,
+    marketId,
+    marketLabel: strategy.label,
+    capital: Number.isFinite(capital) ? capital : fallback.capital,
+    vault: Number.isFinite(vault) ? vault : fallback.vault,
+    positions: Array.isArray(rawMarketState.positions)
+      ? rawMarketState.positions
+      : [],
+    history: Array.isArray(rawMarketState.history) ? rawMarketState.history : [],
+    activityLog: Array.isArray(rawMarketState.activityLog)
+      ? rawMarketState.activityLog
+      : [],
+    events: Array.isArray(rawMarketState.events) ? rawMarketState.events : [],
+    automationEnabled:
+      typeof rawMarketState.automationEnabled === 'boolean'
+        ? rawMarketState.automationEnabled
+        : fallback.automationEnabled,
+    liveMonitorEnabled:
+      typeof rawMarketState.liveMonitorEnabled === 'boolean'
+        ? rawMarketState.liveMonitorEnabled
+        : fallback.liveMonitorEnabled,
+    backendMonitorEnabled:
+      typeof rawMarketState.backendMonitorEnabled === 'boolean'
+        ? rawMarketState.backendMonitorEnabled
+        : fallback.backendMonitorEnabled,
+  }
+}
+
+function syncActiveMarketState(state) {
+  const activeMarket = state.activeMarket || DEFAULT_MARKET_ID
+  const currentMarketState = normalizeMarketState(activeMarket, pickMarketState(state))
+  const markets = {
+    ...(state.markets || {}),
+    [activeMarket]: currentMarketState,
+  }
+
+  return {
+    ...state,
+    activeMarket,
+    markets,
+    ...currentMarketState,
+  }
 }
 
 export function sendJson(response, status, payload) {
@@ -69,13 +169,36 @@ export function getSupabaseClient() {
 
 export function normalizeTradingState(payload) {
   const state = payload && typeof payload === 'object' ? payload : {}
+  const activeMarket = state.activeMarket || DEFAULT_MARKET_ID
+  const rawMarkets =
+    state.markets && typeof state.markets === 'object' ? state.markets : {}
+  const legacyMarketState = normalizeMarketState(DEFAULT_MARKET_ID, state)
+  const markets = {
+    ...createInitialMarkets(),
+    ...rawMarkets,
+    ...Object.values(TRADING_STRATEGIES).reduce((normalizedMarkets, strategy) => {
+      normalizedMarkets[strategy.id] = normalizeMarketState(
+        strategy.id,
+        rawMarkets[strategy.id] ||
+          (strategy.id === DEFAULT_MARKET_ID ? legacyMarketState : {}),
+      )
+      return normalizedMarkets
+    }, {}),
+  }
+  const activeMarketState = normalizeMarketState(
+    activeMarket,
+    markets[activeMarket] || markets[DEFAULT_MARKET_ID],
+  )
   const capital = Number(state.capital)
   const vault = Number(state.vault)
 
-  return {
+  return syncActiveMarketState({
     ...initialState,
     ...state,
     version: STORAGE_VERSION,
+    activeMarket,
+    markets,
+    ...activeMarketState,
     capital: Number.isFinite(capital) ? capital : initialState.capital,
     vault: Number.isFinite(vault) ? vault : initialState.vault,
     positions: Array.isArray(state.positions) ? state.positions : [],
@@ -94,7 +217,7 @@ export function normalizeTradingState(payload) {
       typeof state.backendMonitorEnabled === 'boolean'
         ? state.backendMonitorEnabled
         : initialState.backendMonitorEnabled,
-  }
+  })
 }
 
 function roundPrice(value) {
@@ -486,11 +609,11 @@ export async function runBackendMonitor(state) {
     })
 
     return {
-      state: {
+      state: syncActiveMarketState({
         ...current,
         lastBackendCheckAt: new Date().toISOString(),
         ...appendLogs(current, activity),
-      },
+      }),
       closedTrades: [],
       checkedCount: 0,
     }
@@ -534,7 +657,7 @@ export async function runBackendMonitor(state) {
     })
 
     return {
-      state: {
+      state: syncActiveMarketState({
         ...current,
         capital: refill ? refill.capital : current.capital,
         positions: refill ? refill.positions : current.positions,
@@ -552,7 +675,7 @@ export async function runBackendMonitor(state) {
             : 'Nessun segnale automatico disponibile',
         lastBackendCheckAt: new Date().toISOString(),
         ...appendLogs(current, activity),
-      },
+      }),
       closedTrades: [],
       openedTrades,
       checkedCount: 0,
@@ -654,7 +777,7 @@ export async function runBackendMonitor(state) {
   })
 
   return {
-    state: {
+    state: syncActiveMarketState({
       ...current,
       capital: roundPrice(capital),
       vault: roundPrice(vault),
@@ -670,7 +793,7 @@ export async function runBackendMonitor(state) {
           ? 'Monitor backend attivo'
           : 'In attesa di nuova scansione',
       ...appendLogs(current, activity),
-    },
+    }),
     closedTrades,
     openedTrades,
     checkedCount: current.positions.length,

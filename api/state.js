@@ -1,4 +1,5 @@
 import {
+  DEFAULT_MARKET_ID,
   getSupabaseClient,
   normalizeTradingState,
   readTradingState,
@@ -66,6 +67,43 @@ function mergeHistory(first = [], second = []) {
   )
 }
 
+function mergeMarkets(mergedState, incoming, currentPayload, preserveBackendTrading) {
+  const activeMarket = mergedState.activeMarket || DEFAULT_MARKET_ID
+  const incomingMarkets = incoming.markets || {}
+  const currentMarkets = currentPayload.markets || {}
+  const activeMarketState = {
+    ...(currentMarkets[activeMarket] || {}),
+    ...(incomingMarkets[activeMarket] || {}),
+    capital: mergedState.capital,
+    vault: mergedState.vault,
+    positions: mergedState.positions,
+    history: mergedState.history,
+    events: mergedState.events,
+    activityLog: mergedState.activityLog,
+    lastBackendCheckAt: mergedState.lastBackendCheckAt,
+    backendMonitorEnabled: mergedState.backendMonitorEnabled,
+  }
+
+  if (preserveBackendTrading && currentMarkets[activeMarket]) {
+    activeMarketState.lastScanAt =
+      currentMarkets[activeMarket].lastScanAt || activeMarketState.lastScanAt
+    activeMarketState.lastScanCount =
+      currentMarkets[activeMarket].lastScanCount ?? activeMarketState.lastScanCount
+    activeMarketState.lastSignalCount =
+      currentMarkets[activeMarket].lastSignalCount ??
+      activeMarketState.lastSignalCount
+    activeMarketState.lastScanResults =
+      currentMarkets[activeMarket].lastScanResults ||
+      activeMarketState.lastScanResults
+  }
+
+  return {
+    ...currentMarkets,
+    ...incomingMarkets,
+    [activeMarket]: activeMarketState,
+  }
+}
+
 async function mergeIncomingState(supabase, incomingPayload) {
   const { payload: currentPayload } = await readTradingState(supabase)
   const incoming = normalizeTradingState(incomingPayload)
@@ -73,7 +111,7 @@ async function mergeIncomingState(supabase, incomingPayload) {
   const incomingBackendTime = timestamp(incoming.lastBackendCheckAt)
   const preserveBackendTrading = currentBackendTime > incomingBackendTime
 
-  return {
+  const mergedState = {
     ...currentPayload,
     ...incoming,
     capital: preserveBackendTrading ? currentPayload.capital : incoming.capital,
@@ -95,6 +133,16 @@ async function mergeIncomingState(supabase, incomingPayload) {
       currentBackendTime > incomingBackendTime
         ? currentPayload.lastBackendCheckAt
         : incoming.lastBackendCheckAt,
+  }
+
+  return {
+    ...mergedState,
+    markets: mergeMarkets(
+      mergedState,
+      incoming,
+      currentPayload,
+      preserveBackendTrading,
+    ),
   }
 }
 

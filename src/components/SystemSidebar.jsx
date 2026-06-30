@@ -242,6 +242,7 @@ export function SystemSidebar() {
     lastLiveCheckAt,
     backendMonitorEnabled,
     liveMonitorEnabled,
+    marketLabel,
     maxPositions,
     nextLiveCheckAt,
     positions,
@@ -318,6 +319,12 @@ export function SystemSidebar() {
             </p>
             <Badge variant={operatingState.variant}>{engineStatus}</Badge>
           </div>
+          <p className="mt-3 text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
+            Mercato attivo
+          </p>
+          <p className="mt-1 text-sm font-semibold text-[#deff9a]">
+            {marketLabel || 'Azioni Europa'}
+          </p>
           <p className="mt-3 text-base font-semibold text-white">
             {operatingState.title}
           </p>
