@@ -2,6 +2,7 @@ export const CRYPTO_TICKERS = [
   {
     ticker: 'BTC/EUR',
     krakenPair: 'BTCEUR',
+    coingeckoId: 'bitcoin',
     name: 'Bitcoin',
     sector: 'Criptovalute',
     description: 'Asset digitale decentralizzato con maggiore capitalizzazione e liquidità.',
@@ -9,6 +10,7 @@ export const CRYPTO_TICKERS = [
   {
     ticker: 'ETH/EUR',
     krakenPair: 'ETHEUR',
+    coingeckoId: 'ethereum',
     name: 'Ethereum',
     sector: 'Smart contract',
     description: 'Rete blockchain programmabile usata per applicazioni decentralizzate.',
@@ -16,6 +18,7 @@ export const CRYPTO_TICKERS = [
   {
     ticker: 'SOL/EUR',
     krakenPair: 'SOLEUR',
+    coingeckoId: 'solana',
     name: 'Solana',
     sector: 'Smart contract',
     description: 'Blockchain ad alta velocità orientata ad applicazioni e finanza decentralizzata.',
@@ -23,6 +26,7 @@ export const CRYPTO_TICKERS = [
   {
     ticker: 'ADA/EUR',
     krakenPair: 'ADAEUR',
+    coingeckoId: 'cardano',
     name: 'Cardano',
     sector: 'Smart contract',
     description: 'Protocollo blockchain proof-of-stake con sviluppo accademico e modulare.',
@@ -30,6 +34,7 @@ export const CRYPTO_TICKERS = [
   {
     ticker: 'XRP/EUR',
     krakenPair: 'XRPEUR',
+    coingeckoId: 'ripple',
     name: 'XRP',
     sector: 'Pagamenti',
     description: 'Asset digitale orientato a trasferimenti rapidi e infrastrutture di pagamento.',
@@ -37,6 +42,7 @@ export const CRYPTO_TICKERS = [
   {
     ticker: 'DOT/EUR',
     krakenPair: 'DOTEUR',
+    coingeckoId: 'polkadot',
     name: 'Polkadot',
     sector: 'Interoperabilità',
     description: 'Rete progettata per connettere blockchain diverse tramite parachain.',
@@ -44,6 +50,7 @@ export const CRYPTO_TICKERS = [
   {
     ticker: 'LINK/EUR',
     krakenPair: 'LINKEUR',
+    coingeckoId: 'chainlink',
     name: 'Chainlink',
     sector: 'Oracoli',
     description: 'Rete di oracoli che collega dati esterni e smart contract.',
@@ -51,6 +58,7 @@ export const CRYPTO_TICKERS = [
   {
     ticker: 'LTC/EUR',
     krakenPair: 'LTCEUR',
+    coingeckoId: 'litecoin',
     name: 'Litecoin',
     sector: 'Pagamenti',
     description: 'Criptovaluta storica focalizzata su pagamenti rapidi e costi contenuti.',
@@ -58,6 +66,7 @@ export const CRYPTO_TICKERS = [
   {
     ticker: 'BCH/EUR',
     krakenPair: 'BCHEUR',
+    coingeckoId: 'bitcoin-cash',
     name: 'Bitcoin Cash',
     sector: 'Pagamenti',
     description: 'Fork di Bitcoin orientato a transazioni on-chain a basso costo.',
@@ -65,6 +74,7 @@ export const CRYPTO_TICKERS = [
   {
     ticker: 'ATOM/EUR',
     krakenPair: 'ATOMEUR',
+    coingeckoId: 'cosmos',
     name: 'Cosmos',
     sector: 'Interoperabilità',
     description: 'Ecosistema blockchain modulare basato su comunicazione tra chain.',
@@ -72,6 +82,7 @@ export const CRYPTO_TICKERS = [
   {
     ticker: 'AVAX/EUR',
     krakenPair: 'AVAXEUR',
+    coingeckoId: 'avalanche-2',
     name: 'Avalanche',
     sector: 'Smart contract',
     description: 'Piattaforma per applicazioni decentralizzate e subnet blockchain.',
@@ -79,6 +90,7 @@ export const CRYPTO_TICKERS = [
   {
     ticker: 'ETC/EUR',
     krakenPair: 'ETCEUR',
+    coingeckoId: 'ethereum-classic',
     name: 'Ethereum Classic',
     sector: 'Smart contract',
     description: 'Blockchain proof-of-work nata dalla rete storica Ethereum.',
@@ -86,6 +98,7 @@ export const CRYPTO_TICKERS = [
   {
     ticker: 'TRX/EUR',
     krakenPair: 'TRXEUR',
+    coingeckoId: 'tron',
     name: 'TRON',
     sector: 'Smart contract',
     description: 'Rete blockchain focalizzata su trasferimenti digitali e stablecoin.',
@@ -93,6 +106,7 @@ export const CRYPTO_TICKERS = [
   {
     ticker: 'XLM/EUR',
     krakenPair: 'XLMEUR',
+    coingeckoId: 'stellar',
     name: 'Stellar',
     sector: 'Pagamenti',
     description: 'Rete per pagamenti e trasferimenti cross-border a basso costo.',
@@ -100,6 +114,7 @@ export const CRYPTO_TICKERS = [
   {
     ticker: 'DOGE/EUR',
     krakenPair: 'DOGEEUR',
+    coingeckoId: 'dogecoin',
     name: 'Dogecoin',
     sector: 'Pagamenti',
     description: 'Asset digitale ad alta notorietà e volatilità, nato come meme coin.',
@@ -107,6 +122,7 @@ export const CRYPTO_TICKERS = [
   {
     ticker: 'UNI/EUR',
     krakenPair: 'UNIEUR',
+    coingeckoId: 'uniswap',
     name: 'Uniswap',
     sector: 'DeFi',
     description: 'Token di governance collegato a uno dei principali exchange decentralizzati.',
@@ -114,6 +130,7 @@ export const CRYPTO_TICKERS = [
   {
     ticker: 'AAVE/EUR',
     krakenPair: 'AAVEEUR',
+    coingeckoId: 'aave',
     name: 'Aave',
     sector: 'DeFi',
     description: 'Protocollo decentralizzato per prestiti e liquidità crypto.',
@@ -121,6 +138,7 @@ export const CRYPTO_TICKERS = [
   {
     ticker: 'ALGO/EUR',
     krakenPair: 'ALGOEUR',
+    coingeckoId: 'algorand',
     name: 'Algorand',
     sector: 'Smart contract',
     description: 'Blockchain proof-of-stake orientata a scalabilità e finalità rapida.',

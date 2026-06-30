@@ -21,6 +21,7 @@ import {
   CRYPTO_MAX_AUTO_ATR_PCT,
   getCryptoAtrPct,
   getCryptoAutoScore,
+  getCryptoSignalType,
   isCryptoActionableResult,
   isCryptoAutoEligibleResult,
   isCryptoRejectedResult,
@@ -170,13 +171,30 @@ function StrategyBadge({ rsi }) {
   return <Badge>NEUTRALE</Badge>
 }
 
+function getRowTradeType(row) {
+  if (row.market === 'crypto') {
+    return getCryptoSignalType(row)
+  }
+
+  if (row.rsi < 30) {
+    return 'LONG'
+  }
+
+  if (row.rsi > 70) {
+    return 'SHORT'
+  }
+
+  return null
+}
+
 function StrategyCell({ row, marketCopy }) {
-  const isLong = row.rsi < 30
+  const type = getRowTradeType(row)
+  const isLong = type === 'LONG'
   const assetLabel = marketCopy.assetSingular
 
   return (
     <div className="min-w-48">
-      <StrategyBadge rsi={row.rsi} />
+      <StrategyBadge rsi={isLong ? 0 : type === 'SHORT' ? 100 : 50} />
       <p className="mt-2 text-xs leading-5 text-slate-500">
         {isLong
           ? `Apre una posizione che guadagna se il prezzo dell’${assetLabel} sale.`
@@ -258,6 +276,26 @@ function TechnicalTooltip({ row }) {
             </p>
           </div>
         </div>
+        {isCrypto ? (
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <div className="rounded-lg border border-slate-800 bg-slate-950 p-2">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">
+                Market cap
+              </p>
+              <p className="mt-1 text-sm font-semibold text-white">
+                {formatCurrency(row.marketCapEur)}
+              </p>
+            </div>
+            <div className="rounded-lg border border-slate-800 bg-slate-950 p-2">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">
+                Ranking
+              </p>
+              <p className="mt-1 text-sm font-semibold text-white">
+                {row.marketCapRank ? `#${row.marketCapRank}` : 'Non disponibile'}
+              </p>
+            </div>
+          </div>
+        ) : null}
         <p className="mt-3 text-xs uppercase tracking-[0.14em] text-slate-500">
           Perché
         </p>
@@ -331,7 +369,9 @@ function WatchlistBadge({ row, isActionable }) {
   }
 
   if (isActionable(row)) {
-    return <StrategyBadge rsi={row.rsi} />
+    const type = getRowTradeType(row)
+
+    return <StrategyBadge rsi={type === 'LONG' ? 0 : type === 'SHORT' ? 100 : 50} />
   }
 
   return <Badge>NESSUN SEGNALE</Badge>
@@ -558,7 +598,15 @@ export default function Scanner({ marketId }) {
   }, [handleScan, visibleLastScanResults?.length, scanIsFromToday])
 
   const handleExecuteTrade = (row) => {
-    const type = row.rsi < 30 ? 'LONG' : 'SHORT'
+    const type = getRowTradeType(row)
+
+    if (!type) {
+      toast({
+        title: 'Nessuna direzione operativa disponibile',
+        variant: 'destructive',
+      })
+      return
+    }
 
     try {
       const trade = executeTrade(

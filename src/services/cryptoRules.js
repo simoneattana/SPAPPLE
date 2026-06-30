@@ -1,7 +1,10 @@
+export const CRYPTO_LONG_RSI_LIMIT = 35
+export const CRYPTO_SHORT_RSI_LIMIT = 65
 export const CRYPTO_AUTO_LONG_RSI_LIMIT = 28
 export const CRYPTO_AUTO_SHORT_RSI_LIMIT = 72
 export const CRYPTO_MAX_AUTO_ATR_PCT = 12
 export const CRYPTO_MIN_DAILY_VOLUME_EUR = 100000
+export const CRYPTO_MIN_MARKET_CAP_EUR = 100000000
 
 export function getCryptoAtrPct(row) {
   if (!Number.isFinite(Number(row.atr)) || !Number.isFinite(Number(row.currentPrice))) {
@@ -15,16 +18,37 @@ export function isCryptoActionableResult(row) {
   return (
     row.status === 'ok' &&
     Number(row.volumeEur) >= CRYPTO_MIN_DAILY_VOLUME_EUR &&
-    (row.rsi < 30 || row.rsi > 70)
+    Number(row.marketCapEur || 0) >= CRYPTO_MIN_MARKET_CAP_EUR &&
+    (row.rsi < CRYPTO_LONG_RSI_LIMIT || row.rsi > CRYPTO_SHORT_RSI_LIMIT)
   )
 }
 
+export function getCryptoSignalType(row) {
+  if (row.rsi < CRYPTO_LONG_RSI_LIMIT) {
+    return 'LONG'
+  }
+
+  if (row.rsi > CRYPTO_SHORT_RSI_LIMIT) {
+    return 'SHORT'
+  }
+
+  return null
+}
+
 export function getCryptoAutoScore(row) {
-  const rsiDistance = row.rsi < 30 ? 30 - row.rsi : row.rsi - 70
+  const signalType = getCryptoSignalType(row)
+  const rsiDistance =
+    signalType === 'LONG'
+      ? CRYPTO_LONG_RSI_LIMIT - row.rsi
+      : row.rsi - CRYPTO_SHORT_RSI_LIMIT
   const atrPct = getCryptoAtrPct(row) || 0
   const volumeBonus = Math.min(Math.log10(Math.max(Number(row.volumeEur), 1)), 8)
+  const capBonus = Math.min(Math.log10(Math.max(Number(row.marketCapEur), 1)), 11)
+  const rankPenalty = Number(row.marketCapRank) > 0
+    ? Math.min(Number(row.marketCapRank) / 100, 2)
+    : 0
 
-  return rsiDistance * 12 + volumeBonus - atrPct
+  return rsiDistance * 12 + volumeBonus + capBonus - atrPct - rankPenalty
 }
 
 export function isCryptoAutoEligibleResult(row) {

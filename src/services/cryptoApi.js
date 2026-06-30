@@ -1,6 +1,11 @@
 import { ATR, RSI } from 'technicalindicators'
 import { CRYPTO_TICKERS } from './cryptoUniverse'
-import { CRYPTO_MIN_DAILY_VOLUME_EUR } from './cryptoRules'
+import {
+  CRYPTO_LONG_RSI_LIMIT,
+  CRYPTO_MIN_DAILY_VOLUME_EUR,
+  CRYPTO_MIN_MARKET_CAP_EUR,
+  CRYPTO_SHORT_RSI_LIMIT,
+} from './cryptoRules'
 
 const MIN_HISTORY_LENGTH = 30
 const RSI_PERIOD = 14
@@ -57,6 +62,27 @@ function getCryptoMeta(input) {
   return CRYPTO_TICKERS.find((item) => item.ticker === input || item.krakenPair === input)
 }
 
+async function fetchCoinGeckoMarkets(items) {
+  const ids = items
+    .map((item) => getCryptoMeta(item)?.coingeckoId)
+    .filter(Boolean)
+
+  if (ids.length === 0) {
+    return new Map()
+  }
+
+  const payload = await fetchJson(
+    `/api/coingecko/markets?ids=${encodeURIComponent([...new Set(ids)].join(','))}`,
+    'Dati CoinGecko',
+  )
+
+  if (!Array.isArray(payload)) {
+    throw new Error('CoinGecko: risposta mercati non valida')
+  }
+
+  return new Map(payload.map((item) => [item.id, item]))
+}
+
 function extractKrakenHistory(payload, ticker) {
   const result = payload?.result || {}
   const pairKey = Object.keys(result).find((key) => key !== 'last')
@@ -108,6 +134,19 @@ function buildProfile(meta) {
   }
 }
 
+function enrichProfileWithMarketData(profile, marketData) {
+  if (!marketData) {
+    return profile
+  }
+
+  return {
+    ...profile,
+    description:
+      profile.description ||
+      `Crypto in posizione ${marketData.market_cap_rank || 'N/D'} per capitalizzazione secondo CoinGecko.`,
+  }
+}
+
 function getDiagnostic(row) {
   if (row.status === 'error') {
     return row.reason || 'Dati non disponibili'
@@ -117,20 +156,27 @@ function getDiagnostic(row) {
     return 'Scartata: liquidità giornaliera troppo bassa'
   }
 
-  if (row.rsi >= 30 && row.rsi <= 70) {
+  if (Number(row.marketCapEur || 0) < CRYPTO_MIN_MARKET_CAP_EUR) {
+    return 'Scartata: capitalizzazione troppo bassa per il pilota prudente'
+  }
+
+  if (row.rsi >= CRYPTO_LONG_RSI_LIMIT && row.rsi <= CRYPTO_SHORT_RSI_LIMIT) {
     return 'Scartata: RSI in zona neutrale'
   }
 
-  if (row.rsi < 30) {
-    return 'Ammessa: crypto liquida e RSI sotto 30'
+  if (row.rsi < CRYPTO_LONG_RSI_LIMIT) {
+    return `Ammessa: crypto liquida, market cap verificato e RSI sotto ${CRYPTO_LONG_RSI_LIMIT}`
   }
 
-  return 'Ammessa: crypto liquida e RSI sopra 70'
+  return `Ammessa: crypto liquida, market cap verificato e RSI sopra ${CRYPTO_SHORT_RSI_LIMIT}`
 }
 
-async function fetchCryptoDiagnostic(input) {
+async function fetchCryptoDiagnostic(input, coingeckoMarkets) {
   const meta = getCryptoMeta(input)
   const ticker = meta?.ticker || String(input)
+  const marketData = meta?.coingeckoId
+    ? coingeckoMarkets.get(meta.coingeckoId)
+    : null
 
   try {
     if (!meta?.krakenPair) {
@@ -144,16 +190,20 @@ async function fetchCryptoDiagnostic(input) {
     const history = extractKrakenHistory(payload, ticker)
     const latestBar = history.at(-1)
     const { rsi, atr } = calculateIndicators(history, ticker)
-    const volumeEur = latestBar.volume * latestBar.close
+    const volumeEur = Number(marketData?.total_volume) || latestBar.volume * latestBar.close
     const row = {
       ticker,
       market: 'crypto',
-      provider: 'Kraken',
-      profile: buildProfile(meta),
+      provider: marketData ? 'Kraken + CoinGecko' : 'Kraken',
+      profile: enrichProfileWithMarketData(buildProfile(meta), marketData),
       currentPrice: latestBar.close,
       pe: null,
       volume: latestBar.volume,
       volumeEur,
+      marketCapEur: Number(marketData?.market_cap) || null,
+      marketCapRank: Number(marketData?.market_cap_rank) || null,
+      priceChange24hPct: Number(marketData?.price_change_percentage_24h) || null,
+      priceChange7dPct: Number(marketData?.price_change_percentage_7d_in_currency) || null,
       rsi,
       atr,
       status: 'ok',
@@ -173,6 +223,10 @@ async function fetchCryptoDiagnostic(input) {
       pe: null,
       volume: null,
       volumeEur: null,
+      marketCapEur: marketData?.market_cap || null,
+      marketCapRank: marketData?.market_cap_rank || null,
+      priceChange24hPct: marketData?.price_change_percentage_24h || null,
+      priceChange7dPct: marketData?.price_change_percentage_7d_in_currency || null,
       rsi: null,
       atr: null,
       status: 'error',
@@ -201,10 +255,11 @@ export async function fetchCryptoMarketData(tickers = CRYPTO_TICKERS) {
     throw new Error('Lista crypto non valida')
   }
 
+  const coingeckoMarkets = await fetchCoinGeckoMarkets(tickers)
   const results = await mapWithConcurrency(
     tickers,
     REQUEST_CONCURRENCY,
-    fetchCryptoDiagnostic,
+    (item) => fetchCryptoDiagnostic(item, coingeckoMarkets),
   )
 
   if (results.every((row) => row.status === 'error')) {

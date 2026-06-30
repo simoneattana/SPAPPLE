@@ -2,9 +2,14 @@ import { createClient } from '@supabase/supabase-js'
 import { ATR, RSI } from 'technicalindicators'
 import { CRYPTO_TICKERS } from '../src/services/cryptoUniverse.js'
 import {
+  CRYPTO_LONG_RSI_LIMIT,
+  getCryptoSignalType,
   isCryptoActionableResult,
   isCryptoAutoEligibleResult,
   sortByCryptoAutoScore,
+  CRYPTO_MIN_DAILY_VOLUME_EUR,
+  CRYPTO_MIN_MARKET_CAP_EUR,
+  CRYPTO_SHORT_RSI_LIMIT,
 } from '../src/services/cryptoRules.js'
 import { EUROPEAN_TICKERS } from '../src/services/marketUniverse.js'
 import {
@@ -382,6 +387,53 @@ function getCryptoMeta(ticker) {
   )
 }
 
+function getCoinGeckoApiKey() {
+  return process.env.COINGECKO_API_KEY || process.env.CG_API_KEY || ''
+}
+
+async function fetchCoinGeckoMarkets(items) {
+  const ids = items
+    .map((item) => getCryptoMeta(item.ticker || item)?.coingeckoId)
+    .filter(Boolean)
+
+  if (ids.length === 0) {
+    return new Map()
+  }
+
+  const apiKey = getCoinGeckoApiKey()
+
+  if (!apiKey) {
+    throw new Error('Chiave CoinGecko non configurata sul server')
+  }
+
+  const coingeckoUrl = new URL('https://api.coingecko.com/api/v3/coins/markets')
+  coingeckoUrl.searchParams.set('vs_currency', 'eur')
+  coingeckoUrl.searchParams.set('ids', [...new Set(ids)].join(','))
+  coingeckoUrl.searchParams.set('order', 'market_cap_desc')
+  coingeckoUrl.searchParams.set('per_page', '250')
+  coingeckoUrl.searchParams.set('page', '1')
+  coingeckoUrl.searchParams.set('sparkline', 'false')
+  coingeckoUrl.searchParams.set('price_change_percentage', '24h,7d')
+
+  const coingeckoResponse = await fetch(coingeckoUrl, {
+    headers: {
+      accept: 'application/json',
+      'x-cg-demo-api-key': apiKey,
+    },
+  })
+  const payload = await coingeckoResponse.json()
+
+  if (!coingeckoResponse.ok || !Array.isArray(payload)) {
+    throw new Error(
+      payload?.error ||
+        payload?.status?.error_message ||
+        'CoinGecko non ha restituito dati utilizzabili',
+    )
+  }
+
+  return new Map(payload.map((item) => [item.id, item]))
+}
+
 async function fetchKrakenOhlc(pair) {
   const krakenUrl = new URL('https://api.kraken.com/0/public/OHLC')
   krakenUrl.searchParams.set('pair', pair)
@@ -612,27 +664,46 @@ function buildCryptoProfile(meta) {
   }
 }
 
+function enrichCryptoProfile(profile, marketData) {
+  if (!marketData) {
+    return profile
+  }
+
+  return {
+    ...profile,
+    description:
+      profile.description ||
+      `Crypto in posizione ${marketData.market_cap_rank || 'N/D'} per capitalizzazione secondo CoinGecko.`,
+  }
+}
+
 function getCryptoDiagnostic(row) {
   if (row.status === 'error') {
     return row.reason || 'Dati non disponibili'
   }
 
-  if (Number(row.volumeEur) < 100000) {
+  if (Number(row.volumeEur) < CRYPTO_MIN_DAILY_VOLUME_EUR) {
     return 'Scartata: liquidità giornaliera troppo bassa'
   }
 
-  if (row.rsi >= 30 && row.rsi <= 70) {
+  if (Number(row.marketCapEur || 0) < CRYPTO_MIN_MARKET_CAP_EUR) {
+    return 'Scartata: capitalizzazione troppo bassa per il pilota prudente'
+  }
+
+  if (row.rsi >= CRYPTO_LONG_RSI_LIMIT && row.rsi <= CRYPTO_SHORT_RSI_LIMIT) {
     return 'Scartata: RSI in zona neutrale'
   }
 
-  if (row.rsi < 30) {
-    return 'Ammessa: crypto liquida e RSI sotto 30'
+  if (row.rsi < CRYPTO_LONG_RSI_LIMIT) {
+    return `Ammessa: crypto liquida, market cap verificato e RSI sotto ${CRYPTO_LONG_RSI_LIMIT}`
   }
 
-  return 'Ammessa: crypto liquida e RSI sopra 70'
+  return `Ammessa: crypto liquida, market cap verificato e RSI sopra ${CRYPTO_SHORT_RSI_LIMIT}`
 }
 
-async function fetchCryptoTickerDiagnostic(meta) {
+async function fetchCryptoTickerDiagnostic(meta, coingeckoMarkets = new Map()) {
+  const marketData = meta.coingeckoId ? coingeckoMarkets.get(meta.coingeckoId) : null
+
   try {
     const payload = await fetchKrakenOhlc(meta.krakenPair)
     const history = extractKrakenHistory(payload, meta.ticker)
@@ -641,12 +712,16 @@ async function fetchCryptoTickerDiagnostic(meta) {
     const row = {
       ticker: meta.ticker,
       market: 'crypto',
-      provider: 'Kraken',
-      profile: buildCryptoProfile(meta),
+      provider: marketData ? 'Kraken + CoinGecko' : 'Kraken',
+      profile: enrichCryptoProfile(buildCryptoProfile(meta), marketData),
       currentPrice: latestBar.close,
       pe: null,
       volume: latestBar.volume,
-      volumeEur: latestBar.volume * latestBar.close,
+      volumeEur: Number(marketData?.total_volume) || latestBar.volume * latestBar.close,
+      marketCapEur: Number(marketData?.market_cap) || null,
+      marketCapRank: Number(marketData?.market_cap_rank) || null,
+      priceChange24hPct: Number(marketData?.price_change_percentage_24h) || null,
+      priceChange7dPct: Number(marketData?.price_change_percentage_7d_in_currency) || null,
       rsi,
       atr,
       status: 'ok',
@@ -666,6 +741,10 @@ async function fetchCryptoTickerDiagnostic(meta) {
       pe: null,
       volume: null,
       volumeEur: null,
+      marketCapEur: null,
+      marketCapRank: null,
+      priceChange24hPct: null,
+      priceChange7dPct: null,
       rsi: null,
       atr: null,
       status: 'error',
@@ -691,10 +770,12 @@ async function mapWithConcurrency(items, limit, mapper) {
 
 async function fetchBackendMarketData(marketId = DEFAULT_MARKET_ID) {
   if (marketId === 'crypto') {
+    const coingeckoMarkets = await fetchCoinGeckoMarkets(CRYPTO_TICKERS)
+
     return mapWithConcurrency(
       CRYPTO_TICKERS,
       REQUEST_CONCURRENCY,
-      fetchCryptoTickerDiagnostic,
+      (meta) => fetchCryptoTickerDiagnostic(meta, coingeckoMarkets),
     )
   }
 
@@ -706,8 +787,12 @@ function buildTrade(row, invested, strategy = getTradingStrategy()) {
   const isCrypto = strategy.id === 'crypto'
   const targetPct = isCrypto ? (atrPct < 4 ? 0.8 : 1.2) : atrPct < 1.5 ? 0.3 : 0.5
   const stopMultiplier = isCrypto ? 1.8 : 1.5
-  const long = row.rsi < 30
-  const type = long ? 'LONG' : 'SHORT'
+  const type = strategy.id === 'crypto'
+    ? getCryptoSignalType(row)
+    : row.rsi < 30
+      ? 'LONG'
+      : 'SHORT'
+  const long = type === 'LONG'
   const openedAt = new Date().toISOString()
 
   return {

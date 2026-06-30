@@ -7,6 +7,7 @@ import {
   canOpenPosition,
 } from '../services/positionSizing'
 import { getMarketCopy } from '../services/marketCopy'
+import { getCryptoSignalType } from '../services/cryptoRules'
 import {
   loadRemoteTradingState,
   saveRemoteTradingState,
@@ -385,6 +386,22 @@ function buildTrade(
     invested: roundPrice(invested),
     targetPct,
   }
+}
+
+function getSignalType(row, strategy) {
+  if (strategy.id === 'crypto') {
+    return getCryptoSignalType(row)
+  }
+
+  if (row.rsi < 30) {
+    return 'LONG'
+  }
+
+  if (row.rsi > 70) {
+    return 'SHORT'
+  }
+
+  return null
 }
 
 function evaluatePositions(current, positionsWithPrices, { incrementDays }) {
@@ -822,7 +839,7 @@ export function TradingProvider({ children }) {
     }
 
     rows.forEach((row) => {
-      const type = row.rsi < 30 ? 'LONG' : 'SHORT'
+      const type = getSignalType(row, strategy)
       const alreadyOpen = positions.some(
         (position) => position.ticker === row.ticker,
       )
