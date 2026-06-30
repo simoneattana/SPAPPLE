@@ -1,5 +1,7 @@
 import { Bot, ClipboardCheck, ShieldCheck } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card'
+import { useTrading } from '../context/useTrading'
+import { getMarketCopy } from '../services/marketCopy'
 
 const analysisRules = [
   {
@@ -50,6 +52,55 @@ const routineSteps = [
   },
 ]
 
+const cryptoAnalysisRules = [
+  {
+    title: 'La liquidità dell’asset',
+    text: 'Sulle crypto non esiste il P/E. Spapple controlla quindi il volume giornaliero in euro e scarta gli asset troppo sottili, perché sarebbero poco affidabili per una simulazione prudente.',
+  },
+  {
+    title: 'La temperatura crypto (RSI)',
+    text: 'Cerca eccessi tecnici anche sulle coppie crypto/EUR: RSI sotto 30 segnala possibile rimbalzo, RSI sopra 70 segnala possibile correzione.',
+  },
+  {
+    title: 'La volatilità 24/7 (ATR)',
+    text: 'Le crypto oscillano più delle azioni e non chiudono la sera. Per questo target, stop e filtro del pilota sono più larghi e calibrati su ATR.',
+  },
+]
+
+const cryptoAutomationRules = [
+  {
+    title: 'Capitale Crypto Separato',
+    text: 'Il mercato crypto usa un capitale autonomo rispetto alle azioni. In questo modo risultati, rischio, storico e posizioni non si mischiano.',
+  },
+  {
+    title: 'Sizing più prudente',
+    text: 'Ogni nuova posizione crypto usa circa il 5% del capitale crypto, con massimo 3 posizioni. È più prudente perché il mercato è più volatile.',
+  },
+  {
+    title: 'Monitor 24/7',
+    text: 'Il sistema può controllare prezzi Kraken anche fuori dagli orari di Borsa. Se target o stop vengono raggiunti, chiude la posizione simulata.',
+  },
+]
+
+const cryptoRoutineSteps = [
+  {
+    title: 'Selezioni Crypto',
+    text: 'Nel pannello operativo scegli Crypto. Da quel momento Dashboard, Scanner, Portafoglio, Diario e Storico mostrano solo il mondo crypto.',
+  },
+  {
+    title: 'Scansioni Kraken',
+    text: 'Vai nello Scanner e aggiorni la scansione. Spapple legge dati Kraken reali su coppie crypto/EUR liquide.',
+  },
+  {
+    title: 'Lasci lavorare il pilota',
+    text: 'Con il pilota automatico acceso, Spapple apre solo segnali abbastanza forti per rischio, RSI e volatilità.',
+  },
+  {
+    title: 'Controlli Portafoglio e Storico',
+    text: 'Nel Portafoglio vedi solo posizioni crypto. Nel Diario e nello Storico vedi solo attività e risultati del mercato crypto attivo.',
+  },
+]
+
 function InfoCard({ title, text }) {
   return (
     <Card>
@@ -64,25 +115,31 @@ function InfoCard({ title, text }) {
 }
 
 export default function Explanation() {
+  const { activeMarket, marketLabel } = useTrading()
+  const marketCopy = getMarketCopy(activeMarket)
+  const isCrypto = activeMarket === 'crypto'
+  const activeAnalysisRules = isCrypto ? cryptoAnalysisRules : analysisRules
+  const activeAutomationRules = isCrypto ? cryptoAutomationRules : automationRules
+  const activeRoutineSteps = isCrypto ? cryptoRoutineSteps : routineSteps
+
   return (
     <div className="flex flex-1 flex-col gap-7">
       <header className="rounded-lg border border-slate-800 bg-[#090b10] p-6 shadow-xl shadow-black/20">
         <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">
-          Spiegazione operativa
+          Spiegazione operativa · {marketCopy.eyebrow}
         </p>
         <h1 className="mt-3 text-3xl font-semibold text-white">
-          Cos’è Spapple
+          Cos’è Spapple: {marketLabel}
         </h1>
         <p className="mt-4 max-w-4xl text-base leading-7 text-slate-400">
-          Spapple guarda il mercato azionario reale e fa da “buttafuori” e da
-          “matematico”. Quando analizza i titoli, controlla da solo salute
-          aziendale, temperatura tecnica e nervosismo del prezzo per produrre
-          decisioni fredde, matematiche e ultra-prudenti.
+          {isCrypto
+            ? 'Nel mondo crypto Spapple lavora su asset digitali liquidi, prezzi Kraken reali e regole separate di rischio. Non usa P/E o logiche aziendali: controlla liquidità, temperatura tecnica e volatilità 24/7.'
+            : 'Spapple guarda il mercato azionario reale e fa da “buttafuori” e da “matematico”. Quando analizza i titoli, controlla da solo salute aziendale, temperatura tecnica e nervosismo del prezzo per produrre decisioni fredde, matematiche e ultra-prudenti.'}
         </p>
       </header>
 
       <section className="grid gap-4 lg:grid-cols-3">
-        {analysisRules.map((rule) => (
+        {activeAnalysisRules.map((rule) => (
           <InfoCard key={rule.title} {...rule} />
         ))}
       </section>
@@ -102,7 +159,7 @@ export default function Explanation() {
           </div>
         </div>
         <div className="mt-5 grid gap-4 lg:grid-cols-3">
-          {automationRules.map((rule) => (
+          {activeAutomationRules.map((rule) => (
             <InfoCard key={rule.title} {...rule} />
           ))}
         </div>
@@ -122,13 +179,13 @@ export default function Explanation() {
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
               Spapple fa i calcoli difficili, ma tu sei il Direttore dei
-              Lavori. La routine richiede pochi minuti al giorno, preferibilmente
-              la sera a mercati chiusi.
+              Lavori. La routine cambia in base al mercato attivo e resta
+              separata tra azioni e crypto.
             </p>
           </div>
         </div>
         <ol className="mt-5 grid gap-3 md:grid-cols-2">
-          {routineSteps.map((step, index) => (
+          {activeRoutineSteps.map((step, index) => (
             <li
               key={step.title}
               className="rounded-lg border border-slate-800 bg-slate-950 p-4 text-sm leading-6 text-slate-300"

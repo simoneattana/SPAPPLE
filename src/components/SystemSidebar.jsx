@@ -16,6 +16,7 @@ import {
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { useTrading } from '../context/useTrading'
+import { getMarketCopy } from '../services/marketCopy'
 
 const dateTimeFormatter = new Intl.DateTimeFormat('it-IT', {
   day: '2-digit',
@@ -109,6 +110,7 @@ function activityStyles(status) {
 
 function getOperatingState({
   automationEnabled,
+  marketCopy,
   positions,
   lastScanAt,
   lastSignalCount,
@@ -117,7 +119,7 @@ function getOperatingState({
   if (engineStatus?.toLowerCase().includes('errore')) {
     return {
       title: engineStatus,
-      detail: 'Serve una nuova scansione o un nuovo EOD quando i dati tornano disponibili.',
+      detail: `Serve una nuova scansione ${marketCopy.label} quando i dati tornano disponibili.`,
       variant: 'negative',
     }
   }
@@ -125,7 +127,7 @@ function getOperatingState({
   if (positions.length > 0) {
     return {
       title: 'Monitoraggio posizioni',
-      detail: `Ci sono ${positions.length} posizioni aperte. Il prossimo controllo utile è il Motore EOD.`,
+      detail: `Ci sono ${positions.length} posizioni aperte su ${marketCopy.label}. Il monitor controlla target e stop su questo mercato.`,
       variant: 'positive',
     }
   }
@@ -149,24 +151,25 @@ function getOperatingState({
 
 function getNextAction({ automationEnabled, positions, lastScanAt, lastSignalCount }) {
   if (positions.length > 0) {
-    return 'Sto monitorando le posizioni. Se un prezzo tocca take profit o stop loss, chiudo automaticamente.'
+    return 'Sto monitorando le posizioni del mercato attivo. Se un prezzo tocca take profit o stop loss, chiudo automaticamente.'
   }
 
   if (lastScanAt && lastSignalCount > 0 && !automationEnabled) {
-    return 'Ci sono segnali disponibili: puoi aprirli manualmente dallo Scanner o attivare il Pilota automatico.'
+    return 'Ci sono segnali disponibili nel mercato attivo: puoi aprirli manualmente dallo Scanner o attivare il Pilota automatico.'
   }
 
   if (automationEnabled) {
     return 'La prossima scansione aprirà automaticamente i segnali validi finché ci sono slot e capitale.'
   }
 
-  return 'Prossimo passo: vai nello Scanner e avvia una scansione EOD con dati reali.'
+  return 'Prossimo passo: vai nello Scanner e avvia una scansione con dati reali.'
 }
 
 function buildAssistantMessages({
   automationEnabled,
   backendMonitorEnabled,
   liveMonitorEnabled,
+  marketCopy,
   nextLiveCheckAt,
   positions,
 }) {
@@ -178,9 +181,9 @@ function buildAssistantMessages({
   ) {
     return [
       'Sono in pilota automatico completo: il browser controlla ogni 60 secondi quando l’app è aperta.',
-      'Anche se chiudi l’app, il monitor backend su Vercel continua a controllare Supabase e i prezzi.',
+      `Anche se chiudi l’app, il monitor backend su Vercel continua a controllare ${marketCopy.label} e i prezzi ${marketCopy.provider}.`,
       `Prossimo controllo live locale: ${formatCountdown(nextLiveCheckAt)}.`,
-      'Se un titolo raggiunge take profit o stop loss, chiudo la posizione e aggiorno capitale, salvadanaio e storico.',
+      `Se un ${marketCopy.assetSingular} raggiunge take profit o stop loss, chiudo la posizione e aggiorno capitale, salvadanaio e storico del mercato ${marketCopy.label}.`,
     ]
   }
 
@@ -188,14 +191,14 @@ function buildAssistantMessages({
     return [
       'Ci sono posizioni aperte, ma il monitor live non è completamente attivo.',
       'Puoi riattivare pilota automatico e monitor live per far controllare a me i prezzi.',
-      'In alternativa puoi usare il Motore EOD manuale dal Portafoglio.',
+      `In alternativa puoi usare il controllo manuale ${marketCopy.label} dal Portafoglio.`,
     ]
   }
 
   if (automationEnabled) {
     return [
       'Sono pronto a lavorare in automatico.',
-      'Alla prossima scansione valuterò i segnali e aprirò solo quelli che rispettano le regole.',
+      `Alla prossima scansione ${marketCopy.label} valuterò solo ${marketCopy.assetPlural} e aprirò solo quelli che rispettano le regole.`,
       'Dopo l’apertura partiranno monitor live e monitor backend.',
     ]
   }
@@ -258,6 +261,7 @@ export function SystemSidebar() {
     minPositionSize,
   } = useTrading()
   const [, setNow] = useState(Date.now())
+  const marketCopy = getMarketCopy(activeMarket)
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
@@ -266,6 +270,7 @@ export function SystemSidebar() {
 
   const operatingState = getOperatingState({
     automationEnabled,
+    marketCopy,
     positions,
     lastScanAt,
     lastSignalCount,
@@ -287,6 +292,7 @@ export function SystemSidebar() {
         automationEnabled,
         backendMonitorEnabled,
         liveMonitorEnabled,
+        marketCopy,
         nextLiveCheckAt,
         positions,
       }),
@@ -294,6 +300,7 @@ export function SystemSidebar() {
       automationEnabled,
       backendMonitorEnabled,
       liveMonitorEnabled,
+      marketCopy,
       nextLiveCheckAt,
       positions,
     ],
@@ -472,7 +479,9 @@ export function SystemSidebar() {
                       <span className={pnlReady ? pnlColor : 'text-slate-500'}>
                         {pnlReady
                           ? currencyFormatter.format(pnl)
-                          : 'P/L dopo EOD'}
+                          : activeMarket === 'crypto'
+                            ? 'P/L dopo controllo'
+                            : 'P/L dopo EOD'}
                       </span>
                     </div>
                   </div>

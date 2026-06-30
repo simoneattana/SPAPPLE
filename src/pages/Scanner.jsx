@@ -28,6 +28,7 @@ import {
 } from '../services/cryptoRules'
 import { CRYPTO_TICKERS } from '../services/cryptoUniverse'
 import { EUROPEAN_TICKERS } from '../services/marketUniverse'
+import { getMarketCopy } from '../services/marketCopy'
 import { LEGACY_POSITION_SIZE } from '../services/positionSizing'
 import {
   MAX_AUTO_ATR_PCT,
@@ -38,41 +39,6 @@ import {
   isRejectedResult,
   sortByAutoScore,
 } from '../services/tradingRules'
-
-const glossaryItems = [
-  {
-    term: 'Take Profit',
-    description: 'Prezzo target: se viene raggiunto, il sistema chiude in utile.',
-  },
-  {
-    term: 'Stop Loss',
-    description: 'Prezzo di sicurezza: se viene raggiunto, il sistema chiude per limitare la perdita.',
-  },
-  {
-    term: 'RSI',
-    description: 'Indicatore di temperatura: sotto 30 segnala possibile rimbalzo, sopra 70 possibile eccesso.',
-  },
-  {
-    term: 'Long',
-    description: 'Posizione al rialzo: guadagna se il prezzo sale dopo l’ingresso.',
-  },
-  {
-    term: 'Short',
-    description: 'Posizione aperta al ribasso: non vendi un titolo che possiedi, simuli un’operazione che guadagna se il prezzo scende.',
-  },
-  {
-    term: 'ATR',
-    description: 'Misura la volatilità media e aiuta a calibrare target e stop loss.',
-  },
-  {
-    term: 'P/E',
-    description: 'Rapporto prezzo/utili: se è assente o non positivo, il titolo viene scartato.',
-  },
-  {
-    term: 'AUTO OK',
-    description: 'Il pilota automatico può aprire solo segnali con RSI molto estremo e ATR non superiore al 6%.',
-  },
-]
 
 const currencyFormatter = new Intl.NumberFormat('it-IT', {
   style: 'currency',
@@ -188,22 +154,26 @@ function StrategyBadge({ rsi }) {
   return <Badge>NEUTRALE</Badge>
 }
 
-function StrategyCell({ row }) {
+function StrategyCell({ row, marketCopy }) {
   const isLong = row.rsi < 30
+  const assetLabel = marketCopy.assetSingular
 
   return (
     <div className="min-w-48">
       <StrategyBadge rsi={row.rsi} />
       <p className="mt-2 text-xs leading-5 text-slate-500">
         {isLong
-          ? 'Apre una posizione che guadagna se il prezzo sale.'
-          : 'Apre una posizione che guadagna se il prezzo scende.'}
+          ? `Apre una posizione che guadagna se il prezzo dell’${assetLabel} sale.`
+          : `Apre una posizione che guadagna se il prezzo dell’${assetLabel} scende.`}
       </p>
     </div>
   )
 }
 
 function ReasonCell({ row }) {
+  const isCrypto = row.market === 'crypto'
+  const assetLabel = isCrypto ? 'asset crypto' : 'titolo'
+
   if (row.status !== 'ok') {
     return (
       <p className="min-w-56 text-sm leading-6 text-slate-400">
@@ -215,8 +185,8 @@ function ReasonCell({ row }) {
   if (row.rsi < 30) {
     return (
       <p className="min-w-56 text-sm leading-6 text-slate-400">
-        RSI sotto 30: il titolo risulta molto venduto e il sistema cerca un
-        possibile rimbalzo.
+        RSI sotto 30: l’{assetLabel} risulta molto venduto e il sistema cerca
+        un possibile rimbalzo.
       </p>
     )
   }
@@ -231,7 +201,7 @@ function ReasonCell({ row }) {
 
   return (
     <p className="min-w-56 text-sm leading-6 text-slate-400">
-      RSI sopra 70: il titolo risulta molto comprato e il sistema cerca una
+      RSI sopra 70: l’{assetLabel} risulta molto comprato e il sistema cerca una
       possibile discesa.
     </p>
   )
@@ -376,7 +346,9 @@ export default function Scanner() {
   } = useTrading()
   const scannerConfig = useMemo(() => {
     if (activeMarket === 'crypto') {
+      const copy = getMarketCopy('crypto')
       return {
+        copy,
         provider: 'Kraken',
         universe: CRYPTO_TICKERS,
         fetcher: fetchCryptoMarketData,
@@ -385,13 +357,15 @@ export default function Scanner() {
         isRejected: isCryptoRejectedResult,
         sortByScore: sortByCryptoAutoScore,
         getScore: getCryptoAutoScore,
-        scanLabel: 'crypto liquide',
-        diagnosticLabel: 'crypto',
+        scanLabel: copy.assetPlural,
+        diagnosticLabel: copy.assetPlural,
         errorLabel: 'Kraken',
       }
     }
 
+    const copy = getMarketCopy('equities')
     return {
+      copy,
       provider: 'Yahoo Finance',
       universe: EUROPEAN_TICKERS,
       fetcher: fetchMarketData,
@@ -400,8 +374,8 @@ export default function Scanner() {
       isRejected: isRejectedResult,
       sortByScore: sortByAutoScore,
       getScore: getAutoScore,
-      scanLabel: 'titoli europei',
-      diagnosticLabel: 'titoli',
+      scanLabel: copy.assetPlural,
+      diagnosticLabel: copy.assetPlural,
       errorLabel: 'Yahoo Finance',
     }
   }, [activeMarket])
@@ -584,7 +558,7 @@ export default function Scanner() {
         title:
           openedTrades.length > 0
             ? `Slot riempito: ${openedTrades[0].ticker} aperto dal pilota`
-            : 'Slot libero: nessun nuovo titolo abbastanza forte',
+            : `Slot libero: nessun nuovo ${scannerConfig.copy.assetSingular} abbastanza forte`,
       })
     } catch (scanError) {
       recordScanError(scanError.message)
@@ -621,15 +595,16 @@ export default function Scanner() {
       <header className="flex flex-col gap-5 rounded-lg border border-slate-800 bg-[#090b10] p-5 shadow-xl shadow-black/20 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">
-            Scanner quantitativo
+            Scanner quantitativo · {scannerConfig.copy.eyebrow}
           </p>
           <h1 className="mt-3 text-2xl font-semibold text-white sm:text-3xl">
             Scanner di Mercato: {marketLabel || currentStrategy?.label}
           </h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
-            Analisi EOD automatica su {scannerConfig.universe.length}{' '}
+            Analisi {scannerConfig.copy.scanMode} automatica su{' '}
+            {scannerConfig.universe.length}{' '}
             {scannerConfig.scanLabel} con dati reali da {scannerConfig.provider}.
-            I risultati restano visibili dall’ultima scansione.
+            {scannerConfig.copy.scanDescription}
           </p>
         </div>
 
@@ -639,7 +614,7 @@ export default function Scanner() {
           ) : (
             <Play className="h-4 w-4" />
           )}
-          Aggiorna Scansione Mercato EOD
+          Aggiorna Scansione {scannerConfig.copy.scanMode}
         </Button>
       </header>
 
@@ -703,6 +678,7 @@ export default function Scanner() {
                       <TableCell>
                         <div className="flex flex-col gap-2">
                           <TickerInfo
+                            assetType={scannerConfig.copy.assetType}
                             ticker={position.ticker}
                             profile={position.profile}
                           />
@@ -887,7 +863,11 @@ export default function Scanner() {
               {visibleSignalRows.map((row) => (
                 <TableRow key={row.ticker}>
                   <TableCell>
-                    <TickerInfo ticker={row.ticker} profile={row.profile} />
+                    <TickerInfo
+                      assetType={scannerConfig.copy.assetType}
+                      ticker={row.ticker}
+                      profile={row.profile}
+                    />
                   </TableCell>
                   <TableCell>{formatCurrency(row.currentPrice)}</TableCell>
                   <TableCell>
@@ -897,7 +877,7 @@ export default function Scanner() {
                     <TechnicalTooltip row={row} />
                   </TableCell>
                   <TableCell>
-                    <StrategyCell row={row} />
+                    <StrategyCell row={row} marketCopy={scannerConfig.copy} />
                   </TableCell>
                   <TableCell>
                     <AutoRuleCell row={row} />
@@ -930,7 +910,7 @@ export default function Scanner() {
                 </p>
                 <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
                   Se l’aggiornamento automatico non ha trovato segnali, puoi
-                  usare il bottone manuale per ripetere la scansione EOD.
+                  usare il bottone manuale per ripetere la scansione.
                 </p>
               </div>
             </div>
@@ -970,7 +950,11 @@ export default function Scanner() {
                 {results.map((row) => (
                   <TableRow key={`universo-${row.ticker}`}>
                     <TableCell>
-                      <TickerInfo ticker={row.ticker} profile={row.profile} />
+                      <TickerInfo
+                        assetType={scannerConfig.copy.assetType}
+                        ticker={row.ticker}
+                        profile={row.profile}
+                      />
                     </TableCell>
                     <TableCell>{formatCurrency(row.currentPrice)}</TableCell>
                     <TableCell>
@@ -993,9 +977,7 @@ export default function Scanner() {
                   Diagnostica pronta per la prossima scansione
                 </p>
                 <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
-                  Dopo l’avvio vedrai per ogni ticker se è stato ammesso,
-                  scartato per RSI neutrale, scartato per P/E o escluso per dati
-                  non disponibili.
+                  {scannerConfig.copy.diagnosticDescription}
                 </p>
               </div>
             </div>
@@ -1019,7 +1001,7 @@ export default function Scanner() {
           </div>
         </CardHeader>
         <CardContent className="grid gap-3 pt-5 md:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-          {glossaryItems.map((item) => (
+          {scannerConfig.copy.glossary.map((item) => (
             <div
               key={item.term}
               className="rounded-lg border border-slate-800 bg-slate-950 p-4"

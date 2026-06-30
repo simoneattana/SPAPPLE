@@ -10,6 +10,7 @@ import {
 import { Badge } from '../components/ui/Badge'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card'
 import { useTrading } from '../context/useTrading'
+import { getMarketCopy } from '../services/marketCopy'
 
 const currencyFormatter = new Intl.NumberFormat('it-IT', {
   style: 'currency',
@@ -89,7 +90,9 @@ function StatBox({ label, value, detail, accent = 'text-white' }) {
 export default function Dashboard() {
   const {
     automationEnabled,
+    activeMarket,
     capital,
+    currentStrategy,
     engineStatus,
     history,
     lastScanAt,
@@ -100,6 +103,10 @@ export default function Dashboard() {
     positions,
     vault,
   } = useTrading()
+  const marketCopy = getMarketCopy(activeMarket)
+  const positionPercent = Math.round(
+    (currentStrategy?.positionSizing?.percent || 0.1) * 100,
+  )
   const lastScanText = lastScanAt
     ? new Intl.DateTimeFormat('it-IT', {
         dateStyle: 'short',
@@ -144,14 +151,15 @@ export default function Dashboard() {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">
-              Dashboard operativo
+              Dashboard operativo · {marketCopy.eyebrow}
             </p>
             <h1 className="mt-3 text-2xl font-semibold text-white sm:text-3xl">
               Spapple sta monitorando {marketLabel}: capitale, segnali e posizioni
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-500">
               Ultima scansione: {lastScanText}. Segnali trovati:{' '}
-              {lastSignalCount} su {lastScanCount} titoli analizzati.
+              {lastSignalCount} su {lastScanCount} {marketCopy.assetPlural}{' '}
+              analizzati.
             </p>
           </div>
           <div className="flex items-center gap-2 rounded-lg border border-[#deff9a]/25 bg-[#deff9a]/10 px-3 py-2 text-sm font-medium text-[#deff9a]">
@@ -261,9 +269,11 @@ export default function Dashboard() {
               Slot operativi consigliati
             </p>
             <p className="mt-2 text-sm leading-6 text-slate-500">
-              I 5 slot attuali sono prudenti: limitano esposizione e falsi
-              segnali mentre raccogliamo dati. Conviene aumentarli solo quando
-              expectancy e win rate risultano stabili su un campione credibile.
+              Gli slot attuali sono separati per mercato. Su {marketLabel} il
+              sistema usa massimo {maxPositions} posizioni e circa{' '}
+              {positionPercent}% del capitale per nuova posizione. Conviene
+              aumentare il rischio solo quando expectancy e win rate risultano
+              stabili su un campione credibile.
             </p>
           </div>
         </div>
@@ -273,7 +283,7 @@ export default function Dashboard() {
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">
-              Forward Testing
+              Forward Testing · {marketLabel}
             </p>
             <h2 className="mt-3 text-xl font-semibold text-white">
               Andamento Capitale (Forward Testing)

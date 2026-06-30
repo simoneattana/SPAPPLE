@@ -15,6 +15,7 @@ import {
 } from '../services/cryptoRules'
 import { CRYPTO_TICKERS } from '../services/cryptoUniverse'
 import { EUROPEAN_TICKERS } from '../services/marketUniverse'
+import { getMarketCopy } from '../services/marketCopy'
 import {
   isActionableResult,
   isAutoEligibleResult,
@@ -62,7 +63,7 @@ function PnlMetric({ value }) {
       <p className={`mt-2 text-base font-semibold ${color}`}>
         {Number.isFinite(pnl)
           ? currencyFormatter.format(pnl)
-          : 'In attesa EOD'}
+          : 'In attesa aggiornamento'}
       </p>
     </div>
   )
@@ -87,6 +88,7 @@ export default function Portfolio() {
   const { toast } = useToast()
   const [runningEOD, setRunningEOD] = useState(false)
   const [closingId, setClosingId] = useState(null)
+  const marketCopy = getMarketCopy(activeMarket)
 
   const handleRunEOD = async () => {
     setRunningEOD(true)
@@ -94,11 +96,18 @@ export default function Portfolio() {
     try {
       await runEOD()
       toast({
-        title: 'Elaborazione EOD completata. Posizioni aggiornate.',
+        title:
+          activeMarket === 'crypto'
+            ? 'Controllo Crypto completato. Posizioni aggiornate.'
+            : 'Elaborazione EOD completata. Posizioni aggiornate.',
       })
     } catch (error) {
       toast({
-        title: error.message || 'Errore durante il Motore EOD',
+        title:
+          error.message ||
+          (activeMarket === 'crypto'
+            ? 'Errore durante il Controllo Crypto'
+            : 'Errore durante il Motore EOD'),
         variant: 'destructive',
       })
     } finally {
@@ -151,7 +160,7 @@ export default function Portfolio() {
         title:
           openedTrades.length > 0
             ? `Slot riempito: ${openedTrades[0].ticker} aperto dal pilota`
-            : 'Slot libero: nessun nuovo titolo abbastanza forte',
+            : `Slot libero: nessun nuovo ${marketCopy.assetSingular} abbastanza forte`,
       })
     } catch (error) {
       recordScanError(error.message)
@@ -190,13 +199,14 @@ export default function Portfolio() {
       <header className="flex flex-col gap-5 rounded-lg border border-slate-800 bg-[#090b10] p-5 shadow-xl shadow-black/20 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">
-            Portafoglio virtuale
+            Portafoglio virtuale · {marketCopy.eyebrow}
           </p>
           <h1 className="mt-3 text-2xl font-semibold text-white sm:text-3xl">
             Posizioni Forward Testing: {marketLabel}
           </h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
-            Gestione degli slot operativi, target autotuning e motore EOD.
+            Gestione separata di capitale, posizioni, target e stop per{' '}
+            {marketLabel}.
           </p>
         </div>
 
@@ -209,7 +219,9 @@ export default function Portfolio() {
           ) : (
             <Play className="h-4 w-4" />
           )}
-          Esegui Motore EOD (Fine Giornata)
+          {activeMarket === 'crypto'
+            ? 'Esegui Controllo Crypto'
+            : 'Esegui Motore EOD (Fine Giornata)'}
         </Button>
       </header>
 
@@ -256,6 +268,7 @@ export default function Portfolio() {
               <CardHeader className="items-start justify-between gap-4 border-b border-slate-800">
                 <div>
                   <TickerInfo
+                    assetType={marketCopy.assetType}
                     compact
                     ticker={position.ticker}
                     profile={position.profile}
@@ -280,7 +293,11 @@ export default function Portfolio() {
                   value={currencyFormatter.format(position.stopLoss)}
                 />
                 <Metric
-                  label="Ultimo Prezzo EOD"
+                  label={
+                    activeMarket === 'crypto'
+                      ? 'Ultimo Prezzo Kraken'
+                      : 'Ultimo Prezzo EOD'
+                  }
                   value={
                     Number.isFinite(Number(position.latestPrice))
                       ? currencyFormatter.format(position.latestPrice)
@@ -304,7 +321,7 @@ export default function Portfolio() {
                   {closingId === position.id ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : null}
-                  Vendi ora e cerca nuovo titolo
+                  Chiudi ora e cerca nuovo {marketCopy.assetSingular}
                 </Button>
               </CardContent>
             </Card>
@@ -320,8 +337,8 @@ export default function Portfolio() {
               Nessuna posizione attiva
             </h2>
             <p className="mt-3 max-w-md text-sm leading-6 text-slate-500">
-              Apri una posizione dallo Scanner di Mercato per avviare il forward
-              testing.
+              Apri una posizione dallo Scanner di Mercato {marketLabel} per
+              avviare il forward testing separato.
             </p>
           </div>
         </section>

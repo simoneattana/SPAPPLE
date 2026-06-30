@@ -10,6 +10,7 @@ import {
   TableRow,
 } from '../components/ui/Table'
 import { useTrading } from '../context/useTrading'
+import { getMarketCopy } from '../services/marketCopy'
 
 const currencyFormatter = new Intl.NumberFormat('it-IT', {
   style: 'currency',
@@ -34,19 +35,21 @@ function resultTextColor(result) {
 }
 
 export default function Diary() {
-  const { history, vault } = useTrading()
+  const { activeMarket, history, marketLabel, vault } = useTrading()
+  const marketCopy = getMarketCopy(activeMarket)
 
   return (
     <div className="flex flex-1 flex-col gap-7">
       <header className="rounded-lg border border-slate-800 bg-[#090b10] p-5 shadow-xl shadow-black/20">
         <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">
-          Diario trading
+          Diario trading · {marketCopy.eyebrow}
         </p>
         <h1 className="mt-3 text-2xl font-semibold text-white sm:text-3xl">
-          Storico Operazioni
+          Storico Operazioni: {marketLabel}
         </h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
-          Archivio delle posizioni chiuse dal motore EOD con risultato e P/L.
+          Archivio separato delle posizioni chiuse sul mercato {marketLabel},
+          con risultato e P/L.
         </p>
       </header>
 
@@ -126,8 +129,8 @@ export default function Diary() {
                   Nessuna operazione chiusa
                 </p>
                 <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
-                  Il diario si popolerà quando il motore EOD chiuderà una
-                  posizione su take profit o stop loss.
+                  Il diario si popolerà quando il sistema chiuderà una
+                  posizione su take profit o stop loss nel mercato attivo.
                 </p>
               </div>
             </div>

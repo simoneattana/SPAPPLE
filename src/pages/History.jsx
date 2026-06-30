@@ -13,18 +13,24 @@ import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card'
 import { useTrading } from '../context/useTrading'
+import { getMarketCopy } from '../services/marketCopy'
 
-const filterOptions = [
-  { value: 'all', label: 'Tutte' },
-  { value: 'scan', label: 'Scansioni' },
-  { value: 'trade', label: 'Ordini' },
-  { value: 'monitor', label: 'Monitor live' },
-  { value: 'backend-monitor', label: 'Monitor backend' },
-  { value: 'eod', label: 'Motore EOD' },
-  { value: 'automation', label: 'Automazioni' },
-  { value: 'closed-trade', label: 'Trade chiusi' },
-  { value: 'error', label: 'Errori' },
-]
+function getFilterOptions(activeMarket) {
+  return [
+    { value: 'all', label: 'Tutte' },
+    { value: 'scan', label: 'Scansioni' },
+    { value: 'trade', label: 'Ordini' },
+    { value: 'monitor', label: 'Monitor live' },
+    { value: 'backend-monitor', label: 'Monitor backend' },
+    {
+      value: 'eod',
+      label: activeMarket === 'crypto' ? 'Controllo mercato' : 'Motore EOD',
+    },
+    { value: 'automation', label: 'Automazioni' },
+    { value: 'closed-trade', label: 'Trade chiusi' },
+    { value: 'error', label: 'Errori' },
+  ]
+}
 
 const dateTimeFormatter = new Intl.DateTimeFormat('it-IT', {
   dateStyle: 'medium',
@@ -51,12 +57,12 @@ function monthKey(value) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
 }
 
-function eventLabel(type) {
+function eventLabel(type, activeMarket = 'equities') {
   const labels = {
     automation: 'Automazione',
     'backend-monitor': 'Monitor backend',
     'closed-trade': 'Trade chiuso',
-    eod: 'Motore EOD',
+    eod: activeMarket === 'crypto' ? 'Controllo mercato' : 'Motore EOD',
     monitor: 'Monitor live',
     scan: 'Scansione',
     system: 'Sistema',
@@ -155,7 +161,7 @@ function groupByMonth(records) {
   }, {})
 }
 
-function HistoryItem({ record }) {
+function HistoryItem({ record, activeMarket }) {
   const Icon = eventIcon(record.type, record.status)
   const color = eventColor(record)
 
@@ -175,7 +181,9 @@ function HistoryItem({ record }) {
                 {record.detail}
               </p>
             </div>
-            <Badge variant={eventVariant(record)}>{eventLabel(record.type)}</Badge>
+            <Badge variant={eventVariant(record)}>
+              {eventLabel(record.type, activeMarket)}
+            </Badge>
           </div>
           <p className="mt-3 text-xs uppercase tracking-[0.14em] text-slate-600">
             {dateTimeFormatter.format(normalizeDate(record.createdAt))}
@@ -187,8 +195,10 @@ function HistoryItem({ record }) {
 }
 
 export default function History() {
-  const { events = [], history = [] } = useTrading()
+  const { activeMarket, events = [], history = [], marketLabel } = useTrading()
   const [activeFilter, setActiveFilter] = useState('all')
+  const marketCopy = getMarketCopy(activeMarket)
+  const filterOptions = getFilterOptions(activeMarket)
 
   const records = useMemo(() => {
     const eventRecords = events.map((event) => ({
@@ -222,14 +232,14 @@ export default function History() {
         <div className="flex flex-wrap items-start justify-between gap-5">
           <div>
             <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">
-              Registro operativo
+              Registro operativo · {marketCopy.eyebrow}
             </p>
             <h1 className="mt-3 text-2xl font-semibold text-white sm:text-3xl">
-              Storico
+              Storico: {marketLabel}
             </h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
-              Archivio delle attività del sistema, organizzato per mese e
-              filtrabile per tipologia di azione.
+              Archivio separato delle attività del mercato {marketLabel},
+              organizzato per mese e filtrabile per tipologia di azione.
             </p>
           </div>
           <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-[#deff9a]/30 bg-[#deff9a]/10">
@@ -243,8 +253,8 @@ export default function History() {
           <div>
             <CardTitle>Filtra attività</CardTitle>
             <p className="mt-2 text-sm leading-6 text-slate-500">
-              Usa i filtri per isolare ordini, scansioni, automazioni, EOD o
-              problemi rilevati.
+              Usa i filtri per isolare ordini, scansioni, automazioni,
+              controlli o problemi rilevati.
             </p>
           </div>
           <Badge>{filteredRecords.length} eventi</Badge>
@@ -286,7 +296,11 @@ export default function History() {
                 </div>
                 <ol className="space-y-3 p-5">
                   {monthlyGroups[key].map((record) => (
-                    <HistoryItem key={record.id} record={record} />
+                    <HistoryItem
+                      key={record.id}
+                      activeMarket={activeMarket}
+                      record={record}
+                    />
                   ))}
                 </ol>
               </section>

@@ -6,6 +6,7 @@ import {
   calculatePositionSize,
   canOpenPosition,
 } from '../services/positionSizing'
+import { getMarketCopy } from '../services/marketCopy'
 import {
   loadRemoteTradingState,
   saveRemoteTradingState,
@@ -529,7 +530,7 @@ export function TradingProvider({ children }) {
           title: enabled ? 'Monitor live attivato' : 'Monitor live disattivato',
           detail: enabled
             ? 'Controllerò automaticamente le posizioni aperte ogni 60 secondi mentre l’app resta aperta.'
-            : 'Le posizioni saranno controllate solo dal Motore EOD manuale.',
+            : 'Le posizioni saranno controllate solo dal controllo manuale nel Portafoglio.',
         }),
       ),
     }))
@@ -561,61 +562,75 @@ export function TradingProvider({ children }) {
   }, [updateTradingState])
 
   const recordScanStart = useCallback((tickerCount) => {
-    updateTradingState((current) => ({
-      ...current,
-      engineStatus: 'Scansione mercato in corso',
-      ...appendLogs(
-        current,
-        createActivity({
-          type: 'scan',
-          status: 'working',
-          title: 'Scansione EOD avviata',
-          detail: `Sto leggendo dati reali per ${tickerCount} ticker.`,
-        }),
-      ),
-    }))
+    updateTradingState((current) => {
+      const marketCopy = getMarketCopy(current.activeMarket)
+
+      return {
+        ...current,
+        engineStatus: 'Scansione mercato in corso',
+        ...appendLogs(
+          current,
+          createActivity({
+            type: 'scan',
+            status: 'working',
+            title: `Scansione ${marketCopy.label} avviata`,
+            detail: `Sto leggendo dati reali per ${tickerCount} ${marketCopy.assetPlural}.`,
+          }),
+        ),
+      }
+    })
   }, [updateTradingState])
 
   const recordScanComplete = useCallback(({ scannedCount, signalCount, results }) => {
-    updateTradingState((current) => ({
-      ...current,
-      lastScanAt: new Date().toISOString(),
-      lastScanCount: scannedCount,
-      lastSignalCount: signalCount,
-      lastScanResults: Array.isArray(results) ? results : current.lastScanResults,
-      engineStatus:
-        signalCount > 0
-          ? 'Segnali disponibili'
-          : 'Nessun segnale operativo',
-      ...appendLogs(
-        current,
-        createActivity({
-          type: 'scan',
-          status: signalCount > 0 ? 'attention' : 'done',
-          title: 'Scansione completata',
-          detail:
-            signalCount > 0
-              ? `${signalCount} segnali validi trovati su ${scannedCount} ticker.`
-              : `${scannedCount} ticker controllati. Nessun titolo rispetta le regole operative.`,
-        }),
-      ),
-    }))
+    updateTradingState((current) => {
+      const marketCopy = getMarketCopy(current.activeMarket)
+
+      return {
+        ...current,
+        lastScanAt: new Date().toISOString(),
+        lastScanCount: scannedCount,
+        lastSignalCount: signalCount,
+        lastScanResults: Array.isArray(results) ? results : current.lastScanResults,
+        engineStatus:
+          signalCount > 0
+            ? 'Segnali disponibili'
+            : 'Nessun segnale operativo',
+        ...appendLogs(
+          current,
+          createActivity({
+            type: 'scan',
+            status: signalCount > 0 ? 'attention' : 'done',
+            title: `Scansione ${marketCopy.label} completata`,
+            detail:
+              signalCount > 0
+                ? `${signalCount} segnali validi trovati su ${scannedCount} ${marketCopy.assetPlural}.`
+                : `${scannedCount} ${marketCopy.assetPlural} controllati. Nessun asset rispetta le regole operative.`,
+          }),
+        ),
+      }
+    })
   }, [updateTradingState])
 
   const recordScanError = useCallback((message) => {
-    updateTradingState((current) => ({
-      ...current,
-      engineStatus: 'Errore dati mercato',
-      ...appendLogs(
-        current,
-        createActivity({
-          type: 'scan',
-          status: 'error',
-          title: 'Scansione non riuscita',
-          detail: message || 'Yahoo Finance non ha restituito dati utilizzabili.',
-        }),
-      ),
-    }))
+    updateTradingState((current) => {
+      const marketCopy = getMarketCopy(current.activeMarket)
+
+      return {
+        ...current,
+        engineStatus: 'Errore dati mercato',
+        ...appendLogs(
+          current,
+          createActivity({
+            type: 'scan',
+            status: 'error',
+            title: `Scansione ${marketCopy.label} non riuscita`,
+            detail:
+              message ||
+              `${marketCopy.provider} non ha restituito dati utilizzabili.`,
+          }),
+        ),
+      }
+    })
   }, [updateTradingState])
 
   const executeTrade = useCallback((ticker, price, atr, type, profile = null) => {
@@ -844,7 +859,7 @@ export function TradingProvider({ children }) {
             title: 'Chiusura manuale eseguita',
             detail: `${position.ticker}: P/L realizzato ${roundedPnl.toFixed(
               2,
-            )}€. Avvio ricerca di un nuovo titolo appetibile.`,
+            )}€. Avvio ricerca di un nuovo asset appetibile nel mercato attivo.`,
           }),
         ),
       }
@@ -950,12 +965,15 @@ export function TradingProvider({ children }) {
 
   const runEOD = useCallback(async () => {
     const snapshot = stateRef.current
+    const marketCopy = getMarketCopy(snapshot.activeMarket)
+    const engineName =
+      snapshot.activeMarket === 'crypto' ? 'Controllo Crypto' : 'Motore EOD'
 
     if (snapshot.positions.length === 0) {
       recordActivity({
         type: 'eod',
         status: 'waiting',
-        title: 'Motore EOD non eseguito',
+        title: `${engineName} non eseguito`,
         detail: 'Non ci sono posizioni aperte da controllare.',
       })
       return
@@ -963,14 +981,14 @@ export function TradingProvider({ children }) {
 
     updateTradingState((current) => ({
       ...current,
-      engineStatus: 'Motore EOD in esecuzione',
+      engineStatus: `${engineName} in esecuzione`,
       ...appendLogs(
         current,
         createActivity({
           type: 'eod',
           status: 'working',
-          title: 'Motore EOD avviato',
-          detail: `Sto aggiornando i prezzi di ${current.positions.length} posizioni aperte.`,
+          title: `${engineName} avviato`,
+          detail: `Sto aggiornando i prezzi ${marketCopy.provider} di ${current.positions.length} posizioni aperte.`,
         }),
       ),
     }))
@@ -982,13 +1000,13 @@ export function TradingProvider({ children }) {
     } catch (error) {
       updateTradingState((current) => ({
         ...current,
-        engineStatus: 'Errore Motore EOD',
+        engineStatus: `Errore ${engineName}`,
         ...appendLogs(
           current,
           createActivity({
             type: 'eod',
             status: 'error',
-            title: 'Motore EOD interrotto',
+            title: `${engineName} interrotto`,
             detail: error.message || 'Prezzi aggiornati non disponibili.',
           }),
         ),
@@ -1025,7 +1043,7 @@ export function TradingProvider({ children }) {
           createActivity({
             type: 'eod',
             status: closedTrades.length > 0 ? 'attention' : 'done',
-            title: 'Motore EOD completato',
+            title: `${engineName} completato`,
             detail:
               closedTrades.length > 0
                 ? `${closedTrades.length} posizioni chiuse, ${activePositions.length} ancora aperte.`
