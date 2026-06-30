@@ -25,7 +25,12 @@ Variabili richieste in locale e su Vercel:
 SUPABASE_URL=https://PROJECT_REF.supabase.co
 SUPABASE_SERVER_KEY=...
 SPAPPLE_APP_PASSWORD=alpha
+CRON_SECRET=...
 ```
+
+Il monitor automatico backend e configurato in `vercel.json` su
+`/api/cron/monitor` ogni 5 minuti. L'endpoint accetta solo richieste con header
+`Authorization: Bearer CRON_SECRET`.
 
 La tabella richiesta è definita nella migrazione:
 

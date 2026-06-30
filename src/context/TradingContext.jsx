@@ -37,7 +37,9 @@ const initialState = {
   lastScanResults: [],
   engineStatus: 'In attesa',
   liveMonitorEnabled: true,
+  backendMonitorEnabled: true,
   lastLiveCheckAt: null,
+  lastBackendCheckAt: null,
   nextLiveCheckAt: null,
 }
 
@@ -108,7 +110,13 @@ function normalizeStoredState(parsedState) {
       typeof parsedState.liveMonitorEnabled === 'boolean'
         ? parsedState.liveMonitorEnabled
         : initialState.liveMonitorEnabled,
+    backendMonitorEnabled:
+      typeof parsedState.backendMonitorEnabled === 'boolean'
+        ? parsedState.backendMonitorEnabled
+        : initialState.backendMonitorEnabled,
     lastLiveCheckAt: parsedState.lastLiveCheckAt || initialState.lastLiveCheckAt,
+    lastBackendCheckAt:
+      parsedState.lastBackendCheckAt || initialState.lastBackendCheckAt,
     nextLiveCheckAt: parsedState.nextLiveCheckAt || initialState.nextLiveCheckAt,
   }
 }

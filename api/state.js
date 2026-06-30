@@ -1,29 +1,9 @@
-import { createClient } from '@supabase/supabase-js'
-
-const STATE_ID = 'default'
-
-function sendJson(response, status, payload) {
-  response.statusCode = status
-  response.setHeader('content-type', 'application/json; charset=utf-8')
-  response.end(JSON.stringify(payload))
-}
-
-function getSupabaseClient() {
-  const supabaseUrl = process.env.SUPABASE_URL
-  const supabaseServerKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVER_KEY
-
-  if (!supabaseUrl || !supabaseServerKey) {
-    return null
-  }
-
-  return createClient(supabaseUrl, supabaseServerKey, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-    },
-  })
-}
+import {
+  getSupabaseClient,
+  readTradingState,
+  sendJson,
+  writeTradingState,
+} from './_tradingEngine.js'
 
 function isAuthorized(request) {
   const expectedPassword = process.env.SPAPPLE_APP_PASSWORD || 'alpha'
@@ -71,21 +51,17 @@ export default async function handler(request, response) {
   }
 
   if (request.method === 'GET') {
-    const { data, error } = await supabase
-      .from('spapple_state')
-      .select('payload, updated_at')
-      .eq('id', STATE_ID)
-      .maybeSingle()
+    try {
+      const { payload, updatedAt } = await readTradingState(supabase)
 
-    if (error) {
+      sendJson(response, 200, {
+        payload,
+        updatedAt,
+      })
+    } catch (error) {
       sendJson(response, 500, { error: error.message })
-      return
     }
 
-    sendJson(response, 200, {
-      payload: data?.payload || null,
-      updatedAt: data?.updated_at || null,
-    })
     return
   }
 
@@ -104,13 +80,9 @@ export default async function handler(request, response) {
       return
     }
 
-    const { error } = await supabase.from('spapple_state').upsert({
-      id: STATE_ID,
-      payload: body.payload,
-      updated_at: new Date().toISOString(),
-    })
-
-    if (error) {
+    try {
+      await writeTradingState(supabase, body.payload)
+    } catch (error) {
       sendJson(response, 500, { error: error.message })
       return
     }

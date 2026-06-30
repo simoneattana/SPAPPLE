@@ -19,6 +19,7 @@ const filterOptions = [
   { value: 'scan', label: 'Scansioni' },
   { value: 'trade', label: 'Ordini' },
   { value: 'monitor', label: 'Monitor live' },
+  { value: 'backend-monitor', label: 'Monitor backend' },
   { value: 'eod', label: 'Motore EOD' },
   { value: 'automation', label: 'Automazioni' },
   { value: 'closed-trade', label: 'Trade chiusi' },
@@ -53,6 +54,7 @@ function monthKey(value) {
 function eventLabel(type) {
   const labels = {
     automation: 'Automazione',
+    'backend-monitor': 'Monitor backend',
     'closed-trade': 'Trade chiuso',
     eod: 'Motore EOD',
     monitor: 'Monitor live',
@@ -71,6 +73,7 @@ function eventIcon(type, status) {
 
   const icons = {
     automation: Bot,
+    'backend-monitor': Bot,
     'closed-trade': Repeat2,
     eod: Clock3,
     monitor: Radio,

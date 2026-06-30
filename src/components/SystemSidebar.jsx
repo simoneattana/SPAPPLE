@@ -165,15 +165,22 @@ function getNextAction({ automationEnabled, positions, lastScanAt, lastSignalCou
 
 function buildAssistantMessages({
   automationEnabled,
+  backendMonitorEnabled,
   liveMonitorEnabled,
   nextLiveCheckAt,
   positions,
 }) {
-  if (positions.length > 0 && automationEnabled && liveMonitorEnabled) {
+  if (
+    positions.length > 0 &&
+    automationEnabled &&
+    liveMonitorEnabled &&
+    backendMonitorEnabled
+  ) {
     return [
-      'Sono in modalità pilota automatico: controllo le posizioni aperte senza aspettare il tuo intervento.',
-      `Prossimo controllo prezzo: ${formatCountdown(nextLiveCheckAt)}.`,
-      'Se un titolo raggiunge take profit o stop loss, registro l’uscita e aggiorno capitale, salvadanaio e storico.',
+      'Sono in pilota automatico completo: il browser controlla ogni 60 secondi quando l’app è aperta.',
+      'Anche se chiudi l’app, il monitor backend su Vercel continua a controllare Supabase e i prezzi.',
+      `Prossimo controllo live locale: ${formatCountdown(nextLiveCheckAt)}.`,
+      'Se un titolo raggiunge take profit o stop loss, chiudo la posizione e aggiorno capitale, salvadanaio e storico.',
     ]
   }
 
@@ -189,7 +196,7 @@ function buildAssistantMessages({
     return [
       'Sono pronto a lavorare in automatico.',
       'Alla prossima scansione valuterò i segnali e aprirò solo quelli che rispettano le regole.',
-      'Dopo l’apertura inizierò il monitor live ogni 60 secondi.',
+      'Dopo l’apertura partiranno monitor live e monitor backend.',
     ]
   }
 
@@ -231,7 +238,9 @@ export function SystemSidebar() {
     lastScanAt,
     lastScanCount,
     lastSignalCount,
+    lastBackendCheckAt,
     lastLiveCheckAt,
+    backendMonitorEnabled,
     liveMonitorEnabled,
     maxPositions,
     nextLiveCheckAt,
@@ -269,11 +278,18 @@ export function SystemSidebar() {
     () =>
       buildAssistantMessages({
         automationEnabled,
+        backendMonitorEnabled,
         liveMonitorEnabled,
         nextLiveCheckAt,
         positions,
       }),
-    [automationEnabled, liveMonitorEnabled, nextLiveCheckAt, positions],
+    [
+      automationEnabled,
+      backendMonitorEnabled,
+      liveMonitorEnabled,
+      nextLiveCheckAt,
+      positions,
+    ],
   )
 
   return (
@@ -378,6 +394,14 @@ export function SystemSidebar() {
                 {formatActivityDate(lastLiveCheckAt)}
               </p>
             </div>
+          </div>
+          <div className="mt-2 rounded-lg border border-slate-800 bg-[#090b10] p-2 text-xs">
+            <p className="uppercase tracking-[0.12em] text-slate-600">
+              Ultimo controllo backend
+            </p>
+            <p className="mt-1 font-semibold text-slate-300">
+              {formatActivityDate(lastBackendCheckAt)}
+            </p>
           </div>
           <Button
             className="mt-3 w-full"
