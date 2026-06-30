@@ -5,7 +5,7 @@ import { TradingContext } from './tradingState'
 const SLOT_SIZE = 2000
 const MAX_POSITIONS = 5
 const STORAGE_KEY = 'spapple_state'
-const STORAGE_VERSION = 3
+const STORAGE_VERSION = 4
 
 const initialState = {
   version: STORAGE_VERSION,
@@ -19,11 +19,11 @@ const initialState = {
       type: 'system',
       status: 'done',
       title: 'Sistema azzerato',
-      detail: 'Nuova simulazione avviata con capitale operativo iniziale di 30.000€.',
+      detail: 'Nuova simulazione avviata con capitale operativo iniziale di 30.000€ e pilota automatico attivo.',
       createdAt: new Date().toISOString(),
     },
   ],
-  automationEnabled: false,
+  automationEnabled: true,
   lastScanAt: null,
   lastScanCount: 0,
   lastSignalCount: 0,
