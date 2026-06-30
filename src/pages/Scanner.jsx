@@ -51,6 +51,21 @@ const numberFormatter = new Intl.NumberFormat('it-IT', {
   maximumFractionDigits: 2,
 })
 
+const SCAN_TIMEOUT_MS = 20000
+
+function withTimeout(promise, message) {
+  let timeoutId
+  const timeout = new Promise((_, reject) => {
+    timeoutId = window.setTimeout(() => {
+      reject(new Error(message))
+    }, SCAN_TIMEOUT_MS)
+  })
+
+  return Promise.race([promise, timeout]).finally(() => {
+    window.clearTimeout(timeoutId)
+  })
+}
+
 function formatCurrency(value) {
   return value !== null && value !== undefined && Number.isFinite(Number(value))
     ? currencyFormatter.format(value)
@@ -468,7 +483,10 @@ export default function Scanner({ marketId }) {
     recordScanStart(scannerConfig.universe.length, effectiveMarket)
 
     try {
-      const marketData = await scannerConfig.fetcher(scannerConfig.universe)
+      const marketData = await withTimeout(
+        scannerConfig.fetcher(scannerConfig.universe),
+        `Tempo massimo superato: ${scannerConfig.provider} non ha completato la scansione`,
+      )
       const actionableRows = marketData.filter(scannerConfig.isActionable)
       const automaticRows = scannerConfig.sortByScore(
         marketData.filter(scannerConfig.isAutoEligible),
