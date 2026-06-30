@@ -1,0 +1,24 @@
+name: Spapple Monitor Backend
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: spapple-monitor-backend
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Esegui monitor automatico
+        run: |
+          curl --fail --show-error --silent \
+            --request POST \
+            --header "Authorization: Bearer $SPAPPLE_CRON_SECRET" \
+            https://spapple.vercel.app/api/cron/monitor
+        env:
+          SPAPPLE_CRON_SECRET: ${{ secrets.SPAPPLE_CRON_SECRET }}

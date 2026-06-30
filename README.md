@@ -28,9 +28,10 @@ SPAPPLE_APP_PASSWORD=alpha
 CRON_SECRET=...
 ```
 
-Il monitor automatico backend e configurato in `vercel.json` su
-`/api/cron/monitor` ogni 5 minuti. L'endpoint accetta solo richieste con header
-`Authorization: Bearer CRON_SECRET`.
+Il monitor automatico backend vive su Vercel in `/api/cron/monitor`.
+Lo scheduler e gestito da GitHub Actions con il workflow
+`.github/workflows/spapple-monitor.yml`, ogni 5 minuti. L'endpoint accetta solo
+richieste con header `Authorization: Bearer CRON_SECRET`.
 
 La tabella richiesta è definita nella migrazione:
 
