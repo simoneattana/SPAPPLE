@@ -6,10 +6,27 @@ const MIN_HISTORY_LENGTH = 30
 const RSI_PERIOD = 14
 const ATR_PERIOD = 14
 const REQUEST_CONCURRENCY = 6
+const REQUEST_TIMEOUT_MS = 12000
 
 async function fetchJson(url, label) {
-  const response = await fetch(url)
-  const text = await response.text()
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+
+  let response
+  let text
+
+  try {
+    response = await fetch(url, { signal: controller.signal })
+    text = await response.text()
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error(`${label}: richiesta scaduta`)
+    }
+
+    throw error
+  } finally {
+    window.clearTimeout(timeoutId)
+  }
 
   if (!response.ok) {
     throw new Error(text || `${label}: richiesta fallita`)

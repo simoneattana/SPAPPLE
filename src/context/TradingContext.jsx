@@ -203,6 +203,21 @@ function syncActiveMarketState(state) {
   }
 }
 
+function activateMarketState(state, marketId, marketState) {
+  const syncedState = syncActiveMarketState(state)
+  const normalizedMarketState = normalizeMarketState(marketId, marketState)
+
+  return syncActiveMarketState({
+    ...syncedState,
+    activeMarket: marketId,
+    markets: {
+      ...(syncedState.markets || {}),
+      [marketId]: normalizedMarketState,
+    },
+    ...normalizedMarketState,
+  })
+}
+
 function roundPrice(value) {
   return Number(value.toFixed(4))
 }
@@ -563,15 +578,20 @@ export function TradingProvider({ children }) {
     })
   }, [updateTradingState])
 
-  const recordScanStart = useCallback((tickerCount) => {
+  const recordScanStart = useCallback((tickerCount, targetMarketId = null) => {
     updateTradingState((current) => {
-      const marketCopy = getMarketCopy(current.activeMarket)
-
-      return {
-        ...current,
+      const marketId = targetMarketId || current.activeMarket
+      const marketCopy = getMarketCopy(marketId)
+      const syncedCurrent = syncActiveMarketState(current)
+      const marketState = normalizeMarketState(
+        marketId,
+        syncedCurrent.markets?.[marketId],
+      )
+      const nextMarketState = {
+        ...marketState,
         engineStatus: 'Scansione mercato in corso',
         ...appendLogs(
-          current,
+          marketState,
           createActivity({
             type: 'scan',
             status: 'working',
@@ -580,25 +600,34 @@ export function TradingProvider({ children }) {
           }),
         ),
       }
+
+      return activateMarketState(syncedCurrent, marketId, nextMarketState)
     })
   }, [updateTradingState])
 
-  const recordScanComplete = useCallback(({ scannedCount, signalCount, results }) => {
+  const recordScanComplete = useCallback(({ scannedCount, signalCount, results }, targetMarketId = null) => {
     updateTradingState((current) => {
-      const marketCopy = getMarketCopy(current.activeMarket)
-
-      return {
-        ...current,
+      const marketId = targetMarketId || current.activeMarket
+      const marketCopy = getMarketCopy(marketId)
+      const syncedCurrent = syncActiveMarketState(current)
+      const marketState = normalizeMarketState(
+        marketId,
+        syncedCurrent.markets?.[marketId],
+      )
+      const nextMarketState = {
+        ...marketState,
         lastScanAt: new Date().toISOString(),
         lastScanCount: scannedCount,
         lastSignalCount: signalCount,
-        lastScanResults: Array.isArray(results) ? results : current.lastScanResults,
+        lastScanResults: Array.isArray(results)
+          ? results
+          : marketState.lastScanResults,
         engineStatus:
           signalCount > 0
             ? 'Segnali disponibili'
             : 'Nessun segnale operativo',
         ...appendLogs(
-          current,
+          marketState,
           createActivity({
             type: 'scan',
             status: signalCount > 0 ? 'attention' : 'done',
@@ -610,18 +639,25 @@ export function TradingProvider({ children }) {
           }),
         ),
       }
+
+      return activateMarketState(syncedCurrent, marketId, nextMarketState)
     })
   }, [updateTradingState])
 
-  const recordScanError = useCallback((message) => {
+  const recordScanError = useCallback((message, targetMarketId = null) => {
     updateTradingState((current) => {
-      const marketCopy = getMarketCopy(current.activeMarket)
-
-      return {
-        ...current,
+      const marketId = targetMarketId || current.activeMarket
+      const marketCopy = getMarketCopy(marketId)
+      const syncedCurrent = syncActiveMarketState(current)
+      const marketState = normalizeMarketState(
+        marketId,
+        syncedCurrent.markets?.[marketId],
+      )
+      const nextMarketState = {
+        ...marketState,
         engineStatus: 'Errore dati mercato',
         ...appendLogs(
-          current,
+          marketState,
           createActivity({
             type: 'scan',
             status: 'error',
@@ -632,6 +668,8 @@ export function TradingProvider({ children }) {
           }),
         ),
       }
+
+      return activateMarketState(syncedCurrent, marketId, nextMarketState)
     })
   }, [updateTradingState])
 
@@ -694,17 +732,19 @@ export function TradingProvider({ children }) {
     return trade
   }, [])
 
-  const executeAutomatedTrades = useCallback((rows) => {
-    const current = stateRef.current
-    const strategy = getTradingStrategy(current.activeMarket)
+  const executeAutomatedTrades = useCallback((rows, targetMarketId = null) => {
+    const current = syncActiveMarketState(stateRef.current)
+    const marketId = targetMarketId || current.activeMarket
+    const strategy = getTradingStrategy(marketId)
+    const marketState = normalizeMarketState(marketId, current.markets?.[marketId])
     const sizing = strategy.positionSizing
     const maxPositions = getStrategyMaxPositions(strategy)
-    let capital = current.capital
-    const positions = [...current.positions]
+    let capital = marketState.capital
+    const positions = [...marketState.positions]
     const openedTrades = []
     const skippedTickers = []
-    let activityLog = current.activityLog || []
-    let events = current.events || []
+    let activityLog = marketState.activityLog || []
+    let events = marketState.events || []
 
     const appendLocalLog = (activity) => {
       activityLog = appendActivity({ activityLog }, activity)
@@ -768,15 +808,18 @@ export function TradingProvider({ children }) {
       }),
     )
 
-    const nextState = syncActiveMarketState({
-      ...current,
+    const nextMarketState = {
+      ...marketState,
       capital,
       positions,
       engineStatus:
-        openedTrades.length > 0 ? 'Pilota automatico eseguito' : current.engineStatus,
+        openedTrades.length > 0
+          ? 'Pilota automatico eseguito'
+          : marketState.engineStatus,
       activityLog,
       events,
-    })
+    }
+    const nextState = activateMarketState(current, marketId, nextMarketState)
 
     stateRef.current = nextState
     setState(nextState)

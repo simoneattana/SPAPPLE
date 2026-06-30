@@ -326,7 +326,6 @@ export default function Scanner({ marketId }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [closingId, setClosingId] = useState(null)
-  const [pendingManualScan, setPendingManualScan] = useState(false)
   const autoScanStarted = useRef(false)
   const { toast } = useToast()
   const {
@@ -345,7 +344,6 @@ export default function Scanner({ marketId }) {
     recordScanComplete,
     recordScanError,
     recordScanStart,
-    setActiveMarket,
   } = useTrading()
   const effectiveMarket = marketId || activeMarket
   const marketIsAligned = activeMarket === effectiveMarket
@@ -439,19 +437,9 @@ export default function Scanner({ marketId }) {
   }, [visibleLastScanAt])
 
   const handleScan = useCallback(async ({ automatic = false } = {}) => {
-    if (!marketIsAligned) {
-      if (!automatic) {
-        setPendingManualScan(true)
-        setActiveMarket(effectiveMarket)
-      }
-
-      return
-    }
-
-    setPendingManualScan(false)
     setLoading(true)
     setError('')
-    recordScanStart(scannerConfig.universe.length)
+    recordScanStart(scannerConfig.universe.length, effectiveMarket)
 
     try {
       const marketData = await scannerConfig.fetcher(scannerConfig.universe)
@@ -461,14 +449,20 @@ export default function Scanner({ marketId }) {
       )
 
       setResults(marketData)
-      recordScanComplete({
-        scannedCount: marketData.length,
-        signalCount: actionableRows.length,
-        results: marketData,
-      })
+      recordScanComplete(
+        {
+          scannedCount: marketData.length,
+          signalCount: actionableRows.length,
+          results: marketData,
+        },
+        effectiveMarket,
+      )
 
       if (automationEnabled && automaticRows.length > 0) {
-        const { openedTrades } = executeAutomatedTrades(automaticRows)
+        const { openedTrades } = executeAutomatedTrades(
+          automaticRows,
+          effectiveMarket,
+        )
 
         toast({
           title:
@@ -488,7 +482,7 @@ export default function Scanner({ marketId }) {
     } catch (apiError) {
       console.error(apiError)
       setError(apiError.message)
-      recordScanError(apiError.message)
+      recordScanError(apiError.message, effectiveMarket)
       toast({
         title: `Errore dati: Controlla la connessione o ${scannerConfig.errorLabel}`,
         variant: 'destructive',
@@ -504,18 +498,8 @@ export default function Scanner({ marketId }) {
     recordScanStart,
     scannerConfig,
     toast,
-    marketIsAligned,
     effectiveMarket,
-    setActiveMarket,
   ])
-
-  useEffect(() => {
-    if (!pendingManualScan || !marketIsAligned) {
-      return
-    }
-
-    handleScan()
-  }, [handleScan, marketIsAligned, pendingManualScan])
 
   useEffect(() => {
     const shouldAutoScan =
@@ -661,15 +645,13 @@ export default function Scanner({ marketId }) {
           </p>
         </div>
 
-        <Button onClick={() => handleScan()} disabled={loading || pendingManualScan}>
-          {loading || pendingManualScan ? (
+        <Button onClick={() => handleScan()} disabled={loading}>
+          {loading ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
             <Play className="h-4 w-4" />
           )}
-          {pendingManualScan
-            ? 'Sincronizzo mercato...'
-            : `Aggiorna Scansione ${scannerConfig.copy.scanMode}`}
+          Aggiorna Scansione {scannerConfig.copy.scanMode}
         </Button>
       </header>
 

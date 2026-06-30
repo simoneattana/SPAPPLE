@@ -11,8 +11,11 @@ export default async function handler(request, response) {
   krakenUrl.searchParams.set('pair', pair)
   krakenUrl.searchParams.set('interval', interval)
 
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 10000)
+
   try {
-    const krakenResponse = await fetch(krakenUrl)
+    const krakenResponse = await fetch(krakenUrl, { signal: controller.signal })
     const payload = await krakenResponse.json()
 
     if (!krakenResponse.ok || payload.error?.length) {
@@ -27,7 +30,12 @@ export default async function handler(request, response) {
     response.status(200).json(payload)
   } catch (error) {
     response.status(502).json({
-      error: error.message || 'Connessione Kraken non riuscita',
+      error:
+        error.name === 'AbortError'
+          ? 'Kraken non ha risposto entro il tempo massimo'
+          : error.message || 'Connessione Kraken non riuscita',
     })
+  } finally {
+    clearTimeout(timeoutId)
   }
 }
