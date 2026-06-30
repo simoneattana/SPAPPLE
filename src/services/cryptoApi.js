@@ -1,5 +1,8 @@
 import { ATR, RSI } from 'technicalindicators'
-import { CRYPTO_TICKERS } from './cryptoUniverse'
+import {
+  CRYPTO_TICKERS,
+  getCryptoMappingWarning,
+} from './cryptoUniverse'
 import {
   CRYPTO_LONG_RSI_LIMIT,
   CRYPTO_MIN_DAILY_VOLUME_EUR,
@@ -152,6 +155,10 @@ function getDiagnostic(row) {
     return row.reason || 'Dati non disponibili'
   }
 
+  if (row.mappingIssue) {
+    return row.mappingIssue
+  }
+
   if (Number(row.volumeEur) < CRYPTO_MIN_DAILY_VOLUME_EUR) {
     return 'Scartata: liquidità giornaliera troppo bassa'
   }
@@ -174,6 +181,7 @@ function getDiagnostic(row) {
 async function fetchCryptoDiagnostic(input, coingeckoMarkets) {
   const meta = getCryptoMeta(input)
   const ticker = meta?.ticker || String(input)
+  const mappingWarning = meta ? getCryptoMappingWarning(meta) : null
   const marketData = meta?.coingeckoId
     ? coingeckoMarkets.get(meta.coingeckoId)
     : null
@@ -196,6 +204,12 @@ async function fetchCryptoDiagnostic(input, coingeckoMarkets) {
       market: 'crypto',
       provider: marketData ? 'Kraken + CoinGecko' : 'Kraken',
       profile: enrichProfileWithMarketData(buildProfile(meta), marketData),
+      krakenPair: meta.krakenPair,
+      coingeckoId: meta.coingeckoId,
+      mappingWarning,
+      mappingIssue: marketData
+        ? null
+        : `${ticker}: CoinGecko non ha confermato l’id ${meta.coingeckoId}`,
       currentPrice: latestBar.close,
       pe: null,
       volume: latestBar.volume,
@@ -219,6 +233,12 @@ async function fetchCryptoDiagnostic(input, coingeckoMarkets) {
       market: 'crypto',
       provider: 'Kraken',
       profile: meta ? buildProfile(meta) : null,
+      krakenPair: meta?.krakenPair || null,
+      coingeckoId: meta?.coingeckoId || null,
+      mappingWarning,
+      mappingIssue: meta?.coingeckoId && !marketData
+        ? `${ticker}: CoinGecko non ha confermato l’id ${meta.coingeckoId}`
+        : null,
       currentPrice: null,
       pe: null,
       volume: null,

@@ -74,7 +74,7 @@ const cryptoAutomationRules = [
   },
   {
     title: 'Sizing più prudente',
-    text: 'Ogni nuova posizione crypto usa circa il 5% del capitale crypto, con massimo 3 posizioni. È più prudente perché il mercato è più volatile.',
+    text: 'Ogni nuova posizione crypto usa circa il 5% del capitale crypto, con massimo 5 posizioni. Gli slot aumentano la diversificazione, ma la dimensione resta prudente perché il mercato è più volatile.',
   },
   {
     title: 'Monitor 24/7',

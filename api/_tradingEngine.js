@@ -1,6 +1,9 @@
 import { createClient } from '@supabase/supabase-js'
 import { ATR, RSI } from 'technicalindicators'
-import { CRYPTO_TICKERS } from '../src/services/cryptoUniverse.js'
+import {
+  CRYPTO_TICKERS,
+  getCryptoMappingWarning,
+} from '../src/services/cryptoUniverse.js'
 import {
   CRYPTO_LONG_RSI_LIMIT,
   getCryptoSignalType,
@@ -682,6 +685,10 @@ function getCryptoDiagnostic(row) {
     return row.reason || 'Dati non disponibili'
   }
 
+  if (row.mappingIssue) {
+    return row.mappingIssue
+  }
+
   if (Number(row.volumeEur) < CRYPTO_MIN_DAILY_VOLUME_EUR) {
     return 'Scartata: liquidità giornaliera troppo bassa'
   }
@@ -703,6 +710,7 @@ function getCryptoDiagnostic(row) {
 
 async function fetchCryptoTickerDiagnostic(meta, coingeckoMarkets = new Map()) {
   const marketData = meta.coingeckoId ? coingeckoMarkets.get(meta.coingeckoId) : null
+  const mappingWarning = getCryptoMappingWarning(meta)
 
   try {
     const payload = await fetchKrakenOhlc(meta.krakenPair)
@@ -714,6 +722,12 @@ async function fetchCryptoTickerDiagnostic(meta, coingeckoMarkets = new Map()) {
       market: 'crypto',
       provider: marketData ? 'Kraken + CoinGecko' : 'Kraken',
       profile: enrichCryptoProfile(buildCryptoProfile(meta), marketData),
+      krakenPair: meta.krakenPair,
+      coingeckoId: meta.coingeckoId,
+      mappingWarning,
+      mappingIssue: marketData
+        ? null
+        : `${meta.ticker}: CoinGecko non ha confermato l’id ${meta.coingeckoId}`,
       currentPrice: latestBar.close,
       pe: null,
       volume: latestBar.volume,
@@ -737,6 +751,12 @@ async function fetchCryptoTickerDiagnostic(meta, coingeckoMarkets = new Map()) {
       market: 'crypto',
       provider: 'Kraken',
       profile: buildCryptoProfile(meta),
+      krakenPair: meta.krakenPair,
+      coingeckoId: meta.coingeckoId,
+      mappingWarning,
+      mappingIssue: meta.coingeckoId && !marketData
+        ? `${meta.ticker}: CoinGecko non ha confermato l’id ${meta.coingeckoId}`
+        : null,
       currentPrice: null,
       pe: null,
       volume: null,

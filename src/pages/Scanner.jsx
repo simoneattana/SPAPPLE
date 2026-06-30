@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { BookOpenText, Loader2, Play, SearchX } from 'lucide-react'
+import {
+  AlertTriangle,
+  BookOpenText,
+  Loader2,
+  Play,
+  SearchX,
+} from 'lucide-react'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card'
@@ -296,6 +302,16 @@ function TechnicalTooltip({ row }) {
             </div>
           </div>
         ) : null}
+        {isCrypto && (row.mappingWarning || row.mappingIssue) ? (
+          <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-400/10 p-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-200">
+              Mapping simboli
+            </p>
+            <p className="mt-1 text-xs leading-5 text-amber-100/80">
+              {row.mappingIssue || row.mappingWarning}
+            </p>
+          </div>
+        ) : null}
         <p className="mt-3 text-xs uppercase tracking-[0.14em] text-slate-500">
           Perché
         </p>
@@ -498,6 +514,18 @@ export default function Scanner({ marketId }) {
   const recentClosedTrades = useMemo(
     () => visibleHistory.slice(0, 5),
     [visibleHistory],
+  )
+  const cryptoMappingAlerts = useMemo(
+    () =>
+      effectiveMarket === 'crypto'
+        ? results.filter((row) => row.mappingWarning || row.mappingIssue)
+        : [],
+    [effectiveMarket, results],
+  )
+  const cryptoMappingIssues = useMemo(
+    () =>
+      cryptoMappingAlerts.filter((row) => row.mappingIssue),
+    [cryptoMappingAlerts],
   )
 
   useEffect(() => {
@@ -761,6 +789,31 @@ export default function Scanner({ marketId }) {
       {error ? (
         <div className="rounded-lg border border-[#ef8f8f]/35 bg-[#ef8f8f]/10 p-4 text-sm text-[#ef8f8f]">
           Errore dati: Controlla la connessione o {scannerConfig.errorLabel}
+        </div>
+      ) : null}
+
+      {effectiveMarket === 'crypto' && cryptoMappingAlerts.length > 0 ? (
+        <div className="rounded-lg border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-100">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-200" />
+            <div>
+              <p className="font-semibold">
+                Controllo mapping crypto: {cryptoMappingAlerts.length} simboli con
+                alias operativo
+              </p>
+              <p className="mt-1 leading-6 text-amber-100/75">
+                Alcuni asset hanno un codice visibile diverso dal codice usato da
+                Kraken. Spapple li segnala in diagnostica e blocca quelli non
+                confermati da CoinGecko.
+              </p>
+              {cryptoMappingIssues.length > 0 ? (
+                <p className="mt-2 text-[#ef8f8f]">
+                  {cryptoMappingIssues.length} asset esclusi per mapping
+                  CoinGecko non confermato.
+                </p>
+              ) : null}
+            </div>
+          </div>
         </div>
       ) : null}
 
@@ -1089,6 +1142,15 @@ export default function Scanner({ marketId }) {
                         row={row}
                         isActionable={scannerConfig.isActionable}
                       />
+                      {row.mappingWarning || row.mappingIssue ? (
+                        <div className="mt-2">
+                          <Badge
+                            variant={row.mappingIssue ? 'negative' : 'default'}
+                          >
+                            Mapping
+                          </Badge>
+                        </div>
+                      ) : null}
                     </TableCell>
                     <TableCell>
                       <TechnicalTooltip row={row} />
