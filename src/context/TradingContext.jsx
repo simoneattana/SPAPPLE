@@ -142,7 +142,7 @@ function loadInitialState() {
   }
 }
 
-function buildTrade(ticker, price, atr, type) {
+function buildTrade(ticker, price, atr, type, profile = null) {
   const atrPct = (atr / price) * 100
   const targetPct = atrPct < 1.5 ? 0.3 : 0.5
   const long = type === 'LONG'
@@ -150,6 +150,7 @@ function buildTrade(ticker, price, atr, type) {
   return {
     id: `${ticker}-${type}-${Date.now()}`,
     ticker,
+    profile,
     type,
     entryPrice: roundPrice(price),
     atrAtEntry: roundPrice(atr),
@@ -426,7 +427,7 @@ export function TradingProvider({ children }) {
     }))
   }, [updateTradingState])
 
-  const executeTrade = useCallback((ticker, price, atr, type) => {
+  const executeTrade = useCallback((ticker, price, atr, type, profile = null) => {
     const current = stateRef.current
 
     if (!['LONG', 'SHORT'].includes(type)) {
@@ -445,7 +446,7 @@ export function TradingProvider({ children }) {
       throw new Error(`${ticker} è già presente in portafoglio`)
     }
 
-    const trade = buildTrade(ticker, price, atr, type)
+    const trade = buildTrade(ticker, price, atr, type, profile)
     const nextState = {
       ...current,
       capital: current.capital - SLOT_SIZE,
@@ -500,7 +501,13 @@ export function TradingProvider({ children }) {
         return
       }
 
-      const trade = buildTrade(row.ticker, row.currentPrice, row.atr, type)
+      const trade = buildTrade(
+        row.ticker,
+        row.currentPrice,
+        row.atr,
+        type,
+        row.profile || null,
+      )
       positions.push(trade)
       capital -= SLOT_SIZE
       openedTrades.push(trade)

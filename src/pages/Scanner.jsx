@@ -4,6 +4,7 @@ import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card'
 import { Skeleton } from '../components/ui/Skeleton'
+import { TickerInfo } from '../components/TickerInfo'
 import {
   Table,
   TableBody,
@@ -398,7 +399,13 @@ export default function Scanner() {
     const type = row.rsi < 30 ? 'LONG' : 'SHORT'
 
     try {
-      const trade = executeTrade(row.ticker, row.currentPrice, row.atr, type)
+      const trade = executeTrade(
+        row.ticker,
+        row.currentPrice,
+        row.atr,
+        type,
+        row.profile || null,
+      )
       toast({
         title: `Posizione ${type === 'LONG' ? 'Long' : 'Short'} su ${trade.ticker} aperta`,
       })
@@ -492,8 +499,8 @@ export default function Scanner() {
             <TableBody>
               {filteredResults.map((row) => (
                 <TableRow key={row.ticker}>
-                  <TableCell className="font-semibold text-white">
-                    {row.ticker}
+                  <TableCell>
+                    <TickerInfo ticker={row.ticker} profile={row.profile} />
                   </TableCell>
                   <TableCell>{formatCurrency(row.currentPrice)}</TableCell>
                   <TableCell>{formatNumber(row.rsi)}</TableCell>
@@ -575,8 +582,8 @@ export default function Scanner() {
               <TableBody>
                 {results.map((row) => (
                   <TableRow key={`universo-${row.ticker}`}>
-                    <TableCell className="font-semibold text-white">
-                      {row.ticker}
+                    <TableCell>
+                      <TickerInfo ticker={row.ticker} profile={row.profile} />
                     </TableCell>
                     <TableCell>{formatCurrency(row.currentPrice)}</TableCell>
                     <TableCell>{formatNumber(row.rsi)}</TableCell>

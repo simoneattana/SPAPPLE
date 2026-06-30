@@ -3,6 +3,7 @@ import { CalendarClock, Loader2, Play, Target, Wallet } from 'lucide-react'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card'
+import { TickerInfo } from '../components/TickerInfo'
 import { useToast } from '../components/ui/useToast'
 import { useTrading } from '../context/useTrading'
 
@@ -146,7 +147,11 @@ export default function Portfolio() {
             <Card key={position.id}>
               <CardHeader className="items-start justify-between gap-4 border-b border-slate-800">
                 <div>
-                  <CardTitle>{position.ticker}</CardTitle>
+                  <TickerInfo
+                    compact
+                    ticker={position.ticker}
+                    profile={position.profile}
+                  />
                   <p className="mt-2 text-sm text-slate-500">
                     Slot investito: {currencyFormatter.format(position.invested)}
                   </p>

@@ -1,4 +1,5 @@
 import { ATR, RSI } from 'technicalindicators'
+import { mergeTickerProfile } from './tickerMetadata'
 
 const MIN_HISTORY_LENGTH = 30
 const RSI_PERIOD = 14
@@ -87,6 +88,26 @@ function extractMarketPrice(summaryData, ticker) {
   return assertNumber(price, `${ticker}: prezzo di mercato`)
 }
 
+function extractTickerProfile(summaryData, ticker) {
+  const summary = summaryData?.quoteSummary?.result?.[0]
+  const price = summary?.price || {}
+  const assetProfile = summary?.assetProfile || {}
+  const rawDescription = assetProfile.longBusinessSummary || ''
+  const description =
+    rawDescription.length > 260
+      ? `${rawDescription.slice(0, 260).trim()}...`
+      : rawDescription
+
+  return mergeTickerProfile(ticker, {
+    name: price.longName || price.shortName || null,
+    sector: assetProfile.sector || null,
+    industry: assetProfile.industry || null,
+    country: assetProfile.country || null,
+    website: assetProfile.website || null,
+    description: description || null,
+  })
+}
+
 function getDiagnostic(row) {
   if (row.status === 'error') {
     return row.reason || 'Dati non disponibili'
@@ -134,9 +155,11 @@ async function fetchTickerData(ticker) {
   const latestBar = history.at(-1)
   const pe = extractPeRatio(summaryData, ticker)
   const { rsi, atr } = calculateIndicators(history, ticker)
+  const profile = extractTickerProfile(summaryData, ticker)
 
   return {
     ticker,
+    profile,
     currentPrice: latestBar.close,
     pe,
     rsi,
@@ -156,6 +179,7 @@ async function fetchTickerDiagnostic(ticker) {
   } catch (error) {
     return {
       ticker,
+      profile: mergeTickerProfile(ticker),
       currentPrice: null,
       pe: null,
       rsi: null,

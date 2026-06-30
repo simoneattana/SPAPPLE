@@ -21,7 +21,7 @@ export default async function handler(request, response) {
     )
     yahooUrl.searchParams.set(
       'modules',
-      'summaryDetail,defaultKeyStatistics,price',
+      'summaryDetail,defaultKeyStatistics,price,assetProfile',
     )
     yahooUrl.searchParams.set('crumb', crumb)
 
