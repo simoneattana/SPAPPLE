@@ -175,6 +175,7 @@ export function SystemSidebar() {
     lastSignalCount,
     maxPositions,
     positions,
+    remoteStatus,
     setAutomationEnabled,
     slotSize,
   } = useTrading()
@@ -316,6 +317,22 @@ export function SystemSidebar() {
         ) : null}
 
         <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950 p-3">
+          <div className="mb-3 flex items-center justify-between gap-3 border-b border-slate-800 pb-3">
+            <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
+              Archivio remoto
+            </p>
+            <Badge
+              variant={
+                remoteStatus === 'sincronizzato'
+                  ? 'positive'
+                  : remoteStatus?.startsWith('errore')
+                    ? 'negative'
+                    : 'default'
+              }
+            >
+              {remoteStatus}
+            </Badge>
+          </div>
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-4 w-4 text-[#deff9a]" />
             <p className="text-sm font-semibold text-white">Regole attive</p>

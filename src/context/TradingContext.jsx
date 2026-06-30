@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchLatestPrice } from '../services/api'
+import {
+  loadRemoteTradingState,
+  saveRemoteTradingState,
+} from '../services/remoteState'
+import { useAuth } from '../services/useAuth'
 import { TradingContext } from './tradingState'
 
 const SLOT_SIZE = 2000
@@ -134,8 +139,12 @@ function buildTrade(ticker, price, atr, type) {
 }
 
 export function TradingProvider({ children }) {
+  const { isAuthenticated } = useAuth()
   const [state, setState] = useState(loadInitialState)
+  const [remoteStatus, setRemoteStatus] = useState('disconnesso')
   const stateRef = useRef(state)
+  const remoteReadyRef = useRef(false)
+  const remoteSaveTimerRef = useRef(null)
 
   useEffect(() => {
     stateRef.current = state
@@ -144,6 +153,70 @@ export function TradingProvider({ children }) {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
   }, [state])
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      remoteReadyRef.current = false
+      setRemoteStatus('disconnesso')
+      return
+    }
+
+    let cancelled = false
+
+    async function hydrateRemoteState() {
+      setRemoteStatus('caricamento')
+
+      try {
+        const remoteState = await loadRemoteTradingState()
+
+        if (cancelled) {
+          return
+        }
+
+        if (remoteState.payload?.version === STORAGE_VERSION) {
+          stateRef.current = remoteState.payload
+          setState(remoteState.payload)
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(remoteState.payload))
+        } else {
+          await saveRemoteTradingState(stateRef.current)
+        }
+
+        remoteReadyRef.current = true
+        setRemoteStatus('sincronizzato')
+      } catch (error) {
+        if (!cancelled) {
+          remoteReadyRef.current = false
+          setRemoteStatus(`errore: ${error.message}`)
+        }
+      }
+    }
+
+    hydrateRemoteState()
+
+    return () => {
+      cancelled = true
+    }
+  }, [isAuthenticated])
+
+  useEffect(() => {
+    if (!isAuthenticated || !remoteReadyRef.current) {
+      return undefined
+    }
+
+    clearTimeout(remoteSaveTimerRef.current)
+    remoteSaveTimerRef.current = setTimeout(async () => {
+      try {
+        await saveRemoteTradingState(stateRef.current)
+        setRemoteStatus('sincronizzato')
+      } catch (error) {
+        setRemoteStatus(`errore: ${error.message}`)
+      }
+    }, 600)
+
+    return () => {
+      clearTimeout(remoteSaveTimerRef.current)
+    }
+  }, [isAuthenticated, state])
 
   const updateTradingState = useCallback((updater) => {
     const nextState = updater(stateRef.current)
@@ -506,6 +579,7 @@ export function TradingProvider({ children }) {
   const value = useMemo(
     () => ({
       ...state,
+      remoteStatus,
       executeTrade,
       executeAutomatedTrades,
       recordActivity,
@@ -527,6 +601,7 @@ export function TradingProvider({ children }) {
       runEOD,
       setAutomationEnabled,
       state,
+      remoteStatus,
     ],
   )
 
