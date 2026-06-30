@@ -6,6 +6,7 @@ import MainLayout from './layouts/MainLayout'
 import Dashboard from './pages/Dashboard'
 import Diary from './pages/Diary'
 import Explanation from './pages/Explanation'
+import History from './pages/History'
 import Login from './pages/Login'
 import Portfolio from './pages/Portfolio'
 import Scanner from './pages/Scanner'
@@ -56,6 +57,7 @@ function AppRoutes() {
         <Route path="scanner" element={<Scanner />} />
         <Route path="portafoglio" element={<Portfolio />} />
         <Route path="diario" element={<Diary />} />
+        <Route path="storico" element={<History />} />
         <Route path="spiegazione" element={<Explanation />} />
         <Route path="impostazioni" element={<Settings />} />
       </Route>

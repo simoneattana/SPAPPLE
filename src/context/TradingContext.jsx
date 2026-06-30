@@ -7,22 +7,23 @@ const MAX_POSITIONS = 5
 const STORAGE_KEY = 'spapple_state'
 const STORAGE_VERSION = 4
 
+const initialActivity = {
+  id: 'system-ready',
+  type: 'system',
+  status: 'done',
+  title: 'Sistema azzerato',
+  detail: 'Nuova simulazione avviata con capitale operativo iniziale di 30.000€ e pilota automatico attivo.',
+  createdAt: new Date().toISOString(),
+}
+
 const initialState = {
   version: STORAGE_VERSION,
   capital: 30000,
   vault: 0,
   positions: [],
   history: [],
-  activityLog: [
-    {
-      id: 'system-ready',
-      type: 'system',
-      status: 'done',
-      title: 'Sistema azzerato',
-      detail: 'Nuova simulazione avviata con capitale operativo iniziale di 30.000€ e pilota automatico attivo.',
-      createdAt: new Date().toISOString(),
-    },
-  ],
+  activityLog: [initialActivity],
+  events: [initialActivity],
   automationEnabled: true,
   lastScanAt: null,
   lastScanCount: 0,
@@ -48,6 +49,13 @@ function createActivity({ type = 'system', status = 'done', title, detail }) {
 
 function appendActivity(state, activity) {
   return [activity, ...(state.activityLog || [])].slice(0, 14)
+}
+
+function appendLogs(state, activity) {
+  return {
+    activityLog: appendActivity(state, activity),
+    events: [activity, ...(state.events || [])],
+  }
 }
 
 function loadInitialState() {
@@ -81,6 +89,11 @@ function loadInitialState() {
       activityLog: Array.isArray(parsedState.activityLog)
         ? parsedState.activityLog
         : initialState.activityLog,
+      events: Array.isArray(parsedState.events)
+        ? parsedState.events
+        : Array.isArray(parsedState.activityLog)
+          ? parsedState.activityLog
+          : initialState.events,
       automationEnabled: Boolean(parsedState.automationEnabled),
       lastScanAt: parsedState.lastScanAt || initialState.lastScanAt,
       lastScanCount: Number.isFinite(Number(parsedState.lastScanCount))
@@ -140,16 +153,16 @@ export function TradingProvider({ children }) {
 
   const recordActivity = useCallback((activity) => {
     updateTradingState((current) => ({
-        ...current,
-        activityLog: appendActivity(current, createActivity(activity)),
-      }))
+      ...current,
+      ...appendLogs(current, createActivity(activity)),
+    }))
   }, [updateTradingState])
 
   const setAutomationEnabled = useCallback((enabled) => {
     updateTradingState((current) => ({
       ...current,
       automationEnabled: enabled,
-      activityLog: appendActivity(
+      ...appendLogs(
         current,
         createActivity({
           type: 'automation',
@@ -167,7 +180,7 @@ export function TradingProvider({ children }) {
     updateTradingState((current) => ({
       ...current,
       engineStatus: 'Scansione mercato in corso',
-      activityLog: appendActivity(
+      ...appendLogs(
         current,
         createActivity({
           type: 'scan',
@@ -190,7 +203,7 @@ export function TradingProvider({ children }) {
         signalCount > 0
           ? 'Segnali disponibili'
           : 'Nessun segnale operativo',
-      activityLog: appendActivity(
+      ...appendLogs(
         current,
         createActivity({
           type: 'scan',
@@ -209,7 +222,7 @@ export function TradingProvider({ children }) {
     updateTradingState((current) => ({
       ...current,
       engineStatus: 'Errore dati mercato',
-      activityLog: appendActivity(
+      ...appendLogs(
         current,
         createActivity({
           type: 'scan',
@@ -246,7 +259,7 @@ export function TradingProvider({ children }) {
       capital: current.capital - SLOT_SIZE,
       positions: [...current.positions, trade],
       engineStatus: 'Posizione aperta',
-      activityLog: appendActivity(
+      ...appendLogs(
         current,
         createActivity({
           type: 'trade',
@@ -272,6 +285,12 @@ export function TradingProvider({ children }) {
     const openedTrades = []
     const skippedTickers = []
     let activityLog = current.activityLog || []
+    let events = current.events || []
+
+    const appendLocalLog = (activity) => {
+      activityLog = appendActivity({ activityLog }, activity)
+      events = [activity, ...events]
+    }
 
     rows.forEach((row) => {
       const type = row.rsi < 30 ? 'LONG' : 'SHORT'
@@ -293,8 +312,7 @@ export function TradingProvider({ children }) {
       positions.push(trade)
       capital -= SLOT_SIZE
       openedTrades.push(trade)
-      activityLog = appendActivity(
-        { activityLog },
+      appendLocalLog(
         createActivity({
           type: 'trade',
           status: 'done',
@@ -304,28 +322,30 @@ export function TradingProvider({ children }) {
       )
     })
 
+    appendLocalLog(
+      createActivity({
+        type: 'automation',
+        status: openedTrades.length > 0 ? 'done' : 'waiting',
+        title: 'Pilota automatico completato',
+        detail:
+          openedTrades.length > 0
+            ? `${openedTrades.length} posizioni aperte automaticamente.`
+            : `Nessuna posizione aperta. ${
+                skippedTickers.length > 0
+                  ? 'Segnali saltati per slot, capitale o duplicati.'
+                  : 'Nessun segnale disponibile.'
+              }`,
+      }),
+    )
+
     const nextState = {
       ...current,
       capital,
       positions,
       engineStatus:
         openedTrades.length > 0 ? 'Pilota automatico eseguito' : current.engineStatus,
-      activityLog: appendActivity(
-        { activityLog },
-        createActivity({
-          type: 'automation',
-          status: openedTrades.length > 0 ? 'done' : 'waiting',
-          title: 'Pilota automatico completato',
-          detail:
-            openedTrades.length > 0
-              ? `${openedTrades.length} posizioni aperte automaticamente.`
-              : `Nessuna posizione aperta. ${
-                  skippedTickers.length > 0
-                    ? 'Segnali saltati per slot, capitale o duplicati.'
-                    : 'Nessun segnale disponibile.'
-                }`,
-        }),
-      ),
+      activityLog,
+      events,
     }
 
     stateRef.current = nextState
@@ -348,7 +368,7 @@ export function TradingProvider({ children }) {
     updateTradingState((current) => ({
       ...current,
       engineStatus: 'Motore EOD in esecuzione',
-      activityLog: appendActivity(
+      ...appendLogs(
         current,
         createActivity({
           type: 'eod',
@@ -372,7 +392,7 @@ export function TradingProvider({ children }) {
       updateTradingState((current) => ({
         ...current,
         engineStatus: 'Errore Motore EOD',
-        activityLog: appendActivity(
+        ...appendLogs(
           current,
           createActivity({
             type: 'eod',
@@ -467,7 +487,7 @@ export function TradingProvider({ children }) {
           activePositions.length > 0
             ? 'Posizioni in monitoraggio'
             : 'In attesa di nuova scansione',
-        activityLog: appendActivity(
+        ...appendLogs(
           current,
           createActivity({
             type: 'eod',
