@@ -1,10 +1,13 @@
 import {
+  DEFAULT_MARKET_ID,
   getSupabaseClient,
   readTradingState,
   runBackendMonitor,
   sendJson,
   writeTradingState,
 } from '../_tradingEngine.js'
+
+const MONITORED_MARKETS = ['equities', 'crypto']
 
 function isAuthorized(request) {
   const cronSecret = process.env.CRON_SECRET
@@ -36,16 +39,54 @@ export default async function handler(request, response) {
 
   try {
     const { payload } = await readTradingState(supabase)
-    const result = await runBackendMonitor(payload)
-    await writeTradingState(supabase, result.state)
+    const originalActiveMarket = payload.activeMarket || DEFAULT_MARKET_ID
+    let nextPayload = payload
+    const results = []
+
+    for (const marketId of MONITORED_MARKETS) {
+      const marketState = nextPayload.markets?.[marketId] || {}
+      const result = await runBackendMonitor({
+        ...nextPayload,
+        activeMarket: marketId,
+        ...marketState,
+      })
+
+      nextPayload = {
+        ...result.state,
+        activeMarket: originalActiveMarket,
+        markets: {
+          ...(nextPayload.markets || {}),
+          ...(result.state.markets || {}),
+        },
+      }
+      results.push({ marketId, ...result })
+    }
+
+    await writeTradingState(supabase, nextPayload)
 
     sendJson(response, 200, {
       ok: true,
-      checkedCount: result.checkedCount,
-      closedCount: result.closedTrades.length,
-      openedCount: result.openedTrades?.length || 0,
-      errors: result.errors || [],
-      updatedAt: result.state.lastBackendCheckAt,
+      checkedCount: results.reduce(
+        (sum, result) => sum + (result.checkedCount || 0),
+        0,
+      ),
+      closedCount: results.reduce(
+        (sum, result) => sum + (result.closedTrades?.length || 0),
+        0,
+      ),
+      openedCount: results.reduce(
+        (sum, result) => sum + (result.openedTrades?.length || 0),
+        0,
+      ),
+      markets: results.map((result) => ({
+        marketId: result.marketId,
+        checkedCount: result.checkedCount || 0,
+        closedCount: result.closedTrades?.length || 0,
+        openedCount: result.openedTrades?.length || 0,
+        errors: result.errors || [],
+      })),
+      errors: results.flatMap((result) => result.errors || []),
+      updatedAt: new Date().toISOString(),
     })
   } catch (error) {
     sendJson(response, 500, {

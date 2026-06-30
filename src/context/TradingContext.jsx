@@ -266,6 +266,27 @@ function activateMarketState(state, marketId, marketState) {
   })
 }
 
+function updateMarketState(state, marketId, marketState) {
+  const syncedState = syncActiveMarketState(state)
+  const activeMarket = syncedState.activeMarket || DEFAULT_MARKET_ID
+  const normalizedMarketState = normalizeMarketState(marketId, marketState)
+  const markets = {
+    ...(syncedState.markets || {}),
+    [marketId]: normalizedMarketState,
+  }
+  const activeMarketState = normalizeMarketState(
+    activeMarket,
+    markets[activeMarket],
+  )
+
+  return {
+    ...syncedState,
+    activeMarket,
+    markets,
+    ...activeMarketState,
+  }
+}
+
 function roundPrice(value) {
   return Number(value.toFixed(4))
 }
@@ -1046,7 +1067,7 @@ export function TradingProvider({ children }) {
             syncedCurrent.markets?.[marketId],
           )
 
-          return activateMarketState(syncedCurrent, marketId, {
+          return updateMarketState(syncedCurrent, marketId, {
             ...currentMarketState,
             ...appendLogs(
               currentMarketState,
@@ -1070,7 +1091,7 @@ export function TradingProvider({ children }) {
         syncedCurrent.markets?.[marketId],
       )
 
-      return activateMarketState(syncedCurrent, marketId, {
+      return updateMarketState(syncedCurrent, marketId, {
         ...currentMarketState,
         engineStatus: 'Monitor live in corso',
         nextLiveCheckAt: null,
@@ -1098,7 +1119,7 @@ export function TradingProvider({ children }) {
           syncedCurrent.markets?.[marketId],
         )
 
-        return activateMarketState(syncedCurrent, marketId, {
+        return updateMarketState(syncedCurrent, marketId, {
           ...currentMarketState,
           engineStatus: 'Errore monitor live',
           nextLiveCheckAt: new Date(Date.now() + LIVE_MONITOR_INTERVAL_MS).toISOString(),
@@ -1129,7 +1150,7 @@ export function TradingProvider({ children }) {
         { incrementDays: false },
       )
 
-      return activateMarketState(syncedCurrent, marketId, {
+      return updateMarketState(syncedCurrent, marketId, {
         ...currentMarketState,
         version: STORAGE_VERSION,
         capital,
@@ -1293,22 +1314,51 @@ export function TradingProvider({ children }) {
   }, [fetchPositionPrices, updateTradingState])
 
   useEffect(() => {
-    const monitorActive =
-      isAuthenticated &&
-      state.automationEnabled &&
-      state.liveMonitorEnabled &&
-      state.positions.length > 0
+    const marketIdsToMonitor = Object.values(TRADING_STRATEGIES)
+      .map((strategy) => strategy.id)
+      .filter((marketId) => {
+        const marketState = normalizeMarketState(
+          marketId,
+          state.markets?.[marketId],
+        )
 
-    if (!monitorActive) {
+        return (
+          marketState.automationEnabled &&
+          marketState.liveMonitorEnabled &&
+          marketState.positions.length > 0
+        )
+      })
+
+    if (!isAuthenticated || marketIdsToMonitor.length === 0) {
       return undefined
     }
 
-    updateTradingState((current) => ({
-      ...current,
-      nextLiveCheckAt:
-        current.nextLiveCheckAt ||
-        new Date(Date.now() + LIVE_MONITOR_INTERVAL_MS).toISOString(),
-    }))
+    const missingNextCheckIds = marketIdsToMonitor.filter((marketId) => {
+      const marketState = normalizeMarketState(marketId, state.markets?.[marketId])
+      return !marketState.nextLiveCheckAt
+    })
+
+    if (missingNextCheckIds.length > 0) {
+      updateTradingState((current) => {
+        let nextState = syncActiveMarketState(current)
+
+        missingNextCheckIds.forEach((marketId) => {
+          const marketState = normalizeMarketState(
+            marketId,
+            nextState.markets?.[marketId],
+          )
+
+          nextState = updateMarketState(nextState, marketId, {
+            ...marketState,
+            nextLiveCheckAt: new Date(
+              Date.now() + LIVE_MONITOR_INTERVAL_MS,
+            ).toISOString(),
+          })
+        })
+
+        return nextState
+      })
+    }
 
     const intervalId = window.setInterval(async () => {
       if (liveCheckRunningRef.current) {
@@ -1318,7 +1368,9 @@ export function TradingProvider({ children }) {
       liveCheckRunningRef.current = true
 
       try {
-        await runLiveCheck({ silent: true })
+        for (const marketId of marketIdsToMonitor) {
+          await runLiveCheck({ silent: true, targetMarketId: marketId })
+        }
       } catch {
         // L'errore viene gia registrato nello storico dal monitor.
       } finally {
@@ -1332,9 +1384,7 @@ export function TradingProvider({ children }) {
   }, [
     isAuthenticated,
     runLiveCheck,
-    state.automationEnabled,
-    state.liveMonitorEnabled,
-    state.positions.length,
+    state.markets,
     updateTradingState,
   ])
 

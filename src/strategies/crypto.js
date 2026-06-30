@@ -9,7 +9,7 @@ export const cryptoStrategy = {
   currency: 'EUR',
   universe: CRYPTO_TICKERS,
   initialCapital: 10000,
-  maxPositions: 3,
+  maxPositions: 5,
   enabled: true,
   positionSizing: {
     mode: 'percentuale_capitale',
