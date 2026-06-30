@@ -12,7 +12,7 @@ export default async function handler(request, response) {
   krakenUrl.searchParams.set('interval', interval)
 
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 10000)
+  const timeoutId = setTimeout(() => controller.abort(), 5000)
 
   try {
     const krakenResponse = await fetch(krakenUrl, { signal: controller.signal })

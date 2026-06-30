@@ -5,8 +5,8 @@ import { CRYPTO_MIN_DAILY_VOLUME_EUR } from './cryptoRules'
 const MIN_HISTORY_LENGTH = 30
 const RSI_PERIOD = 14
 const ATR_PERIOD = 14
-const REQUEST_CONCURRENCY = 6
-const REQUEST_TIMEOUT_MS = 12000
+const REQUEST_CONCURRENCY = 9
+const REQUEST_TIMEOUT_MS = 6000
 
 async function fetchJson(url, label) {
   const controller = new AbortController()
