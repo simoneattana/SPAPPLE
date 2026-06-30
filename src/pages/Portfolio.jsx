@@ -72,42 +72,49 @@ function PnlMetric({ value }) {
 
 export default function Portfolio({ marketId }) {
   const {
-    automationEnabled,
     closePositionManually,
     executeAutomatedTrades,
     activeMarket,
-    positions,
-    capital,
-    vault,
+    markets,
     recordScanComplete,
     recordScanError,
     recordScanStart,
     runEOD,
     maxPositions,
-    marketLabel,
   } = useTrading()
   const { toast } = useToast()
   const [runningEOD, setRunningEOD] = useState(false)
   const [closingId, setClosingId] = useState(null)
   const effectiveMarket = marketId || activeMarket
-  const marketIsAligned = activeMarket === effectiveMarket
   const effectiveStrategy = getTradingStrategy(effectiveMarket)
   const effectiveMarketLabel = effectiveStrategy.label
+  const routeMarketState = markets?.[effectiveMarket] || {}
+  const routeAutomationEnabled =
+    typeof routeMarketState.automationEnabled === 'boolean'
+      ? routeMarketState.automationEnabled
+      : true
   const marketCopy = getMarketCopy(effectiveMarket)
-  const visiblePositions = marketIsAligned ? positions : []
-  const visibleCapital = marketIsAligned ? currencyFormatter.format(capital) : 'Sincronizzazione'
-  const visibleVault = marketIsAligned ? currencyFormatter.format(vault) : 'Sincronizzazione'
+  const visiblePositions = Array.isArray(routeMarketState.positions)
+    ? routeMarketState.positions
+    : []
+  const visibleCapital = currencyFormatter.format(
+    Number.isFinite(Number(routeMarketState.capital))
+      ? Number(routeMarketState.capital)
+      : effectiveStrategy.initialCapital,
+  )
+  const visibleVault = currencyFormatter.format(
+    Number.isFinite(Number(routeMarketState.vault))
+      ? Number(routeMarketState.vault)
+      : 0,
+  )
   const visibleMaxPositions = effectiveStrategy.maxPositions || maxPositions
+  const routeMarketLabel = routeMarketState.marketLabel || effectiveMarketLabel
 
   const handleRunEOD = async () => {
-    if (!marketIsAligned) {
-      return
-    }
-
     setRunningEOD(true)
 
     try {
-      await runEOD()
+      await runEOD(effectiveMarket)
       toast({
         title:
           effectiveMarket === 'crypto'
@@ -129,7 +136,7 @@ export default function Portfolio({ marketId }) {
   }
 
   const refillAfterManualClose = async (closedTicker) => {
-    if (!automationEnabled || !marketIsAligned) {
+    if (!routeAutomationEnabled) {
       return
     }
 
@@ -150,7 +157,7 @@ export default function Portfolio({ marketId }) {
             sortByScore: sortByAutoScore,
           }
 
-    recordScanStart(config.universe.length)
+    recordScanStart(config.universe.length, effectiveMarket)
 
     try {
       const marketData = await config.fetcher(config.universe)
@@ -161,13 +168,19 @@ export default function Portfolio({ marketId }) {
         ),
       )
 
-      recordScanComplete({
-        scannedCount: marketData.length,
-        signalCount: actionableRows.length,
-        results: marketData,
-      })
+      recordScanComplete(
+        {
+          scannedCount: marketData.length,
+          signalCount: actionableRows.length,
+          results: marketData,
+        },
+        effectiveMarket,
+      )
 
-      const { openedTrades } = executeAutomatedTrades(automaticRows)
+      const { openedTrades } = executeAutomatedTrades(
+        automaticRows,
+        effectiveMarket,
+      )
 
       toast({
         title:
@@ -176,7 +189,7 @@ export default function Portfolio({ marketId }) {
             : `Slot libero: nessun nuovo ${marketCopy.assetSingular} abbastanza forte`,
       })
     } catch (error) {
-      recordScanError(error.message)
+      recordScanError(error.message, effectiveMarket)
       toast({
         title: 'Chiusura eseguita, ma nuova scansione non riuscita',
         variant: 'destructive',
@@ -185,14 +198,10 @@ export default function Portfolio({ marketId }) {
   }
 
   const handleManualClose = async (position) => {
-    if (!marketIsAligned) {
-      return
-    }
-
     setClosingId(position.id)
 
     try {
-      const closedTrade = await closePositionManually(position.id)
+      const closedTrade = await closePositionManually(position.id, effectiveMarket)
 
       toast({
         title: `${position.ticker} chiuso manualmente: ${currencyFormatter.format(
@@ -219,17 +228,17 @@ export default function Portfolio({ marketId }) {
             Portafoglio virtuale · {marketCopy.eyebrow}
           </p>
           <h1 className="mt-3 text-2xl font-semibold text-white sm:text-3xl">
-            Portafoglio {marketIsAligned ? marketLabel : effectiveMarketLabel}
+            Portafoglio {routeMarketLabel}
           </h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
             Gestione separata di capitale, posizioni, target e stop per{' '}
-            {marketIsAligned ? marketLabel : effectiveMarketLabel}.
+            {routeMarketLabel}.
           </p>
         </div>
 
         <Button
           onClick={handleRunEOD}
-          disabled={!marketIsAligned || visiblePositions.length === 0 || runningEOD}
+          disabled={visiblePositions.length === 0 || runningEOD}
         >
           {runningEOD ? (
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -355,7 +364,7 @@ export default function Portfolio({ marketId }) {
             </h2>
             <p className="mt-3 max-w-md text-sm leading-6 text-slate-500">
               Apri una posizione dallo Scanner di Mercato{' '}
-              {marketIsAligned ? marketLabel : effectiveMarketLabel} per
+              {routeMarketLabel} per
               avviare il forward testing separato.
             </p>
           </div>

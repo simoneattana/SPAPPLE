@@ -99,6 +99,22 @@ function pickMarketState(state) {
   }, {})
 }
 
+function removeClosedPositions(positions = [], history = []) {
+  const closedKeys = new Set(
+    history
+      .filter((trade) => trade?.ticker && trade?.openedAt)
+      .map((trade) => `${trade.ticker}-${trade.openedAt}`),
+  )
+
+  return positions.filter((position) => {
+    if (!position?.ticker || !position?.openedAt) {
+      return true
+    }
+
+    return !closedKeys.has(`${position.ticker}-${position.openedAt}`)
+  })
+}
+
 function normalizeMarketState(marketId, rawMarketState = {}) {
   const strategy = getTradingStrategy(marketId)
   const fallback = {
@@ -137,6 +153,14 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
         ? capital
         : fallback.capital
 
+  const history = Array.isArray(rawMarketState.history) ? rawMarketState.history : []
+  const positions = removeClosedPositions(
+    Array.isArray(rawMarketState.positions)
+      ? rawMarketState.positions
+      : [],
+    history,
+  )
+
   return {
     ...fallback,
     ...rawMarketState,
@@ -144,10 +168,8 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
     marketLabel: strategy.label,
     capital: normalizedCapital,
     vault: Number.isFinite(vault) ? vault : fallback.vault,
-    positions: Array.isArray(rawMarketState.positions)
-      ? rawMarketState.positions
-      : [],
-    history: Array.isArray(rawMarketState.history) ? rawMarketState.history : [],
+    positions,
+    history,
     activityLog: Array.isArray(rawMarketState.activityLog)
       ? rawMarketState.activityLog
       : [],

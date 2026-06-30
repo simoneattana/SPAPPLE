@@ -17,6 +17,9 @@ import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { useTrading } from '../context/useTrading'
 import { getMarketCopy } from '../services/marketCopy'
+import { calculatePositionSize, MIN_POSITION_SIZE } from '../services/positionSizing'
+import { getTradingStrategy } from '../strategies'
+import { useLocation } from 'react-router-dom'
 
 const dateTimeFormatter = new Intl.DateTimeFormat('it-IT', {
   day: '2-digit',
@@ -29,6 +32,8 @@ const currencyFormatter = new Intl.NumberFormat('it-IT', {
   style: 'currency',
   currency: 'EUR',
 })
+
+const EMPTY_ARRAY = []
 
 function formatActivityDate(value) {
   if (!value) {
@@ -234,32 +239,56 @@ function ActivityItem({ item }) {
 
 export function SystemSidebar() {
   const {
-    activityLog,
     activeMarket,
-    automationEnabled,
-    capital,
-    currentStrategy,
-    engineStatus,
-    lastScanAt,
-    lastScanCount,
-    lastSignalCount,
-    lastBackendCheckAt,
-    lastLiveCheckAt,
-    backendMonitorEnabled,
-    liveMonitorEnabled,
-    marketLabel,
-    maxPositions,
-    nextLiveCheckAt,
-    positions,
+    markets,
     remoteStatus,
     runLiveCheck,
     setAutomationEnabled,
     setLiveMonitorEnabled,
-    slotSize,
-    minPositionSize,
   } = useTrading()
+  const location = useLocation()
   const [, setNow] = useState(Date.now())
-  const marketCopy = getMarketCopy(activeMarket)
+  const routeMarket = location.pathname.startsWith('/crypto')
+    ? 'crypto'
+    : location.pathname.startsWith('/azioni')
+      ? 'equities'
+      : activeMarket
+  const routeStrategy = getTradingStrategy(routeMarket)
+  const routeMarketState = markets?.[routeMarket] || {}
+  const activityLog = Array.isArray(routeMarketState.activityLog)
+    ? routeMarketState.activityLog
+    : EMPTY_ARRAY
+  const automationEnabled =
+    typeof routeMarketState.automationEnabled === 'boolean'
+      ? routeMarketState.automationEnabled
+      : true
+  const backendMonitorEnabled =
+    typeof routeMarketState.backendMonitorEnabled === 'boolean'
+      ? routeMarketState.backendMonitorEnabled
+      : true
+  const liveMonitorEnabled =
+    typeof routeMarketState.liveMonitorEnabled === 'boolean'
+      ? routeMarketState.liveMonitorEnabled
+      : true
+  const capital = Number.isFinite(Number(routeMarketState.capital))
+    ? Number(routeMarketState.capital)
+    : routeStrategy.initialCapital
+  const currentStrategy = routeStrategy
+  const engineStatus = routeMarketState.engineStatus || 'In attesa'
+  const lastScanAt = routeMarketState.lastScanAt || null
+  const lastScanCount = Number(routeMarketState.lastScanCount || 0)
+  const lastSignalCount = Number(routeMarketState.lastSignalCount || 0)
+  const lastBackendCheckAt = routeMarketState.lastBackendCheckAt || null
+  const lastLiveCheckAt = routeMarketState.lastLiveCheckAt || null
+  const marketLabel = routeMarketState.marketLabel || routeStrategy.label
+  const maxPositions = routeStrategy.maxPositions || 5
+  const nextLiveCheckAt = routeMarketState.nextLiveCheckAt || null
+  const positions = Array.isArray(routeMarketState.positions)
+    ? routeMarketState.positions
+    : EMPTY_ARRAY
+  const slotSize = calculatePositionSize(capital, routeStrategy.positionSizing)
+  const minPositionSize = routeStrategy.positionSizing?.min || MIN_POSITION_SIZE
+  const marketCopy = getMarketCopy(routeMarket)
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
@@ -368,7 +397,7 @@ export function SystemSidebar() {
         <Button
           className="mt-4 w-full justify-between"
           variant={automationEnabled ? 'default' : 'ghost'}
-          onClick={() => setAutomationEnabled(!automationEnabled)}
+          onClick={() => setAutomationEnabled(!automationEnabled, routeMarket)}
         >
           <span className="flex items-center gap-2">
             {automationEnabled ? (
@@ -384,7 +413,7 @@ export function SystemSidebar() {
         <Button
           className="mt-3 w-full justify-between"
           variant={liveMonitorEnabled ? 'default' : 'ghost'}
-          onClick={() => setLiveMonitorEnabled(!liveMonitorEnabled)}
+          onClick={() => setLiveMonitorEnabled(!liveMonitorEnabled, routeMarket)}
         >
           <span className="flex items-center gap-2">
             <Zap className="h-4 w-4" />
@@ -429,7 +458,7 @@ export function SystemSidebar() {
             className="mt-3 w-full"
             variant="ghost"
             disabled={positions.length === 0}
-            onClick={() => runLiveCheck()}
+            onClick={() => runLiveCheck({ targetMarketId: routeMarket })}
           >
             Controlla ora
           </Button>
@@ -469,7 +498,7 @@ export function SystemSidebar() {
                       <span className={pnlReady ? pnlColor : 'text-slate-500'}>
                         {pnlReady
                           ? currencyFormatter.format(pnl)
-                          : activeMarket === 'crypto'
+                          : routeMarket === 'crypto'
                             ? 'P/L dopo controllo'
                             : 'P/L dopo EOD'}
                       </span>

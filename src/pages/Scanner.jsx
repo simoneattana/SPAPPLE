@@ -362,7 +362,6 @@ export default function Scanner({ marketId }) {
     recordScanStart,
   } = useTrading()
   const effectiveMarket = marketId || activeMarket
-  const marketIsAligned = activeMarket === effectiveMarket
   const effectiveStrategy = getTradingStrategy(effectiveMarket)
   const effectiveMarketLabel = effectiveStrategy.label
   const routeMarketState = markets?.[effectiveMarket] || null
@@ -422,19 +421,19 @@ export default function Scanner({ marketId }) {
     () =>
       Array.isArray(routeMarketState?.positions)
         ? routeMarketState.positions
-        : marketIsAligned
+        : activeMarket === effectiveMarket
           ? positions
           : [],
-    [marketIsAligned, positions, routeMarketState],
+    [activeMarket, effectiveMarket, positions, routeMarketState],
   )
   const visibleHistory = useMemo(
     () =>
       Array.isArray(routeMarketState?.history)
         ? routeMarketState.history
-        : marketIsAligned
+        : activeMarket === effectiveMarket
           ? history
           : [],
-    [history, marketIsAligned, routeMarketState],
+    [activeMarket, effectiveMarket, history, routeMarketState],
   )
   const visibleLastScanAt = routeLastScanAt
   const visibleLastScanResults = routeLastScanResults
@@ -559,10 +558,6 @@ export default function Scanner({ marketId }) {
   }, [handleScan, visibleLastScanResults?.length, scanIsFromToday])
 
   const handleExecuteTrade = (row) => {
-    if (!marketIsAligned) {
-      return
-    }
-
     const type = row.rsi < 30 ? 'LONG' : 'SHORT'
 
     try {
@@ -572,6 +567,7 @@ export default function Scanner({ marketId }) {
         row.atr,
         type,
         row.profile || null,
+        effectiveMarket,
       )
       toast({
         title: `Posizione ${type === 'LONG' ? 'Long' : 'Short'} su ${trade.ticker} aperta`,
@@ -606,11 +602,11 @@ export default function Scanner({ marketId }) {
   }, [filteredResults, visiblePositions, scannerConfig])
 
   const refillAfterManualClose = async (closedTicker) => {
-    if (!automationEnabled || !marketIsAligned) {
+    if (!routeAutomationEnabled) {
       return
     }
 
-    recordScanStart(scannerConfig.universe.length)
+    recordScanStart(scannerConfig.universe.length, effectiveMarket)
 
     try {
       const marketData = await scannerConfig.fetcher(scannerConfig.universe)
@@ -622,13 +618,19 @@ export default function Scanner({ marketId }) {
       )
 
       setResults(marketData)
-      recordScanComplete({
-        scannedCount: marketData.length,
-        signalCount: actionableRows.length,
-        results: marketData,
-      })
+      recordScanComplete(
+        {
+          scannedCount: marketData.length,
+          signalCount: actionableRows.length,
+          results: marketData,
+        },
+        effectiveMarket,
+      )
 
-      const { openedTrades } = executeAutomatedTrades(automaticRows)
+      const { openedTrades } = executeAutomatedTrades(
+        automaticRows,
+        effectiveMarket,
+      )
 
       toast({
         title:
@@ -637,7 +639,7 @@ export default function Scanner({ marketId }) {
             : `Slot libero: nessun nuovo ${scannerConfig.copy.assetSingular} abbastanza forte`,
       })
     } catch (scanError) {
-      recordScanError(scanError.message)
+      recordScanError(scanError.message, effectiveMarket)
       toast({
         title: 'Chiusura eseguita, ma nuova scansione non riuscita',
         variant: 'destructive',
@@ -646,14 +648,10 @@ export default function Scanner({ marketId }) {
   }
 
   const handleManualClose = async (position) => {
-    if (!marketIsAligned) {
-      return
-    }
-
     setClosingId(position.id)
 
     try {
-      const closedTrade = await closePositionManually(position.id)
+      const closedTrade = await closePositionManually(position.id, effectiveMarket)
 
       toast({
         title: `${position.ticker} chiuso: P/L ${formatCurrency(closedTrade.pnlEur)}`,
@@ -679,9 +677,7 @@ export default function Scanner({ marketId }) {
           </p>
           <h1 className="mt-3 text-2xl font-semibold text-white sm:text-3xl">
             Scanner{' '}
-            {marketIsAligned
-              ? marketLabel || currentStrategy?.label
-              : routeMarketLabel}
+            {routeMarketLabel || marketLabel || currentStrategy?.label}
           </h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
             Analisi {scannerConfig.copy.scanMode} automatica su{' '}

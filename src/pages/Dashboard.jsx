@@ -11,6 +11,7 @@ import { Badge } from '../components/ui/Badge'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card'
 import { useTrading } from '../context/useTrading'
 import { getMarketCopy } from '../services/marketCopy'
+import { getTradingStrategy } from '../strategies'
 
 const currencyFormatter = new Intl.NumberFormat('it-IT', {
   style: 'currency',
@@ -87,23 +88,37 @@ function StatBox({ label, value, detail, accent = 'text-white' }) {
   )
 }
 
-export default function Dashboard() {
+export default function Dashboard({ marketId }) {
   const {
-    automationEnabled,
     activeMarket,
-    capital,
-    currentStrategy,
-    engineStatus,
-    history,
-    lastScanAt,
-    lastScanCount,
-    lastSignalCount,
-    marketLabel,
-    maxPositions,
-    positions,
-    vault,
+    markets,
   } = useTrading()
-  const marketCopy = getMarketCopy(activeMarket)
+  const effectiveMarket = marketId || activeMarket
+  const currentStrategy = getTradingStrategy(effectiveMarket)
+  const routeMarketState = markets?.[effectiveMarket] || {}
+  const automationEnabled =
+    typeof routeMarketState.automationEnabled === 'boolean'
+      ? routeMarketState.automationEnabled
+      : true
+  const capital = Number.isFinite(Number(routeMarketState.capital))
+    ? Number(routeMarketState.capital)
+    : currentStrategy.initialCapital
+  const vault = Number.isFinite(Number(routeMarketState.vault))
+    ? Number(routeMarketState.vault)
+    : 0
+  const positions = Array.isArray(routeMarketState.positions)
+    ? routeMarketState.positions
+    : []
+  const history = Array.isArray(routeMarketState.history)
+    ? routeMarketState.history
+    : []
+  const engineStatus = routeMarketState.engineStatus || 'In attesa'
+  const lastScanAt = routeMarketState.lastScanAt || null
+  const lastScanCount = Number(routeMarketState.lastScanCount || 0)
+  const lastSignalCount = Number(routeMarketState.lastSignalCount || 0)
+  const marketLabel = routeMarketState.marketLabel || currentStrategy.label
+  const maxPositions = currentStrategy.maxPositions || 5
+  const marketCopy = getMarketCopy(effectiveMarket)
   const positionPercent = Math.round(
     (currentStrategy?.positionSizing?.percent || 0.1) * 100,
   )

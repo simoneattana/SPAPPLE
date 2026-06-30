@@ -11,6 +11,7 @@ import {
 } from '../components/ui/Table'
 import { useTrading } from '../context/useTrading'
 import { getMarketCopy } from '../services/marketCopy'
+import { getTradingStrategy } from '../strategies'
 
 const currencyFormatter = new Intl.NumberFormat('it-IT', {
   style: 'currency',
@@ -34,9 +35,19 @@ function resultTextColor(result) {
   return result === 'WIN' ? 'text-[var(--market-accent)]' : 'text-[#ef8f8f]'
 }
 
-export default function Diary() {
-  const { activeMarket, history, marketLabel, vault } = useTrading()
-  const marketCopy = getMarketCopy(activeMarket)
+export default function Diary({ marketId }) {
+  const { activeMarket, markets } = useTrading()
+  const effectiveMarket = marketId || activeMarket
+  const strategy = getTradingStrategy(effectiveMarket)
+  const routeMarketState = markets?.[effectiveMarket] || {}
+  const history = Array.isArray(routeMarketState.history)
+    ? routeMarketState.history
+    : []
+  const vault = Number.isFinite(Number(routeMarketState.vault))
+    ? Number(routeMarketState.vault)
+    : 0
+  const marketLabel = routeMarketState.marketLabel || strategy.label
+  const marketCopy = getMarketCopy(effectiveMarket)
 
   return (
     <div className="flex flex-1 flex-col gap-7">

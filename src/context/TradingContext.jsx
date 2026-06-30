@@ -118,6 +118,22 @@ function pickMarketState(state) {
   }, {})
 }
 
+function removeClosedPositions(positions = [], history = []) {
+  const closedKeys = new Set(
+    history
+      .filter((trade) => trade?.ticker && trade?.openedAt)
+      .map((trade) => `${trade.ticker}-${trade.openedAt}`),
+  )
+
+  return positions.filter((position) => {
+    if (!position?.ticker || !position?.openedAt) {
+      return true
+    }
+
+    return !closedKeys.has(`${position.ticker}-${position.openedAt}`)
+  })
+}
+
 function normalizeMarketState(marketId, rawMarketState = {}) {
   const strategy = getTradingStrategy(marketId)
   const fallback = createInitialMarketState(strategy)
@@ -136,6 +152,16 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
         ? capital
         : fallback.capital
 
+  const history = Array.isArray(rawMarketState.history)
+    ? rawMarketState.history
+    : fallback.history
+  const positions = removeClosedPositions(
+    Array.isArray(rawMarketState.positions)
+      ? rawMarketState.positions
+      : fallback.positions,
+    history,
+  )
+
   return {
     ...fallback,
     ...rawMarketState,
@@ -143,12 +169,8 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
     marketLabel: strategy.label,
     capital: normalizedCapital,
     vault: Number.isFinite(vault) ? vault : fallback.vault,
-    positions: Array.isArray(rawMarketState.positions)
-      ? rawMarketState.positions
-      : fallback.positions,
-    history: Array.isArray(rawMarketState.history)
-      ? rawMarketState.history
-      : fallback.history,
+    positions,
+    history,
     activityLog: Array.isArray(rawMarketState.activityLog)
       ? rawMarketState.activityLog
       : fallback.activityLog,
@@ -513,44 +535,64 @@ export function TradingProvider({ children }) {
     }))
   }, [updateTradingState])
 
-  const setAutomationEnabled = useCallback((enabled) => {
-    updateTradingState((current) => ({
-      ...current,
-      automationEnabled: enabled,
-      ...appendLogs(
-        current,
-        createActivity({
-          type: 'automation',
-          status: enabled ? 'working' : 'waiting',
-          title: enabled ? 'Pilota automatico attivato' : 'Pilota automatico disattivato',
-          detail: enabled
-            ? 'Alla prossima scansione aprirà automaticamente i segnali validi, rispettando capitale e slot.'
-            : 'Le prossime operazioni richiederanno conferma manuale dallo Scanner.',
-        }),
-      ),
-    }))
+  const setAutomationEnabled = useCallback((enabled, targetMarketId = null) => {
+    updateTradingState((current) => {
+      const syncedCurrent = syncActiveMarketState(current)
+      const marketId = targetMarketId || syncedCurrent.activeMarket
+      const marketState = normalizeMarketState(
+        marketId,
+        syncedCurrent.markets?.[marketId],
+      )
+      const nextMarketState = {
+        ...marketState,
+        automationEnabled: enabled,
+        ...appendLogs(
+          marketState,
+          createActivity({
+            type: 'automation',
+            status: enabled ? 'working' : 'waiting',
+            title: enabled ? 'Pilota automatico attivato' : 'Pilota automatico disattivato',
+            detail: enabled
+              ? 'Alla prossima scansione aprirà automaticamente i segnali validi, rispettando capitale e slot.'
+              : 'Le prossime operazioni richiederanno conferma manuale dallo Scanner.',
+          }),
+        ),
+      }
+
+      return activateMarketState(syncedCurrent, marketId, nextMarketState)
+    })
   }, [updateTradingState])
 
-  const setLiveMonitorEnabled = useCallback((enabled) => {
-    updateTradingState((current) => ({
-      ...current,
-      liveMonitorEnabled: enabled,
-      nextLiveCheckAt:
-        enabled && current.positions.length > 0
-          ? new Date(Date.now() + LIVE_MONITOR_INTERVAL_MS).toISOString()
-          : null,
-      ...appendLogs(
-        current,
-        createActivity({
-          type: 'monitor',
-          status: enabled ? 'working' : 'waiting',
-          title: enabled ? 'Monitor live attivato' : 'Monitor live disattivato',
-          detail: enabled
-            ? 'Controllerò automaticamente le posizioni aperte ogni 60 secondi mentre l’app resta aperta.'
-            : 'Le posizioni saranno controllate solo dal controllo manuale nel Portafoglio.',
-        }),
-      ),
-    }))
+  const setLiveMonitorEnabled = useCallback((enabled, targetMarketId = null) => {
+    updateTradingState((current) => {
+      const syncedCurrent = syncActiveMarketState(current)
+      const marketId = targetMarketId || syncedCurrent.activeMarket
+      const marketState = normalizeMarketState(
+        marketId,
+        syncedCurrent.markets?.[marketId],
+      )
+      const nextMarketState = {
+        ...marketState,
+        liveMonitorEnabled: enabled,
+        nextLiveCheckAt:
+          enabled && marketState.positions.length > 0
+            ? new Date(Date.now() + LIVE_MONITOR_INTERVAL_MS).toISOString()
+            : null,
+        ...appendLogs(
+          marketState,
+          createActivity({
+            type: 'monitor',
+            status: enabled ? 'working' : 'waiting',
+            title: enabled ? 'Monitor live attivato' : 'Monitor live disattivato',
+            detail: enabled
+              ? 'Controllerò automaticamente le posizioni aperte ogni 60 secondi mentre l’app resta aperta.'
+              : 'Le posizioni saranno controllate solo dal controllo manuale nel Portafoglio.',
+          }),
+        ),
+      }
+
+      return activateMarketState(syncedCurrent, marketId, nextMarketState)
+    })
   }, [updateTradingState])
 
   const setActiveMarket = useCallback((marketId) => {
@@ -673,9 +715,11 @@ export function TradingProvider({ children }) {
     })
   }, [updateTradingState])
 
-  const executeTrade = useCallback((ticker, price, atr, type, profile = null) => {
-    const current = stateRef.current
-    const strategy = getTradingStrategy(current.activeMarket)
+  const executeTrade = useCallback((ticker, price, atr, type, profile = null, targetMarketId = null) => {
+    const current = syncActiveMarketState(stateRef.current)
+    const marketId = targetMarketId || current.activeMarket
+    const strategy = getTradingStrategy(marketId)
+    const marketState = normalizeMarketState(marketId, current.markets?.[marketId])
     const sizing = strategy.positionSizing
     const maxPositions = getStrategyMaxPositions(strategy)
 
@@ -683,17 +727,17 @@ export function TradingProvider({ children }) {
       throw new Error('Tipo ordine non valido')
     }
 
-    if (current.positions.length >= maxPositions) {
+    if (marketState.positions.length >= maxPositions) {
       throw new Error('Slot operativi esauriti')
     }
 
-    const positionSize = calculatePositionSize(current.capital, sizing)
+    const positionSize = calculatePositionSize(marketState.capital, sizing)
 
-    if (!canOpenPosition(current.capital, sizing)) {
+    if (!canOpenPosition(marketState.capital, sizing)) {
       throw new Error('Capitale operativo insufficiente')
     }
 
-    if (current.positions.some((position) => position.ticker === ticker)) {
+    if (marketState.positions.some((position) => position.ticker === ticker)) {
       throw new Error(`${ticker} è già presente in portafoglio`)
     }
 
@@ -706,13 +750,13 @@ export function TradingProvider({ children }) {
       profile,
       strategy,
     )
-    const nextState = syncActiveMarketState({
-      ...current,
-      capital: roundPrice(current.capital - positionSize),
-      positions: [...current.positions, trade],
+    const nextMarketState = {
+      ...marketState,
+      capital: roundPrice(marketState.capital - positionSize),
+      positions: [...marketState.positions, trade],
       engineStatus: 'Posizione aperta',
       ...appendLogs(
-        current,
+        marketState,
         createActivity({
           type: 'trade',
           status: 'done',
@@ -724,7 +768,8 @@ export function TradingProvider({ children }) {
           )}, stop loss ${roundPrice(trade.stopLoss)}.`,
         }),
       ),
-    })
+    }
+    const nextState = activateMarketState(current, marketId, nextMarketState)
 
     stateRef.current = nextState
     setState(nextState)
@@ -827,9 +872,8 @@ export function TradingProvider({ children }) {
     return { openedTrades, skippedTickers }
   }, [])
 
-  const fetchPositionPrices = useCallback(async (positions) => {
-    const marketId = stateRef.current.activeMarket
-
+  const fetchPositionPrices = useCallback(async (positions, targetMarketId = null) => {
+    const marketId = targetMarketId || stateRef.current.activeMarket
     return Promise.all(
       positions.map(async (position) => ({
         position,
@@ -841,17 +885,43 @@ export function TradingProvider({ children }) {
     )
   }, [])
 
-  const closePositionManually = useCallback(async (positionId) => {
-    const snapshot = stateRef.current
-    const position = snapshot.positions.find((item) => item.id === positionId)
+  const closePositionManually = useCallback(async (positionId, targetMarketId = null) => {
+    const snapshot = syncActiveMarketState(stateRef.current)
+    const candidateMarketIds = targetMarketId
+      ? [targetMarketId]
+      : Object.keys(snapshot.markets || {})
+    let marketId = targetMarketId
+    let marketState = null
+    let position = null
+
+    for (const candidateMarketId of candidateMarketIds) {
+      const candidateState = normalizeMarketState(
+        candidateMarketId,
+        snapshot.markets?.[candidateMarketId],
+      )
+      const candidatePosition = candidateState.positions.find(
+        (item) => item.id === positionId,
+      )
+
+      if (candidatePosition) {
+        marketId = candidateMarketId
+        marketState = candidateState
+        position = candidatePosition
+        break
+      }
+    }
 
     if (!position) {
       throw new Error('Posizione non trovata')
     }
 
+    if (!marketState) {
+      marketState = normalizeMarketState(marketId, snapshot.markets?.[marketId])
+    }
+
     const latestPrice = await fetchLatestPrice(
       position.ticker,
-      position.marketId || snapshot.activeMarket,
+      position.marketId || marketId,
     )
     const invested = position.invested || LEGACY_POSITION_SIZE
     const quantity = invested / position.entryPrice
@@ -877,7 +947,12 @@ export function TradingProvider({ children }) {
     }
 
     updateTradingState((current) => {
-      const remainingPositions = current.positions.filter(
+      const syncedCurrent = syncActiveMarketState(current)
+      const currentMarketState = normalizeMarketState(
+        marketId,
+        syncedCurrent.markets?.[marketId],
+      )
+      const remainingPositions = currentMarketState.positions.filter(
         (item) => item.id !== positionId,
       )
       const capitalReturn =
@@ -886,103 +961,142 @@ export function TradingProvider({ children }) {
           : recoveredCapital
       const vaultGain = roundedPnl > 0 ? roundedPnl : 0
 
-      return {
-        ...current,
-        capital: roundPrice(current.capital + capitalReturn),
-        vault: roundPrice(current.vault + vaultGain),
+      const nextMarketState = {
+        ...currentMarketState,
+        capital: roundPrice(currentMarketState.capital + capitalReturn),
+        vault: roundPrice(currentMarketState.vault + vaultGain),
         positions: remainingPositions,
-        history: [closedTrade, ...current.history],
+        history: [closedTrade, ...currentMarketState.history],
         engineStatus:
           remainingPositions.length > 0
             ? 'Posizione chiusa manualmente'
             : 'Slot liberato, ricerca nuovi segnali',
         ...appendLogs(
-          current,
+          currentMarketState,
           createActivity({
             type: 'trade',
             status: result === 'WIN' ? 'attention' : 'error',
             title: 'Chiusura manuale eseguita',
             detail: `${position.ticker}: P/L realizzato ${roundedPnl.toFixed(
               2,
-            )}€. Avvio ricerca di un nuovo asset appetibile nel mercato attivo.`,
+            )}€. Avvio ricerca di un nuovo asset appetibile in ${currentMarketState.marketLabel}.`,
           }),
         ),
       }
+
+      return activateMarketState(syncedCurrent, marketId, nextMarketState)
     })
 
     return closedTrade
   }, [updateTradingState])
 
-  const runLiveCheck = useCallback(async ({ silent = false } = {}) => {
-    const snapshot = stateRef.current
+  const runLiveCheck = useCallback(async ({ silent = false, targetMarketId = null } = {}) => {
+    const snapshot = syncActiveMarketState(stateRef.current)
+    const marketId = targetMarketId || snapshot.activeMarket
+    const marketState = normalizeMarketState(marketId, snapshot.markets?.[marketId])
 
-    if (snapshot.positions.length === 0) {
+    if (marketState.positions.length === 0) {
       if (!silent) {
-        recordActivity({
-          type: 'monitor',
-          status: 'waiting',
-          title: 'Monitor live in attesa',
-          detail: 'Non ci sono posizioni aperte da controllare.',
+        updateTradingState((current) => {
+          const syncedCurrent = syncActiveMarketState(current)
+          const currentMarketState = normalizeMarketState(
+            marketId,
+            syncedCurrent.markets?.[marketId],
+          )
+
+          return activateMarketState(syncedCurrent, marketId, {
+            ...currentMarketState,
+            ...appendLogs(
+              currentMarketState,
+              createActivity({
+                type: 'monitor',
+                status: 'waiting',
+                title: 'Monitor live in attesa',
+                detail: 'Non ci sono posizioni aperte da controllare.',
+              }),
+            ),
+          })
         })
       }
       return
     }
 
-    updateTradingState((current) => ({
-      ...current,
-      engineStatus: 'Monitor live in corso',
-      nextLiveCheckAt: null,
-      ...appendLogs(
-        current,
-        createActivity({
-          type: 'monitor',
-          status: 'working',
-          title: 'Controllo automatico avviato',
-          detail: `Sto controllando ${current.positions.length} posizioni aperte con prezzi aggiornati.`,
-        }),
-      ),
-    }))
+    updateTradingState((current) => {
+      const syncedCurrent = syncActiveMarketState(current)
+      const currentMarketState = normalizeMarketState(
+        marketId,
+        syncedCurrent.markets?.[marketId],
+      )
+
+      return activateMarketState(syncedCurrent, marketId, {
+        ...currentMarketState,
+        engineStatus: 'Monitor live in corso',
+        nextLiveCheckAt: null,
+        ...appendLogs(
+          currentMarketState,
+          createActivity({
+            type: 'monitor',
+            status: 'working',
+            title: 'Controllo automatico avviato',
+            detail: `Sto controllando ${currentMarketState.positions.length} posizioni aperte con prezzi aggiornati.`,
+          }),
+        ),
+      })
+    })
 
     let positionsWithPrices = []
 
     try {
-      positionsWithPrices = await fetchPositionPrices(snapshot.positions)
+      positionsWithPrices = await fetchPositionPrices(marketState.positions, marketId)
     } catch (error) {
-      updateTradingState((current) => ({
-        ...current,
-        engineStatus: 'Errore monitor live',
-        nextLiveCheckAt: new Date(Date.now() + LIVE_MONITOR_INTERVAL_MS).toISOString(),
-        ...appendLogs(
-          current,
-          createActivity({
-            type: 'monitor',
-            status: 'error',
-            title: 'Monitor live interrotto',
-            detail: error.message || 'Prezzi aggiornati non disponibili.',
-          }),
-        ),
-      }))
+      updateTradingState((current) => {
+        const syncedCurrent = syncActiveMarketState(current)
+        const currentMarketState = normalizeMarketState(
+          marketId,
+          syncedCurrent.markets?.[marketId],
+        )
+
+        return activateMarketState(syncedCurrent, marketId, {
+          ...currentMarketState,
+          engineStatus: 'Errore monitor live',
+          nextLiveCheckAt: new Date(Date.now() + LIVE_MONITOR_INTERVAL_MS).toISOString(),
+          ...appendLogs(
+            currentMarketState,
+            createActivity({
+              type: 'monitor',
+              status: 'error',
+              title: 'Monitor live interrotto',
+              detail: error.message || 'Prezzi aggiornati non disponibili.',
+            }),
+          ),
+        })
+      })
       throw error
     }
 
     updateTradingState((current) => {
-      const evaluatedCount = current.positions.length
+      const syncedCurrent = syncActiveMarketState(current)
+      const currentMarketState = normalizeMarketState(
+        marketId,
+        syncedCurrent.markets?.[marketId],
+      )
+      const evaluatedCount = currentMarketState.positions.length
       const { capital, vault, activePositions, closedTrades } = evaluatePositions(
-        current,
+        currentMarketState,
         positionsWithPrices,
         { incrementDays: false },
       )
 
-      return {
-        ...current,
+      return activateMarketState(syncedCurrent, marketId, {
+        ...currentMarketState,
         version: STORAGE_VERSION,
         capital,
         vault,
         positions: activePositions,
-        history: [...closedTrades, ...current.history],
+        history: [...closedTrades, ...currentMarketState.history],
         lastLiveCheckAt: new Date().toISOString(),
         nextLiveCheckAt:
-          activePositions.length > 0 && current.liveMonitorEnabled
+          activePositions.length > 0 && currentMarketState.liveMonitorEnabled
             ? new Date(Date.now() + LIVE_MONITOR_INTERVAL_MS).toISOString()
             : null,
         engineStatus:
@@ -990,7 +1104,7 @@ export function TradingProvider({ children }) {
             ? 'Monitor live attivo'
             : 'In attesa di nuova scansione',
         ...appendLogs(
-          current,
+          currentMarketState,
           createActivity({
             type: 'monitor',
             status: closedTrades.length > 0 ? 'attention' : 'done',
@@ -1004,79 +1118,116 @@ export function TradingProvider({ children }) {
                 : `${evaluatedCount} posizioni controllate. Nessun target o stop raggiunto; prossimo controllo tra 60 secondi.`,
           }),
         ),
-      }
+      })
     })
-  }, [fetchPositionPrices, recordActivity, updateTradingState])
+  }, [fetchPositionPrices, updateTradingState])
 
-  const runEOD = useCallback(async () => {
-    const snapshot = stateRef.current
-    const marketCopy = getMarketCopy(snapshot.activeMarket)
+  const runEOD = useCallback(async (targetMarketId = null) => {
+    const snapshot = syncActiveMarketState(stateRef.current)
+    const marketId = targetMarketId || snapshot.activeMarket
+    const marketState = normalizeMarketState(marketId, snapshot.markets?.[marketId])
+    const marketCopy = getMarketCopy(marketId)
     const engineName =
-      snapshot.activeMarket === 'crypto' ? 'Controllo Crypto' : 'Motore EOD'
+      marketId === 'crypto' ? 'Controllo Crypto' : 'Motore EOD'
 
-    if (snapshot.positions.length === 0) {
-      recordActivity({
-        type: 'eod',
-        status: 'waiting',
-        title: `${engineName} non eseguito`,
-        detail: 'Non ci sono posizioni aperte da controllare.',
+    if (marketState.positions.length === 0) {
+      updateTradingState((current) => {
+        const syncedCurrent = syncActiveMarketState(current)
+        const currentMarketState = normalizeMarketState(
+          marketId,
+          syncedCurrent.markets?.[marketId],
+        )
+
+        return activateMarketState(syncedCurrent, marketId, {
+          ...currentMarketState,
+          ...appendLogs(
+            currentMarketState,
+            createActivity({
+              type: 'eod',
+              status: 'waiting',
+              title: `${engineName} non eseguito`,
+              detail: 'Non ci sono posizioni aperte da controllare.',
+            }),
+          ),
+        })
       })
       return
     }
 
-    updateTradingState((current) => ({
-      ...current,
-      engineStatus: `${engineName} in esecuzione`,
-      ...appendLogs(
-        current,
-        createActivity({
-          type: 'eod',
-          status: 'working',
-          title: `${engineName} avviato`,
-          detail: `Sto aggiornando i prezzi ${marketCopy.provider} di ${current.positions.length} posizioni aperte.`,
-        }),
-      ),
-    }))
+    updateTradingState((current) => {
+      const syncedCurrent = syncActiveMarketState(current)
+      const currentMarketState = normalizeMarketState(
+        marketId,
+        syncedCurrent.markets?.[marketId],
+      )
+
+      return activateMarketState(syncedCurrent, marketId, {
+        ...currentMarketState,
+        engineStatus: `${engineName} in esecuzione`,
+        ...appendLogs(
+          currentMarketState,
+          createActivity({
+            type: 'eod',
+            status: 'working',
+            title: `${engineName} avviato`,
+            detail: `Sto aggiornando i prezzi ${marketCopy.provider} di ${currentMarketState.positions.length} posizioni aperte.`,
+          }),
+        ),
+      })
+    })
 
     let positionsWithPrices = []
 
     try {
-      positionsWithPrices = await fetchPositionPrices(snapshot.positions)
+      positionsWithPrices = await fetchPositionPrices(marketState.positions, marketId)
     } catch (error) {
-      updateTradingState((current) => ({
-        ...current,
-        engineStatus: `Errore ${engineName}`,
-        ...appendLogs(
-          current,
-          createActivity({
-            type: 'eod',
-            status: 'error',
-            title: `${engineName} interrotto`,
-            detail: error.message || 'Prezzi aggiornati non disponibili.',
-          }),
-        ),
-      }))
+      updateTradingState((current) => {
+        const syncedCurrent = syncActiveMarketState(current)
+        const currentMarketState = normalizeMarketState(
+          marketId,
+          syncedCurrent.markets?.[marketId],
+        )
+
+        return activateMarketState(syncedCurrent, marketId, {
+          ...currentMarketState,
+          engineStatus: `Errore ${engineName}`,
+          ...appendLogs(
+            currentMarketState,
+            createActivity({
+              type: 'eod',
+              status: 'error',
+              title: `${engineName} interrotto`,
+              detail: error.message || 'Prezzi aggiornati non disponibili.',
+            }),
+          ),
+        })
+      })
       throw error
     }
 
     updateTradingState((current) => {
-      const evaluatedCount = current.positions.length
+      const syncedCurrent = syncActiveMarketState(current)
+      const currentMarketState = normalizeMarketState(
+        marketId,
+        syncedCurrent.markets?.[marketId],
+      )
+      const evaluatedCount = currentMarketState.positions.length
       const { capital, vault, activePositions, closedTrades } = evaluatePositions(
-        current,
+        currentMarketState,
         positionsWithPrices,
         { incrementDays: true },
       )
 
-      return {
-        ...current,
+      return activateMarketState(syncedCurrent, marketId, {
+        ...currentMarketState,
         version: STORAGE_VERSION,
         capital,
         vault,
         positions: activePositions,
-        history: [...closedTrades, ...current.history],
+        history: [...closedTrades, ...currentMarketState.history],
         lastLiveCheckAt: new Date().toISOString(),
         nextLiveCheckAt:
-          activePositions.length > 0 && current.liveMonitorEnabled
+          activePositions.length > 0 && currentMarketState.liveMonitorEnabled
             ? new Date(Date.now() + LIVE_MONITOR_INTERVAL_MS).toISOString()
             : null,
         engineStatus:
@@ -1084,7 +1235,7 @@ export function TradingProvider({ children }) {
             ? 'Posizioni in monitoraggio'
             : 'In attesa di nuova scansione',
         ...appendLogs(
-          current,
+          currentMarketState,
           createActivity({
             type: 'eod',
             status: closedTrades.length > 0 ? 'attention' : 'done',
@@ -1095,9 +1246,9 @@ export function TradingProvider({ children }) {
                 : `${evaluatedCount} posizioni controllate. Nessun target o stop loss raggiunto.`,
           }),
         ),
-      }
+      })
     })
-  }, [fetchPositionPrices, recordActivity, updateTradingState])
+  }, [fetchPositionPrices, updateTradingState])
 
   useEffect(() => {
     const monitorActive =

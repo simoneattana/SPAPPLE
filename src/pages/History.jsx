@@ -14,6 +14,7 @@ import { Button } from '../components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card'
 import { useTrading } from '../context/useTrading'
 import { getMarketCopy } from '../services/marketCopy'
+import { getTradingStrategy } from '../strategies'
 
 function getFilterOptions(activeMarket) {
   return [
@@ -46,6 +47,8 @@ const currencyFormatter = new Intl.NumberFormat('it-IT', {
   style: 'currency',
   currency: 'EUR',
 })
+
+const EMPTY_ARRAY = []
 
 function normalizeDate(value) {
   const date = new Date(value)
@@ -194,11 +197,21 @@ function HistoryItem({ record, activeMarket }) {
   )
 }
 
-export default function History() {
-  const { activeMarket, events = [], history = [], marketLabel } = useTrading()
+export default function History({ marketId }) {
+  const { activeMarket, markets } = useTrading()
+  const effectiveMarket = marketId || activeMarket
+  const strategy = getTradingStrategy(effectiveMarket)
+  const routeMarketState = markets?.[effectiveMarket] || {}
+  const events = Array.isArray(routeMarketState.events)
+    ? routeMarketState.events
+    : EMPTY_ARRAY
+  const history = Array.isArray(routeMarketState.history)
+    ? routeMarketState.history
+    : EMPTY_ARRAY
+  const marketLabel = routeMarketState.marketLabel || strategy.label
   const [activeFilter, setActiveFilter] = useState('all')
-  const marketCopy = getMarketCopy(activeMarket)
-  const filterOptions = getFilterOptions(activeMarket)
+  const marketCopy = getMarketCopy(effectiveMarket)
+  const filterOptions = getFilterOptions(effectiveMarket)
 
   const records = useMemo(() => {
     const eventRecords = events.map((event) => ({
@@ -298,7 +311,7 @@ export default function History() {
                   {monthlyGroups[key].map((record) => (
                     <HistoryItem
                       key={record.id}
-                      activeMarket={activeMarket}
+                      activeMarket={effectiveMarket}
                       record={record}
                     />
                   ))}

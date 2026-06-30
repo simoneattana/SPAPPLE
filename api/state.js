@@ -67,82 +67,74 @@ function mergeHistory(first = [], second = []) {
   )
 }
 
-function mergeMarkets(mergedState, incoming, currentPayload, preserveBackendTrading) {
-  const activeMarket = mergedState.activeMarket || DEFAULT_MARKET_ID
+function latestTimestamp(first, second) {
+  return timestamp(first) >= timestamp(second) ? first : second
+}
+
+function mergeMarketState(incomingMarket = {}, currentMarket = {}) {
+  return {
+    ...currentMarket,
+    ...incomingMarket,
+    history: mergeHistory(incomingMarket.history, currentMarket.history),
+    events: mergeById(incomingMarket.events, currentMarket.events),
+    activityLog: mergeById(
+      incomingMarket.activityLog,
+      currentMarket.activityLog,
+    ).slice(0, 14),
+    lastBackendCheckAt: latestTimestamp(
+      incomingMarket.lastBackendCheckAt,
+      currentMarket.lastBackendCheckAt,
+    ),
+    backendMonitorEnabled:
+      typeof incomingMarket.backendMonitorEnabled === 'boolean'
+        ? incomingMarket.backendMonitorEnabled
+        : currentMarket.backendMonitorEnabled,
+  }
+}
+
+function mergeMarkets(incoming, currentPayload) {
   const incomingMarkets = incoming.markets || {}
   const currentMarkets = currentPayload.markets || {}
-  const activeMarketState = {
-    ...(currentMarkets[activeMarket] || {}),
-    ...(incomingMarkets[activeMarket] || {}),
-    capital: mergedState.capital,
-    vault: mergedState.vault,
-    positions: mergedState.positions,
-    history: mergedState.history,
-    events: mergedState.events,
-    activityLog: mergedState.activityLog,
-    lastBackendCheckAt: mergedState.lastBackendCheckAt,
-    backendMonitorEnabled: mergedState.backendMonitorEnabled,
-  }
+  const marketIds = new Set([
+    DEFAULT_MARKET_ID,
+    incoming.activeMarket || DEFAULT_MARKET_ID,
+    currentPayload.activeMarket || DEFAULT_MARKET_ID,
+    ...Object.keys(currentMarkets),
+    ...Object.keys(incomingMarkets),
+  ])
+  const mergedMarkets = {}
 
-  if (preserveBackendTrading && currentMarkets[activeMarket]) {
-    activeMarketState.lastScanAt =
-      currentMarkets[activeMarket].lastScanAt || activeMarketState.lastScanAt
-    activeMarketState.lastScanCount =
-      currentMarkets[activeMarket].lastScanCount ?? activeMarketState.lastScanCount
-    activeMarketState.lastSignalCount =
-      currentMarkets[activeMarket].lastSignalCount ??
-      activeMarketState.lastSignalCount
-    activeMarketState.lastScanResults =
-      currentMarkets[activeMarket].lastScanResults ||
-      activeMarketState.lastScanResults
-  }
+  marketIds.forEach((marketId) => {
+    mergedMarkets[marketId] = mergeMarketState(
+      incomingMarkets[marketId],
+      currentMarkets[marketId],
+    )
+  })
 
-  return {
-    ...currentMarkets,
-    ...incomingMarkets,
-    [activeMarket]: activeMarketState,
-  }
+  return mergedMarkets
 }
 
 async function mergeIncomingState(supabase, incomingPayload) {
   const { payload: currentPayload } = await readTradingState(supabase)
   const incoming = normalizeTradingState(incomingPayload)
-  const currentBackendTime = timestamp(currentPayload.lastBackendCheckAt)
-  const incomingBackendTime = timestamp(incoming.lastBackendCheckAt)
-  const preserveBackendTrading = currentBackendTime > incomingBackendTime
-
-  const mergedState = {
-    ...currentPayload,
-    ...incoming,
-    capital: preserveBackendTrading ? currentPayload.capital : incoming.capital,
-    vault: preserveBackendTrading ? currentPayload.vault : incoming.vault,
-    positions: preserveBackendTrading
-      ? currentPayload.positions
-      : incoming.positions,
-    history: mergeHistory(incoming.history, currentPayload.history),
-    events: mergeById(incoming.events, currentPayload.events),
-    activityLog: mergeById(incoming.activityLog, currentPayload.activityLog).slice(
-      0,
-      14,
-    ),
-    backendMonitorEnabled:
-      typeof incomingPayload.backendMonitorEnabled === 'boolean'
-        ? incoming.backendMonitorEnabled
-        : currentPayload.backendMonitorEnabled,
-    lastBackendCheckAt:
-      currentBackendTime > incomingBackendTime
-        ? currentPayload.lastBackendCheckAt
-        : incoming.lastBackendCheckAt,
-  }
+  const markets = mergeMarkets(incoming, currentPayload)
+  const activeMarket = incoming.activeMarket || DEFAULT_MARKET_ID
+  const activeMarketState = markets[activeMarket] || {}
 
   return {
-    ...mergedState,
-    markets: mergeMarkets(
-      mergedState,
-      incoming,
-      currentPayload,
-      preserveBackendTrading,
-    ),
+    ...currentPayload,
+    ...incoming,
+    activeMarket,
+    markets,
+    ...activeMarketState,
+    history: activeMarketState.history || [],
+    events: activeMarketState.events || [],
+    activityLog: activeMarketState.activityLog || [],
+    backendMonitorEnabled:
+      typeof activeMarketState.backendMonitorEnabled === 'boolean'
+        ? activeMarketState.backendMonitorEnabled
+        : true,
+    lastBackendCheckAt: activeMarketState.lastBackendCheckAt || null,
   }
 }
 
