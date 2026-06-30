@@ -11,6 +11,7 @@ const SLOT_SIZE = 2000
 const MAX_POSITIONS = 5
 const STORAGE_KEY = 'spapple_state'
 const STORAGE_VERSION = 4
+const LIVE_MONITOR_INTERVAL_MS = 60_000
 
 const initialActivity = {
   id: 'system-ready',
@@ -35,6 +36,9 @@ const initialState = {
   lastSignalCount: 0,
   lastScanResults: [],
   engineStatus: 'In attesa',
+  liveMonitorEnabled: true,
+  lastLiveCheckAt: null,
+  nextLiveCheckAt: null,
 }
 
 function roundPrice(value) {
@@ -63,6 +67,52 @@ function appendLogs(state, activity) {
   }
 }
 
+function normalizeStoredState(parsedState) {
+  const capital = Number(parsedState.capital)
+  const vault = Number(parsedState.vault)
+
+  return {
+    version: STORAGE_VERSION,
+    capital: Number.isFinite(capital) ? capital : initialState.capital,
+    vault: Number.isFinite(vault) ? vault : initialState.vault,
+    positions: Array.isArray(parsedState.positions)
+      ? parsedState.positions
+      : initialState.positions,
+    history: Array.isArray(parsedState.history)
+      ? parsedState.history
+      : initialState.history,
+    activityLog: Array.isArray(parsedState.activityLog)
+      ? parsedState.activityLog
+      : initialState.activityLog,
+    events: Array.isArray(parsedState.events)
+      ? parsedState.events
+      : Array.isArray(parsedState.activityLog)
+        ? parsedState.activityLog
+        : initialState.events,
+    automationEnabled:
+      typeof parsedState.automationEnabled === 'boolean'
+        ? parsedState.automationEnabled
+        : initialState.automationEnabled,
+    lastScanAt: parsedState.lastScanAt || initialState.lastScanAt,
+    lastScanCount: Number.isFinite(Number(parsedState.lastScanCount))
+      ? Number(parsedState.lastScanCount)
+      : initialState.lastScanCount,
+    lastSignalCount: Number.isFinite(Number(parsedState.lastSignalCount))
+      ? Number(parsedState.lastSignalCount)
+      : initialState.lastSignalCount,
+    lastScanResults: Array.isArray(parsedState.lastScanResults)
+      ? parsedState.lastScanResults
+      : initialState.lastScanResults,
+    engineStatus: parsedState.engineStatus || initialState.engineStatus,
+    liveMonitorEnabled:
+      typeof parsedState.liveMonitorEnabled === 'boolean'
+        ? parsedState.liveMonitorEnabled
+        : initialState.liveMonitorEnabled,
+    lastLiveCheckAt: parsedState.lastLiveCheckAt || initialState.lastLiveCheckAt,
+    nextLiveCheckAt: parsedState.nextLiveCheckAt || initialState.nextLiveCheckAt,
+  }
+}
+
 function loadInitialState() {
   try {
     const storedState = localStorage.getItem(STORAGE_KEY)
@@ -78,40 +128,7 @@ function loadInitialState() {
       return initialState
     }
 
-    const capital = Number(parsedState.capital)
-    const vault = Number(parsedState.vault)
-
-    return {
-      version: STORAGE_VERSION,
-      capital: Number.isFinite(capital) ? capital : initialState.capital,
-      vault: Number.isFinite(vault) ? vault : initialState.vault,
-      positions: Array.isArray(parsedState.positions)
-        ? parsedState.positions
-        : initialState.positions,
-      history: Array.isArray(parsedState.history)
-        ? parsedState.history
-        : initialState.history,
-      activityLog: Array.isArray(parsedState.activityLog)
-        ? parsedState.activityLog
-        : initialState.activityLog,
-      events: Array.isArray(parsedState.events)
-        ? parsedState.events
-        : Array.isArray(parsedState.activityLog)
-          ? parsedState.activityLog
-          : initialState.events,
-      automationEnabled: Boolean(parsedState.automationEnabled),
-      lastScanAt: parsedState.lastScanAt || initialState.lastScanAt,
-      lastScanCount: Number.isFinite(Number(parsedState.lastScanCount))
-        ? Number(parsedState.lastScanCount)
-        : initialState.lastScanCount,
-      lastSignalCount: Number.isFinite(Number(parsedState.lastSignalCount))
-        ? Number(parsedState.lastSignalCount)
-        : initialState.lastSignalCount,
-      lastScanResults: Array.isArray(parsedState.lastScanResults)
-        ? parsedState.lastScanResults
-        : initialState.lastScanResults,
-      engineStatus: parsedState.engineStatus || initialState.engineStatus,
-    }
+    return normalizeStoredState(parsedState)
   } catch {
     return initialState
   }
@@ -138,6 +155,76 @@ function buildTrade(ticker, price, atr, type) {
   }
 }
 
+function evaluatePositions(current, positionsWithPrices, { incrementDays }) {
+  let capital = current.capital
+  let vault = current.vault
+  const activePositions = []
+  const closedTrades = []
+
+  current.positions.forEach((position) => {
+    const priceData = positionsWithPrices.find(
+      (item) => item.position.id === position.id,
+    )
+    const latestPrice = priceData?.latestPrice
+    const updatedPosition = {
+      ...position,
+      daysHeld: incrementDays ? position.daysHeld + 1 : position.daysHeld,
+    }
+
+    if (!Number.isFinite(latestPrice)) {
+      activePositions.push(updatedPosition)
+      return
+    }
+
+    const quantity = position.invested / position.entryPrice
+    const long = position.type === 'LONG'
+    const pnlEur = long
+      ? (latestPrice - position.entryPrice) * quantity
+      : (position.entryPrice - latestPrice) * quantity
+    const monitoredPosition = {
+      ...updatedPosition,
+      latestPrice: roundPrice(latestPrice),
+      unrealizedPnl: roundPrice(pnlEur),
+    }
+    const isWin = long
+      ? latestPrice >= position.takeProfit
+      : latestPrice <= position.takeProfit
+    const isLoss = long
+      ? latestPrice <= position.stopLoss
+      : latestPrice >= position.stopLoss
+
+    if (!isWin && !isLoss) {
+      activePositions.push(monitoredPosition)
+      return
+    }
+
+    const roundedPnl = roundPrice(pnlEur)
+
+    if (isWin) {
+      capital += position.invested
+      vault += Math.max(roundedPnl, 0)
+    } else {
+      capital += Math.max(position.invested - Math.abs(roundedPnl), 0)
+    }
+
+    closedTrades.push({
+      ticker: position.ticker,
+      type: position.type,
+      pnlEur: roundedPnl,
+      result: isWin ? 'WIN' : 'LOSS',
+      exitDate: new Date().toISOString(),
+      exitPrice: roundPrice(latestPrice),
+    })
+  })
+
+  return {
+    capital: roundPrice(capital),
+    vault: roundPrice(vault),
+    activePositions,
+    closedTrades,
+  }
+}
+
 export function TradingProvider({ children }) {
   const { isAuthenticated } = useAuth()
   const [state, setState] = useState(loadInitialState)
@@ -145,6 +232,7 @@ export function TradingProvider({ children }) {
   const stateRef = useRef(state)
   const remoteReadyRef = useRef(false)
   const remoteSaveTimerRef = useRef(null)
+  const liveCheckRunningRef = useRef(false)
 
   useEffect(() => {
     stateRef.current = state
@@ -174,9 +262,10 @@ export function TradingProvider({ children }) {
         }
 
         if (remoteState.payload?.version === STORAGE_VERSION) {
-          stateRef.current = remoteState.payload
-          setState(remoteState.payload)
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(remoteState.payload))
+          const hydratedState = normalizeStoredState(remoteState.payload)
+          stateRef.current = hydratedState
+          setState(hydratedState)
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(hydratedState))
         } else {
           await saveRemoteTradingState(stateRef.current)
         }
@@ -244,6 +333,28 @@ export function TradingProvider({ children }) {
           detail: enabled
             ? 'Alla prossima scansione aprirà automaticamente i segnali validi, rispettando capitale e slot.'
             : 'Le prossime operazioni richiederanno conferma manuale dallo Scanner.',
+        }),
+      ),
+    }))
+  }, [updateTradingState])
+
+  const setLiveMonitorEnabled = useCallback((enabled) => {
+    updateTradingState((current) => ({
+      ...current,
+      liveMonitorEnabled: enabled,
+      nextLiveCheckAt:
+        enabled && current.positions.length > 0
+          ? new Date(Date.now() + LIVE_MONITOR_INTERVAL_MS).toISOString()
+          : null,
+      ...appendLogs(
+        current,
+        createActivity({
+          type: 'monitor',
+          status: enabled ? 'working' : 'waiting',
+          title: enabled ? 'Monitor live attivato' : 'Monitor live disattivato',
+          detail: enabled
+            ? 'Controllerò automaticamente le posizioni aperte ogni 60 secondi mentre l’app resta aperta.'
+            : 'Le posizioni saranno controllate solo dal Motore EOD manuale.',
         }),
       ),
     }))
@@ -427,8 +538,114 @@ export function TradingProvider({ children }) {
     return { openedTrades, skippedTickers }
   }, [])
 
+  const fetchPositionPrices = useCallback(async (positions) => {
+    return Promise.all(
+      positions.map(async (position) => ({
+        position,
+        latestPrice: await fetchLatestPrice(position.ticker),
+      })),
+    )
+  }, [])
+
+  const runLiveCheck = useCallback(async ({ silent = false } = {}) => {
+    const snapshot = stateRef.current
+
+    if (snapshot.positions.length === 0) {
+      if (!silent) {
+        recordActivity({
+          type: 'monitor',
+          status: 'waiting',
+          title: 'Monitor live in attesa',
+          detail: 'Non ci sono posizioni aperte da controllare.',
+        })
+      }
+      return
+    }
+
+    updateTradingState((current) => ({
+      ...current,
+      engineStatus: 'Monitor live in corso',
+      nextLiveCheckAt: null,
+      ...appendLogs(
+        current,
+        createActivity({
+          type: 'monitor',
+          status: 'working',
+          title: 'Controllo automatico avviato',
+          detail: `Sto controllando ${current.positions.length} posizioni aperte con prezzi aggiornati.`,
+        }),
+      ),
+    }))
+
+    let positionsWithPrices = []
+
+    try {
+      positionsWithPrices = await fetchPositionPrices(snapshot.positions)
+    } catch (error) {
+      updateTradingState((current) => ({
+        ...current,
+        engineStatus: 'Errore monitor live',
+        nextLiveCheckAt: new Date(Date.now() + LIVE_MONITOR_INTERVAL_MS).toISOString(),
+        ...appendLogs(
+          current,
+          createActivity({
+            type: 'monitor',
+            status: 'error',
+            title: 'Monitor live interrotto',
+            detail: error.message || 'Prezzi aggiornati non disponibili.',
+          }),
+        ),
+      }))
+      throw error
+    }
+
+    updateTradingState((current) => {
+      const evaluatedCount = current.positions.length
+      const { capital, vault, activePositions, closedTrades } = evaluatePositions(
+        current,
+        positionsWithPrices,
+        { incrementDays: false },
+      )
+
+      return {
+        ...current,
+        version: STORAGE_VERSION,
+        capital,
+        vault,
+        positions: activePositions,
+        history: [...closedTrades, ...current.history],
+        lastLiveCheckAt: new Date().toISOString(),
+        nextLiveCheckAt:
+          activePositions.length > 0 && current.liveMonitorEnabled
+            ? new Date(Date.now() + LIVE_MONITOR_INTERVAL_MS).toISOString()
+            : null,
+        engineStatus:
+          activePositions.length > 0
+            ? 'Monitor live attivo'
+            : 'In attesa di nuova scansione',
+        ...appendLogs(
+          current,
+          createActivity({
+            type: 'monitor',
+            status: closedTrades.length > 0 ? 'attention' : 'done',
+            title:
+              closedTrades.length > 0
+                ? 'Uscita automatica eseguita'
+                : 'Controllo automatico completato',
+            detail:
+              closedTrades.length > 0
+                ? `${closedTrades.length} posizioni chiuse perché hanno raggiunto target o stop.`
+                : `${evaluatedCount} posizioni controllate. Nessun target o stop raggiunto; prossimo controllo tra 60 secondi.`,
+          }),
+        ),
+      }
+    })
+  }, [fetchPositionPrices, recordActivity, updateTradingState])
+
   const runEOD = useCallback(async () => {
-    if (state.positions.length === 0) {
+    const snapshot = stateRef.current
+
+    if (snapshot.positions.length === 0) {
       recordActivity({
         type: 'eod',
         status: 'waiting',
@@ -455,12 +672,7 @@ export function TradingProvider({ children }) {
     let positionsWithPrices = []
 
     try {
-      positionsWithPrices = await Promise.all(
-        state.positions.map(async (position) => ({
-          position,
-          latestPrice: await fetchLatestPrice(position.ticker),
-        })),
-      )
+      positionsWithPrices = await fetchPositionPrices(snapshot.positions)
     } catch (error) {
       updateTradingState((current) => ({
         ...current,
@@ -479,83 +691,25 @@ export function TradingProvider({ children }) {
     }
 
     updateTradingState((current) => {
-      let capital = current.capital
-      let vault = current.vault
-      const activePositions = []
-      const closedTrades = []
       const evaluatedCount = current.positions.length
-
-      current.positions.forEach((position) => {
-        const priceData = positionsWithPrices.find(
-          (item) => item.position.id === position.id,
-        )
-        const latestPrice = priceData?.latestPrice
-        const updatedPosition = {
-          ...position,
-          daysHeld: position.daysHeld + 1,
-        }
-
-        if (!Number.isFinite(latestPrice)) {
-          console.log('Valutazione EOD posizione', updatedPosition)
-          activePositions.push(updatedPosition)
-          return
-        }
-
-        const quantity = position.invested / position.entryPrice
-        const long = position.type === 'LONG'
-        const pnlEur = long
-          ? (latestPrice - position.entryPrice) * quantity
-          : (position.entryPrice - latestPrice) * quantity
-        const monitoredPosition = {
-          ...updatedPosition,
-          latestPrice: roundPrice(latestPrice),
-          unrealizedPnl: roundPrice(pnlEur),
-        }
-        const isWin = long
-          ? latestPrice >= position.takeProfit
-          : latestPrice <= position.takeProfit
-        const isLoss = long
-          ? latestPrice <= position.stopLoss
-          : latestPrice >= position.stopLoss
-
-        console.log('Valutazione EOD posizione', {
-          ...monitoredPosition,
-          latestPrice,
-          pnlEur,
-          isWin,
-          isLoss,
-        })
-
-        if (!isWin && !isLoss) {
-          activePositions.push(monitoredPosition)
-          return
-        }
-
-        const roundedPnl = roundPrice(pnlEur)
-
-        if (isWin) {
-          capital += position.invested
-          vault += Math.max(roundedPnl, 0)
-        } else {
-          capital += Math.max(position.invested - Math.abs(roundedPnl), 0)
-        }
-
-        closedTrades.push({
-          ticker: position.ticker,
-          type: position.type,
-          pnlEur: roundedPnl,
-          result: isWin ? 'WIN' : 'LOSS',
-          exitDate: new Date().toISOString(),
-        })
-      })
+      const { capital, vault, activePositions, closedTrades } = evaluatePositions(
+        current,
+        positionsWithPrices,
+        { incrementDays: true },
+      )
 
       return {
         ...current,
         version: STORAGE_VERSION,
-        capital: roundPrice(capital),
-        vault: roundPrice(vault),
+        capital,
+        vault,
         positions: activePositions,
         history: [...closedTrades, ...current.history],
+        lastLiveCheckAt: new Date().toISOString(),
+        nextLiveCheckAt:
+          activePositions.length > 0 && current.liveMonitorEnabled
+            ? new Date(Date.now() + LIVE_MONITOR_INTERVAL_MS).toISOString()
+            : null,
         engineStatus:
           activePositions.length > 0
             ? 'Posizioni in monitoraggio'
@@ -574,7 +728,53 @@ export function TradingProvider({ children }) {
         ),
       }
     })
-  }, [recordActivity, state.positions, updateTradingState])
+  }, [fetchPositionPrices, recordActivity, updateTradingState])
+
+  useEffect(() => {
+    const monitorActive =
+      isAuthenticated &&
+      state.automationEnabled &&
+      state.liveMonitorEnabled &&
+      state.positions.length > 0
+
+    if (!monitorActive) {
+      return undefined
+    }
+
+    updateTradingState((current) => ({
+      ...current,
+      nextLiveCheckAt:
+        current.nextLiveCheckAt ||
+        new Date(Date.now() + LIVE_MONITOR_INTERVAL_MS).toISOString(),
+    }))
+
+    const intervalId = window.setInterval(async () => {
+      if (liveCheckRunningRef.current) {
+        return
+      }
+
+      liveCheckRunningRef.current = true
+
+      try {
+        await runLiveCheck({ silent: true })
+      } catch {
+        // L'errore viene gia registrato nello storico dal monitor.
+      } finally {
+        liveCheckRunningRef.current = false
+      }
+    }, LIVE_MONITOR_INTERVAL_MS)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [
+    isAuthenticated,
+    runLiveCheck,
+    state.automationEnabled,
+    state.liveMonitorEnabled,
+    state.positions.length,
+    updateTradingState,
+  ])
 
   const value = useMemo(
     () => ({
@@ -586,8 +786,10 @@ export function TradingProvider({ children }) {
       recordScanComplete,
       recordScanError,
       recordScanStart,
+      runLiveCheck,
       runEOD,
       setAutomationEnabled,
+      setLiveMonitorEnabled,
       slotSize: SLOT_SIZE,
       maxPositions: MAX_POSITIONS,
     }),
@@ -598,8 +800,10 @@ export function TradingProvider({ children }) {
       recordScanComplete,
       recordScanError,
       recordScanStart,
+      runLiveCheck,
       runEOD,
       setAutomationEnabled,
+      setLiveMonitorEnabled,
       state,
       remoteStatus,
     ],

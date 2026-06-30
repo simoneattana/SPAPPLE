@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from 'react'
 import {
   Activity,
   AlertTriangle,
@@ -10,6 +11,7 @@ import {
   ShieldCheck,
   ToggleLeft,
   ToggleRight,
+  Zap,
 } from 'lucide-react'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
@@ -33,6 +35,26 @@ function formatActivityDate(value) {
   }
 
   return dateTimeFormatter.format(new Date(value))
+}
+
+function formatCountdown(target) {
+  if (!target) {
+    return 'In attesa'
+  }
+
+  const remainingMs = new Date(target).getTime() - Date.now()
+
+  if (!Number.isFinite(remainingMs) || remainingMs <= 0) {
+    return 'A breve'
+  }
+
+  const seconds = Math.ceil(remainingMs / 1000)
+
+  if (seconds < 60) {
+    return `${seconds}s`
+  }
+
+  return `${Math.ceil(seconds / 60)} min`
 }
 
 function activityStyles(status) {
@@ -127,7 +149,7 @@ function getOperatingState({
 
 function getNextAction({ automationEnabled, positions, lastScanAt, lastSignalCount }) {
   if (positions.length > 0) {
-    return 'A mercati chiusi, esegui il Motore EOD: aggiornerà i prezzi e chiuderà solo target o stop loss raggiunti.'
+    return 'Sto monitorando le posizioni. Se un prezzo tocca take profit o stop loss, chiudo automaticamente.'
   }
 
   if (lastScanAt && lastSignalCount > 0 && !automationEnabled) {
@@ -139,6 +161,42 @@ function getNextAction({ automationEnabled, positions, lastScanAt, lastSignalCou
   }
 
   return 'Prossimo passo: vai nello Scanner e avvia una scansione EOD con dati reali.'
+}
+
+function buildAssistantMessages({
+  automationEnabled,
+  liveMonitorEnabled,
+  nextLiveCheckAt,
+  positions,
+}) {
+  if (positions.length > 0 && automationEnabled && liveMonitorEnabled) {
+    return [
+      'Sono in modalità pilota automatico: controllo le posizioni aperte senza aspettare il tuo intervento.',
+      `Prossimo controllo prezzo: ${formatCountdown(nextLiveCheckAt)}.`,
+      'Se un titolo raggiunge take profit o stop loss, registro l’uscita e aggiorno capitale, salvadanaio e storico.',
+    ]
+  }
+
+  if (positions.length > 0) {
+    return [
+      'Ci sono posizioni aperte, ma il monitor live non è completamente attivo.',
+      'Puoi riattivare pilota automatico e monitor live per far controllare a me i prezzi.',
+      'In alternativa puoi usare il Motore EOD manuale dal Portafoglio.',
+    ]
+  }
+
+  if (automationEnabled) {
+    return [
+      'Sono pronto a lavorare in automatico.',
+      'Alla prossima scansione valuterò i segnali e aprirò solo quelli che rispettano le regole.',
+      'Dopo l’apertura inizierò il monitor live ogni 60 secondi.',
+    ]
+  }
+
+  return [
+    'Sono in attesa: il pilota automatico è spento.',
+    'Puoi riattivarlo quando vuoi per lasciare a Spapple apertura e monitoraggio delle posizioni.',
+  ]
 }
 
 function ActivityItem({ item }) {
@@ -173,12 +231,23 @@ export function SystemSidebar() {
     lastScanAt,
     lastScanCount,
     lastSignalCount,
+    lastLiveCheckAt,
+    liveMonitorEnabled,
     maxPositions,
+    nextLiveCheckAt,
     positions,
     remoteStatus,
+    runLiveCheck,
     setAutomationEnabled,
+    setLiveMonitorEnabled,
     slotSize,
   } = useTrading()
+  const [, setNow] = useState(Date.now())
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   const operatingState = getOperatingState({
     automationEnabled,
@@ -196,6 +265,16 @@ export function SystemSidebar() {
   const availableSlots = Math.max(maxPositions - positions.length, 0)
   const capitalSlots = Math.floor(capital / slotSize)
   const executableSlots = Math.min(availableSlots, capitalSlots)
+  const assistantMessages = useMemo(
+    () =>
+      buildAssistantMessages({
+        automationEnabled,
+        liveMonitorEnabled,
+        nextLiveCheckAt,
+        positions,
+      }),
+    [automationEnabled, liveMonitorEnabled, nextLiveCheckAt, positions],
+  )
 
   return (
     <aside className="flex flex-col gap-4 xl:sticky xl:top-8 xl:max-h-[calc(100vh-4rem)]">
@@ -264,12 +343,50 @@ export function SystemSidebar() {
           <span>{automationEnabled ? 'ON' : 'OFF'}</span>
         </Button>
 
+        <Button
+          className="mt-3 w-full justify-between"
+          variant={liveMonitorEnabled ? 'default' : 'ghost'}
+          onClick={() => setLiveMonitorEnabled(!liveMonitorEnabled)}
+        >
+          <span className="flex items-center gap-2">
+            <Zap className="h-4 w-4" />
+            Monitor live
+          </span>
+          <span>{liveMonitorEnabled ? 'ON' : 'OFF'}</span>
+        </Button>
+
         <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950 p-3">
           <div className="flex items-center gap-2">
             <ListChecks className="h-4 w-4 text-[#deff9a]" />
             <p className="text-sm font-semibold text-white">Prossima azione</p>
           </div>
           <p className="mt-2 text-sm leading-6 text-slate-400">{nextAction}</p>
+          <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+            <div className="rounded-lg border border-slate-800 bg-[#090b10] p-2">
+              <p className="uppercase tracking-[0.12em] text-slate-600">
+                Prossimo controllo
+              </p>
+              <p className="mt-1 font-semibold text-[#deff9a]">
+                {formatCountdown(nextLiveCheckAt)}
+              </p>
+            </div>
+            <div className="rounded-lg border border-slate-800 bg-[#090b10] p-2">
+              <p className="uppercase tracking-[0.12em] text-slate-600">
+                Ultimo controllo
+              </p>
+              <p className="mt-1 font-semibold text-slate-300">
+                {formatActivityDate(lastLiveCheckAt)}
+              </p>
+            </div>
+          </div>
+          <Button
+            className="mt-3 w-full"
+            variant="ghost"
+            disabled={positions.length === 0}
+            onClick={() => runLiveCheck()}
+          >
+            Controlla ora
+          </Button>
         </div>
 
         {positions.length > 0 ? (
@@ -353,10 +470,21 @@ export function SystemSidebar() {
               Diario sistema
             </p>
             <h2 className="mt-2 text-base font-semibold text-white">
-              Cosa è successo
+              Chat operativa
             </h2>
           </div>
           <Activity className="h-5 w-5 text-[#deff9a]" />
+        </div>
+
+        <div className="mt-4 space-y-2">
+          {assistantMessages.map((message) => (
+            <div
+              key={message}
+              className="rounded-lg border border-[#deff9a]/20 bg-[#deff9a]/10 p-3 text-sm leading-6 text-slate-200"
+            >
+              {message}
+            </div>
+          ))}
         </div>
 
         <ol className="mt-4 space-y-3 xl:max-h-[34vh] xl:overflow-y-auto xl:pr-1">

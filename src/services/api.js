@@ -77,6 +77,16 @@ function extractPeRatio(summaryData, ticker) {
   return peNumber
 }
 
+function extractMarketPrice(summaryData, ticker) {
+  const summary = summaryData?.quoteSummary?.result?.[0]
+  const price =
+    summary?.price?.regularMarketPrice?.raw ??
+    summary?.price?.postMarketPrice?.raw ??
+    summary?.price?.preMarketPrice?.raw
+
+  return assertNumber(price, `${ticker}: prezzo di mercato`)
+}
+
 function getDiagnostic(row) {
   if (row.status === 'error') {
     return row.reason || 'Dati non disponibili'
@@ -173,6 +183,19 @@ async function mapWithConcurrency(items, limit, mapper) {
 
 export async function fetchLatestPrice(ticker) {
   const encodedTicker = encodeURIComponent(ticker)
+  const summaryData = await fetchJson(
+    `/api/yahoo/summary?symbol=${encodedTicker}`,
+    `${ticker} prezzo aggiornato`,
+  ).catch(() => null)
+
+  if (summaryData) {
+    try {
+      return extractMarketPrice(summaryData, ticker)
+    } catch {
+      // Se Yahoo non espone il prezzo live, usiamo la barra giornaliera.
+    }
+  }
+
   const chartData = await fetchJson(
     `/api/yahoo/chart?symbol=${encodedTicker}`,
     `${ticker} prezzo aggiornato`,

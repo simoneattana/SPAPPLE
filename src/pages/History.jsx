@@ -18,6 +18,7 @@ const filterOptions = [
   { value: 'all', label: 'Tutte' },
   { value: 'scan', label: 'Scansioni' },
   { value: 'trade', label: 'Ordini' },
+  { value: 'monitor', label: 'Monitor live' },
   { value: 'eod', label: 'Motore EOD' },
   { value: 'automation', label: 'Automazioni' },
   { value: 'closed-trade', label: 'Trade chiusi' },
@@ -54,6 +55,7 @@ function eventLabel(type) {
     automation: 'Automazione',
     'closed-trade': 'Trade chiuso',
     eod: 'Motore EOD',
+    monitor: 'Monitor live',
     scan: 'Scansione',
     system: 'Sistema',
     trade: 'Ordine',
@@ -71,6 +73,7 @@ function eventIcon(type, status) {
     automation: Bot,
     'closed-trade': Repeat2,
     eod: Clock3,
+    monitor: Radio,
     scan: Radio,
     trade: CheckCircle2,
   }
