@@ -43,6 +43,7 @@ export default async function handler(request, response) {
       ok: true,
       checkedCount: result.checkedCount,
       closedCount: result.closedTrades.length,
+      openedCount: result.openedTrades?.length || 0,
       errors: result.errors || [],
       updatedAt: result.state.lastBackendCheckAt,
     })
