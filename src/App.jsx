@@ -1,5 +1,5 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
-import { useEffect } from 'react'
+import { useLayoutEffect } from 'react'
 import { AuthProvider } from './services/AuthContext'
 import { ToastProvider } from './components/ui/Toast'
 import { TradingProvider } from './context/TradingContext'
@@ -38,26 +38,11 @@ function PublicRoute({ children }) {
 function MarketScope({ marketId, children }) {
   const { activeMarket, setActiveMarket } = useTrading()
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (activeMarket !== marketId) {
       setActiveMarket(marketId)
     }
   }, [activeMarket, marketId, setActiveMarket])
-
-  if (activeMarket !== marketId) {
-    return (
-      <div className="flex min-h-[520px] items-center justify-center rounded-lg border border-slate-800 bg-[#090b10] p-8 text-center">
-        <div>
-          <p className="text-sm font-semibold text-[var(--market-accent)]">
-            Cambio ambiente operativo...
-          </p>
-          <p className="mt-2 text-sm text-slate-500">
-            Sto caricando il mercato selezionato.
-          </p>
-        </div>
-      </div>
-    )
-  }
 
   return children
 }
