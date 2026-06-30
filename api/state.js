@@ -1,5 +1,6 @@
 import {
   getSupabaseClient,
+  normalizeTradingState,
   readTradingState,
   sendJson,
   writeTradingState,
@@ -26,6 +27,75 @@ async function readRequestBody(request) {
   }
 
   return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')
+}
+
+function timestamp(value) {
+  const time = new Date(value || 0).getTime()
+  return Number.isFinite(time) ? time : 0
+}
+
+function mergeById(first = [], second = []) {
+  const items = new Map()
+
+  ;[...first, ...second].forEach((item) => {
+    if (!item?.id) {
+      return
+    }
+
+    items.set(item.id, item)
+  })
+
+  return [...items.values()].sort(
+    (a, b) => timestamp(b.createdAt) - timestamp(a.createdAt),
+  )
+}
+
+function mergeHistory(first = [], second = []) {
+  const items = new Map()
+
+  ;[...first, ...second].forEach((item) => {
+    if (!item?.ticker || !item?.exitDate) {
+      return
+    }
+
+    items.set(`${item.ticker}-${item.exitDate}`, item)
+  })
+
+  return [...items.values()].sort(
+    (a, b) => timestamp(b.exitDate) - timestamp(a.exitDate),
+  )
+}
+
+async function mergeIncomingState(supabase, incomingPayload) {
+  const { payload: currentPayload } = await readTradingState(supabase)
+  const incoming = normalizeTradingState(incomingPayload)
+  const currentBackendTime = timestamp(currentPayload.lastBackendCheckAt)
+  const incomingBackendTime = timestamp(incoming.lastBackendCheckAt)
+  const preserveBackendTrading = currentBackendTime > incomingBackendTime
+
+  return {
+    ...currentPayload,
+    ...incoming,
+    capital: preserveBackendTrading ? currentPayload.capital : incoming.capital,
+    vault: preserveBackendTrading ? currentPayload.vault : incoming.vault,
+    positions: preserveBackendTrading
+      ? currentPayload.positions
+      : incoming.positions,
+    history: mergeHistory(incoming.history, currentPayload.history),
+    events: mergeById(incoming.events, currentPayload.events),
+    activityLog: mergeById(incoming.activityLog, currentPayload.activityLog).slice(
+      0,
+      14,
+    ),
+    backendMonitorEnabled:
+      typeof incomingPayload.backendMonitorEnabled === 'boolean'
+        ? incoming.backendMonitorEnabled
+        : currentPayload.backendMonitorEnabled,
+    lastBackendCheckAt:
+      currentBackendTime > incomingBackendTime
+        ? currentPayload.lastBackendCheckAt
+        : incoming.lastBackendCheckAt,
+  }
 }
 
 export default async function handler(request, response) {
@@ -81,7 +151,8 @@ export default async function handler(request, response) {
     }
 
     try {
-      await writeTradingState(supabase, body.payload)
+      const mergedPayload = await mergeIncomingState(supabase, body.payload)
+      await writeTradingState(supabase, mergedPayload)
     } catch (error) {
       sendJson(response, 500, { error: error.message })
       return
