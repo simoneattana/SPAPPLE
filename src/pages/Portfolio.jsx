@@ -16,6 +16,7 @@ import {
 import { CRYPTO_TICKERS } from '../services/cryptoUniverse'
 import { EUROPEAN_TICKERS } from '../services/marketUniverse'
 import { getMarketCopy } from '../services/marketCopy'
+import { getTradingStrategy } from '../strategies'
 import {
   isActionableResult,
   isAutoEligibleResult,
@@ -69,7 +70,7 @@ function PnlMetric({ value }) {
   )
 }
 
-export default function Portfolio() {
+export default function Portfolio({ marketId }) {
   const {
     automationEnabled,
     closePositionManually,
@@ -88,16 +89,28 @@ export default function Portfolio() {
   const { toast } = useToast()
   const [runningEOD, setRunningEOD] = useState(false)
   const [closingId, setClosingId] = useState(null)
-  const marketCopy = getMarketCopy(activeMarket)
+  const effectiveMarket = marketId || activeMarket
+  const marketIsAligned = activeMarket === effectiveMarket
+  const effectiveStrategy = getTradingStrategy(effectiveMarket)
+  const effectiveMarketLabel = effectiveStrategy.label
+  const marketCopy = getMarketCopy(effectiveMarket)
+  const visiblePositions = marketIsAligned ? positions : []
+  const visibleCapital = marketIsAligned ? currencyFormatter.format(capital) : 'Sincronizzazione'
+  const visibleVault = marketIsAligned ? currencyFormatter.format(vault) : 'Sincronizzazione'
+  const visibleMaxPositions = effectiveStrategy.maxPositions || maxPositions
 
   const handleRunEOD = async () => {
+    if (!marketIsAligned) {
+      return
+    }
+
     setRunningEOD(true)
 
     try {
       await runEOD()
       toast({
         title:
-          activeMarket === 'crypto'
+          effectiveMarket === 'crypto'
             ? 'Controllo Crypto completato. Posizioni aggiornate.'
             : 'Elaborazione EOD completata. Posizioni aggiornate.',
       })
@@ -105,7 +118,7 @@ export default function Portfolio() {
       toast({
         title:
           error.message ||
-          (activeMarket === 'crypto'
+          (effectiveMarket === 'crypto'
             ? 'Errore durante il Controllo Crypto'
             : 'Errore durante il Motore EOD'),
         variant: 'destructive',
@@ -116,12 +129,12 @@ export default function Portfolio() {
   }
 
   const refillAfterManualClose = async (closedTicker) => {
-    if (!automationEnabled) {
+    if (!automationEnabled || !marketIsAligned) {
       return
     }
 
     const config =
-      activeMarket === 'crypto'
+      effectiveMarket === 'crypto'
         ? {
             universe: CRYPTO_TICKERS,
             fetcher: fetchCryptoMarketData,
@@ -172,6 +185,10 @@ export default function Portfolio() {
   }
 
   const handleManualClose = async (position) => {
+    if (!marketIsAligned) {
+      return
+    }
+
     setClosingId(position.id)
 
     try {
@@ -202,24 +219,24 @@ export default function Portfolio() {
             Portafoglio virtuale · {marketCopy.eyebrow}
           </p>
           <h1 className="mt-3 text-2xl font-semibold text-white sm:text-3xl">
-            Portafoglio {marketLabel}
+            Portafoglio {marketIsAligned ? marketLabel : effectiveMarketLabel}
           </h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
             Gestione separata di capitale, posizioni, target e stop per{' '}
-            {marketLabel}.
+            {marketIsAligned ? marketLabel : effectiveMarketLabel}.
           </p>
         </div>
 
         <Button
           onClick={handleRunEOD}
-          disabled={positions.length === 0 || runningEOD}
+          disabled={!marketIsAligned || visiblePositions.length === 0 || runningEOD}
         >
           {runningEOD ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
             <Play className="h-4 w-4" />
           )}
-          {activeMarket === 'crypto'
+          {effectiveMarket === 'crypto'
             ? 'Esegui Controllo Crypto'
             : 'Esegui Motore EOD (Fine Giornata)'}
         </Button>
@@ -233,7 +250,7 @@ export default function Portfolio() {
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-semibold text-[var(--market-accent)]">
-              {currencyFormatter.format(capital)}
+              {visibleCapital}
             </p>
           </CardContent>
         </Card>
@@ -244,7 +261,7 @@ export default function Portfolio() {
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-semibold text-[var(--market-accent)]">
-              {currencyFormatter.format(vault)}
+              {visibleVault}
             </p>
           </CardContent>
         </Card>
@@ -255,15 +272,15 @@ export default function Portfolio() {
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-semibold text-white">
-              {positions.length} / {maxPositions}
+              {visiblePositions.length} / {visibleMaxPositions}
             </p>
           </CardContent>
         </Card>
       </section>
 
-      {positions.length > 0 ? (
+      {visiblePositions.length > 0 ? (
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {positions.map((position) => (
+          {visiblePositions.map((position) => (
             <Card key={position.id}>
               <CardHeader className="items-start justify-between gap-4 border-b border-slate-800">
                 <div>
@@ -294,7 +311,7 @@ export default function Portfolio() {
                 />
                 <Metric
                   label={
-                    activeMarket === 'crypto'
+                    effectiveMarket === 'crypto'
                       ? 'Ultimo Prezzo Kraken'
                       : 'Ultimo Prezzo EOD'
                   }
@@ -337,7 +354,8 @@ export default function Portfolio() {
               Nessuna posizione attiva
             </h2>
             <p className="mt-3 max-w-md text-sm leading-6 text-slate-500">
-              Apri una posizione dallo Scanner di Mercato {marketLabel} per
+              Apri una posizione dallo Scanner di Mercato{' '}
+              {marketIsAligned ? marketLabel : effectiveMarketLabel} per
               avviare il forward testing separato.
             </p>
           </div>

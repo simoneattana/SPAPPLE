@@ -1,5 +1,5 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
-import { useLayoutEffect } from 'react'
+import { cloneElement, isValidElement, useLayoutEffect } from 'react'
 import { AuthProvider } from './services/AuthContext'
 import { ToastProvider } from './components/ui/Toast'
 import { TradingProvider } from './context/TradingContext'
@@ -48,7 +48,11 @@ function MarketScope({ marketId, children }) {
 }
 
 function MarketPage({ marketId, children }) {
-  return <MarketScope marketId={marketId}>{children}</MarketScope>
+  return (
+    <MarketScope marketId={marketId}>
+      {isValidElement(children) ? cloneElement(children, { marketId }) : children}
+    </MarketScope>
+  )
 }
 
 function AppRoutes() {

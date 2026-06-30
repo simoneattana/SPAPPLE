@@ -30,6 +30,7 @@ import { CRYPTO_TICKERS } from '../services/cryptoUniverse'
 import { EUROPEAN_TICKERS } from '../services/marketUniverse'
 import { getMarketCopy } from '../services/marketCopy'
 import { LEGACY_POSITION_SIZE } from '../services/positionSizing'
+import { getTradingStrategy } from '../strategies'
 import {
   MAX_AUTO_ATR_PCT,
   getAtrPct,
@@ -321,7 +322,7 @@ function WatchlistBadge({ row, isActionable }) {
   return <Badge>NESSUN SEGNALE</Badge>
 }
 
-export default function Scanner() {
+export default function Scanner({ marketId }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [closingId, setClosingId] = useState(null)
@@ -344,8 +345,12 @@ export default function Scanner() {
     recordScanError,
     recordScanStart,
   } = useTrading()
+  const effectiveMarket = marketId || activeMarket
+  const marketIsAligned = activeMarket === effectiveMarket
+  const effectiveStrategy = getTradingStrategy(effectiveMarket)
+  const effectiveMarketLabel = effectiveStrategy.label
   const scannerConfig = useMemo(() => {
-    if (activeMarket === 'crypto') {
+    if (effectiveMarket === 'crypto') {
       const copy = getMarketCopy('crypto')
       return {
         copy,
@@ -378,9 +383,21 @@ export default function Scanner() {
       diagnosticLabel: copy.assetPlural,
       errorLabel: 'Yahoo Finance',
     }
-  }, [activeMarket])
-  const [results, setResults] = useState(lastScanResults || [])
-  const slotsFull = positions.length >= maxPositions
+  }, [effectiveMarket])
+  const [results, setResults] = useState(
+    marketIsAligned ? lastScanResults || [] : [],
+  )
+  const visiblePositions = useMemo(
+    () => (marketIsAligned ? positions : []),
+    [marketIsAligned, positions],
+  )
+  const visibleHistory = useMemo(
+    () => (marketIsAligned ? history : []),
+    [history, marketIsAligned],
+  )
+  const visibleLastScanAt = marketIsAligned ? lastScanAt : null
+  const visibleLastScanResults = marketIsAligned ? lastScanResults : []
+  const slotsFull = visiblePositions.length >= maxPositions
 
   const filteredResults = useMemo(
     () => results.filter(scannerConfig.isActionable),
@@ -398,25 +415,32 @@ export default function Scanner() {
     () => new Map(results.map((row) => [row.ticker, row])),
     [results],
   )
-  const recentClosedTrades = useMemo(() => history.slice(0, 5), [history])
+  const recentClosedTrades = useMemo(
+    () => visibleHistory.slice(0, 5),
+    [visibleHistory],
+  )
 
   useEffect(() => {
-    setResults(lastScanResults || [])
-  }, [lastScanResults])
+    setResults(marketIsAligned ? lastScanResults || [] : [])
+  }, [lastScanResults, marketIsAligned])
 
   useEffect(() => {
     autoScanStarted.current = false
-  }, [activeMarket])
+  }, [effectiveMarket])
 
   const scanIsFromToday = useMemo(() => {
-    if (!lastScanAt) {
+    if (!visibleLastScanAt) {
       return false
     }
 
-    return new Date(lastScanAt).toDateString() === new Date().toDateString()
-  }, [lastScanAt])
+    return new Date(visibleLastScanAt).toDateString() === new Date().toDateString()
+  }, [visibleLastScanAt])
 
   const handleScan = useCallback(async ({ automatic = false } = {}) => {
+    if (!marketIsAligned) {
+      return
+    }
+
     setLoading(true)
     setError('')
     recordScanStart(scannerConfig.universe.length)
@@ -472,11 +496,14 @@ export default function Scanner() {
     recordScanStart,
     scannerConfig,
     toast,
+    marketIsAligned,
   ])
 
   useEffect(() => {
     const shouldAutoScan =
-      !autoScanStarted.current && (!lastScanResults?.length || !scanIsFromToday)
+      marketIsAligned &&
+      !autoScanStarted.current &&
+      (!visibleLastScanResults?.length || !scanIsFromToday)
 
     if (!shouldAutoScan) {
       return
@@ -484,9 +511,13 @@ export default function Scanner() {
 
     autoScanStarted.current = true
     handleScan({ automatic: true })
-  }, [handleScan, lastScanResults?.length, scanIsFromToday])
+  }, [handleScan, marketIsAligned, visibleLastScanResults?.length, scanIsFromToday])
 
   const handleExecuteTrade = (row) => {
+    if (!marketIsAligned) {
+      return
+    }
+
     const type = row.rsi < 30 ? 'LONG' : 'SHORT'
 
     try {
@@ -509,13 +540,13 @@ export default function Scanner() {
   }
 
   const isTickerAlreadyOpen = (ticker) =>
-    positions.some((position) => position.ticker === ticker)
+    visiblePositions.some((position) => position.ticker === ticker)
 
   const getOpenPosition = (ticker) =>
-    positions.find((position) => position.ticker === ticker)
+    visiblePositions.find((position) => position.ticker === ticker)
 
   const visibleSignalRows = useMemo(() => {
-    const openTickers = new Set(positions.map((position) => position.ticker))
+    const openTickers = new Set(visiblePositions.map((position) => position.ticker))
 
     return [...filteredResults].sort((left, right) => {
       const leftOpen = openTickers.has(left.ticker)
@@ -527,10 +558,10 @@ export default function Scanner() {
 
       return scannerConfig.getScore(right) - scannerConfig.getScore(left)
     })
-  }, [filteredResults, positions, scannerConfig])
+  }, [filteredResults, visiblePositions, scannerConfig])
 
   const refillAfterManualClose = async (closedTicker) => {
-    if (!automationEnabled) {
+    if (!automationEnabled || !marketIsAligned) {
       return
     }
 
@@ -570,6 +601,10 @@ export default function Scanner() {
   }
 
   const handleManualClose = async (position) => {
+    if (!marketIsAligned) {
+      return
+    }
+
     setClosingId(position.id)
 
     try {
@@ -598,7 +633,7 @@ export default function Scanner() {
             Scanner quantitativo · {scannerConfig.copy.eyebrow}
           </p>
           <h1 className="mt-3 text-2xl font-semibold text-white sm:text-3xl">
-            Scanner {marketLabel || currentStrategy?.label}
+            Scanner {marketIsAligned ? marketLabel || currentStrategy?.label : effectiveMarketLabel}
           </h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
             Analisi {scannerConfig.copy.scanMode} automatica su{' '}
@@ -608,7 +643,7 @@ export default function Scanner() {
           </p>
         </div>
 
-        <Button onClick={() => handleScan()} disabled={loading}>
+        <Button onClick={() => handleScan()} disabled={loading || !marketIsAligned}>
           {loading ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
@@ -647,10 +682,10 @@ export default function Scanner() {
               prezzo disponibile.
             </p>
           </div>
-          <Badge>{positions.length} aperte</Badge>
+          <Badge>{visiblePositions.length} aperte</Badge>
         </CardHeader>
         <CardContent className="p-0">
-          {positions.length > 0 ? (
+          {visiblePositions.length > 0 ? (
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
@@ -666,7 +701,7 @@ export default function Scanner() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {positions.map((position) => {
+                {visiblePositions.map((position) => {
                   const scanRow = resultsByTicker.get(position.ticker)
                   const livePrice = getPositionLivePrice(position, scanRow)
                   const livePnl = calculatePositionPnl(position, scanRow)
@@ -770,7 +805,7 @@ export default function Scanner() {
               rientrato dopo la chiusura.
             </p>
           </div>
-          <Badge>{history.length} chiuse</Badge>
+          <Badge>{visibleHistory.length} chiuse</Badge>
         </CardHeader>
         <CardContent className="p-0">
           {recentClosedTrades.length > 0 ? (
