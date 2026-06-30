@@ -339,6 +339,7 @@ export default function Scanner({ marketId }) {
     lastScanAt,
     lastScanResults,
     marketLabel,
+    markets,
     positions,
     maxPositions,
     recordScanComplete,
@@ -349,6 +350,21 @@ export default function Scanner({ marketId }) {
   const marketIsAligned = activeMarket === effectiveMarket
   const effectiveStrategy = getTradingStrategy(effectiveMarket)
   const effectiveMarketLabel = effectiveStrategy.label
+  const routeMarketState = markets?.[effectiveMarket] || null
+  const routeAutomationEnabled =
+    typeof routeMarketState?.automationEnabled === 'boolean'
+      ? routeMarketState.automationEnabled
+      : automationEnabled
+  const routeLastScanAt = routeMarketState?.lastScanAt || lastScanAt
+  const routeLastScanResults = useMemo(
+    () =>
+      Array.isArray(routeMarketState?.lastScanResults)
+        ? routeMarketState.lastScanResults
+        : lastScanResults || [],
+    [lastScanResults, routeMarketState],
+  )
+  const routeMarketLabel = routeMarketState?.marketLabel || effectiveMarketLabel
+  const routeMaxPositions = effectiveStrategy.maxPositions || maxPositions
   const scannerConfig = useMemo(() => {
     if (effectiveMarket === 'crypto') {
       const copy = getMarketCopy('crypto')
@@ -385,19 +401,29 @@ export default function Scanner({ marketId }) {
     }
   }, [effectiveMarket])
   const [results, setResults] = useState(
-    marketIsAligned ? lastScanResults || [] : [],
+    routeLastScanResults || [],
   )
   const visiblePositions = useMemo(
-    () => (marketIsAligned ? positions : []),
-    [marketIsAligned, positions],
+    () =>
+      Array.isArray(routeMarketState?.positions)
+        ? routeMarketState.positions
+        : marketIsAligned
+          ? positions
+          : [],
+    [marketIsAligned, positions, routeMarketState],
   )
   const visibleHistory = useMemo(
-    () => (marketIsAligned ? history : []),
-    [history, marketIsAligned],
+    () =>
+      Array.isArray(routeMarketState?.history)
+        ? routeMarketState.history
+        : marketIsAligned
+          ? history
+          : [],
+    [history, marketIsAligned, routeMarketState],
   )
-  const visibleLastScanAt = marketIsAligned ? lastScanAt : null
-  const visibleLastScanResults = marketIsAligned ? lastScanResults : []
-  const slotsFull = visiblePositions.length >= maxPositions
+  const visibleLastScanAt = routeLastScanAt
+  const visibleLastScanResults = routeLastScanResults
+  const slotsFull = visiblePositions.length >= routeMaxPositions
 
   const filteredResults = useMemo(
     () => results.filter(scannerConfig.isActionable),
@@ -421,8 +447,8 @@ export default function Scanner({ marketId }) {
   )
 
   useEffect(() => {
-    setResults(marketIsAligned ? lastScanResults || [] : [])
-  }, [lastScanResults, marketIsAligned])
+    setResults(visibleLastScanResults || [])
+  }, [visibleLastScanResults])
 
   useEffect(() => {
     autoScanStarted.current = false
@@ -458,7 +484,7 @@ export default function Scanner({ marketId }) {
         effectiveMarket,
       )
 
-      if (automationEnabled && automaticRows.length > 0) {
+      if (routeAutomationEnabled && automaticRows.length > 0) {
         const { openedTrades } = executeAutomatedTrades(
           automaticRows,
           effectiveMarket,
@@ -470,7 +496,7 @@ export default function Scanner({ marketId }) {
               ? `Pilota automatico: ${openedTrades.length} posizioni aperte`
               : 'Pilota automatico: nessuna posizione aperta',
         })
-      } else if (automationEnabled && actionableRows.length > 0) {
+      } else if (routeAutomationEnabled && actionableRows.length > 0) {
         toast({
           title: 'Pilota automatico: segnali presenti ma non abbastanza forti',
         })
@@ -491,7 +517,6 @@ export default function Scanner({ marketId }) {
       setLoading(false)
     }
   }, [
-    automationEnabled,
     executeAutomatedTrades,
     recordScanComplete,
     recordScanError,
@@ -499,11 +524,11 @@ export default function Scanner({ marketId }) {
     scannerConfig,
     toast,
     effectiveMarket,
+    routeAutomationEnabled,
   ])
 
   useEffect(() => {
     const shouldAutoScan =
-      marketIsAligned &&
       !autoScanStarted.current &&
       (!visibleLastScanResults?.length || !scanIsFromToday)
 
@@ -513,7 +538,7 @@ export default function Scanner({ marketId }) {
 
     autoScanStarted.current = true
     handleScan({ automatic: true })
-  }, [handleScan, marketIsAligned, visibleLastScanResults?.length, scanIsFromToday])
+  }, [handleScan, visibleLastScanResults?.length, scanIsFromToday])
 
   const handleExecuteTrade = (row) => {
     if (!marketIsAligned) {
@@ -635,7 +660,10 @@ export default function Scanner({ marketId }) {
             Scanner quantitativo · {scannerConfig.copy.eyebrow}
           </p>
           <h1 className="mt-3 text-2xl font-semibold text-white sm:text-3xl">
-            Scanner {marketIsAligned ? marketLabel || currentStrategy?.label : effectiveMarketLabel}
+            Scanner{' '}
+            {marketIsAligned
+              ? marketLabel || currentStrategy?.label
+              : routeMarketLabel}
           </h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
             Analisi {scannerConfig.copy.scanMode} automatica su{' '}
