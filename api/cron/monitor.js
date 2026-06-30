@@ -62,6 +62,13 @@ export default async function handler(request, response) {
       results.push({ marketId, ...result })
     }
 
+    const activeMarketState = nextPayload.markets?.[originalActiveMarket] || {}
+    nextPayload = {
+      ...nextPayload,
+      activeMarket: originalActiveMarket,
+      ...activeMarketState,
+    }
+
     await writeTradingState(supabase, nextPayload)
 
     sendJson(response, 200, {
