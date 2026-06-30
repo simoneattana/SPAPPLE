@@ -216,19 +216,25 @@ function AutoRuleCell({ row }) {
   )
 }
 
-function InvestmentCell({ row, slotSize }) {
-  const estimatedQuantity =
-    Number.isFinite(Number(row.currentPrice)) && row.currentPrice > 0
-      ? slotSize / row.currentPrice
-      : null
+function InvestmentCell({ position }) {
+  if (!position) {
+    return (
+      <div className="min-w-36">
+        <p className="font-semibold text-slate-400">Non aperta</p>
+        <p className="mt-1 text-xs leading-5 text-slate-500">
+          Nessun capitale impegnato
+        </p>
+      </div>
+    )
+  }
 
   return (
     <div className="min-w-36">
-      <p className="font-semibold text-white">{formatCurrency(slotSize)}</p>
+      <p className="font-semibold text-[#deff9a]">
+        {formatCurrency(position.invested)}
+      </p>
       <p className="mt-1 text-xs leading-5 text-slate-500">
-        {estimatedQuantity
-          ? `Circa ${formatNumber(estimatedQuantity)} azioni`
-          : 'Quantità non calcolabile'}
+        Aperta a {formatCurrency(position.entryPrice)}
       </p>
     </div>
   )
@@ -262,7 +268,6 @@ export default function Scanner() {
     recordScanComplete,
     recordScanError,
     recordScanStart,
-    slotSize,
   } = useTrading()
   const [results, setResults] = useState(lastScanResults || [])
   const slotsFull = positions.length >= maxPositions
@@ -384,6 +389,9 @@ export default function Scanner() {
   const isTickerAlreadyOpen = (ticker) =>
     positions.some((position) => position.ticker === ticker)
 
+  const getOpenPosition = (ticker) =>
+    positions.find((position) => position.ticker === ticker)
+
   return (
     <div className="flex flex-1 flex-col gap-7">
       <header className="flex flex-col gap-5 rounded-lg border border-slate-800 bg-[#090b10] p-5 shadow-xl shadow-black/20 sm:flex-row sm:items-center sm:justify-between">
@@ -451,7 +459,7 @@ export default function Scanner() {
               <TableRow className="hover:bg-transparent">
                 <TableHead>Ticker</TableHead>
                 <TableHead>Prezzo</TableHead>
-                <TableHead>Importo</TableHead>
+                <TableHead>Investito reale</TableHead>
                 <TableHead>Dati</TableHead>
                 <TableHead>Strategia suggerita</TableHead>
                 <TableHead>Criterio pilota</TableHead>
@@ -466,7 +474,7 @@ export default function Scanner() {
                   </TableCell>
                   <TableCell>{formatCurrency(row.currentPrice)}</TableCell>
                   <TableCell>
-                    <InvestmentCell row={row} slotSize={slotSize} />
+                    <InvestmentCell position={getOpenPosition(row.ticker)} />
                   </TableCell>
                   <TableCell>
                     <TechnicalTooltip row={row} />
