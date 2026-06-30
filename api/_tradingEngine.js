@@ -6,12 +6,17 @@ import {
   isAutoEligibleResult,
   sortByAutoScore,
 } from '../src/services/tradingRules.js'
+import {
+  LEGACY_POSITION_SIZE,
+  MIN_POSITION_SIZE,
+  calculatePositionSize,
+  canOpenPosition,
+} from '../src/services/positionSizing.js'
 import { clearYahooAuth, fetchYahooJson, getYahooAuth } from './_yahoo.js'
 
 export const STATE_ID = 'default'
 export const STORAGE_VERSION = 4
 
-const SLOT_SIZE = 2000
 const MAX_POSITIONS = 5
 const MIN_HISTORY_LENGTH = 30
 const RSI_PERIOD = 14
@@ -361,7 +366,7 @@ async function fetchBackendMarketData() {
   )
 }
 
-function buildTrade(row) {
+function buildTrade(row, invested) {
   const atrPct = (row.atr / row.currentPrice) * 100
   const targetPct = atrPct < 1.5 ? 0.3 : 0.5
   const long = row.rsi < 30
@@ -385,7 +390,7 @@ function buildTrade(row) {
       long ? row.currentPrice - row.atr * 1.5 : row.currentPrice + row.atr * 1.5,
     ),
     daysHeld: 0,
-    invested: SLOT_SIZE,
+    invested: roundPrice(invested),
     targetPct,
   }
 }
@@ -407,13 +412,14 @@ async function refillOpenSlots(state, excludedTickers = []) {
   let capital = state.capital
 
   automaticRows.forEach((row) => {
-    if (positions.length >= MAX_POSITIONS || capital < SLOT_SIZE) {
+    if (positions.length >= MAX_POSITIONS || !canOpenPosition(capital)) {
       return
     }
 
-    const trade = buildTrade(row)
+    const positionSize = calculatePositionSize(capital)
+    const trade = buildTrade(row, positionSize)
     positions.push(trade)
-    capital -= SLOT_SIZE
+    capital = roundPrice(capital - positionSize)
     openedTrades.push(trade)
   })
 
@@ -428,7 +434,7 @@ async function refillOpenSlots(state, excludedTickers = []) {
 }
 
 function evaluatePosition(position, latestPrice) {
-  const invested = position.invested || SLOT_SIZE
+  const invested = position.invested || LEGACY_POSITION_SIZE
   const quantity = invested / position.entryPrice
   const long = position.type === 'LONG'
   const pnlEur = long
@@ -494,7 +500,7 @@ export async function runBackendMonitor(state) {
     const refillErrors = []
     let refill = null
 
-    if (current.capital >= SLOT_SIZE) {
+    if (canOpenPosition(current.capital)) {
       try {
         refill = await refillOpenSlots(current)
       } catch (error) {
@@ -523,7 +529,7 @@ export async function runBackendMonitor(state) {
             : `Nessuna posizione aperta. ${
                 refill
                   ? `${refill.scannedCount} titoli scansionati, ${refill.signalCount} segnali trovati, nessuno abbastanza forte per il pilota.`
-                  : 'Capitale operativo insufficiente per aprire nuovi slot.'
+                  : `Capitale operativo sotto il minimo di ${MIN_POSITION_SIZE}€ per aprire nuovi slot.`
               }`,
     })
 
@@ -574,7 +580,7 @@ export async function runBackendMonitor(state) {
       }
 
       if (closedTrade.result === 'WIN') {
-        capital += closedTrade.invested || SLOT_SIZE
+        capital += closedTrade.invested || LEGACY_POSITION_SIZE
         vault += Math.max(closedTrade.pnlEur, 0)
       } else {
         capital += closedTrade.recoveredCapital || 0
@@ -594,7 +600,7 @@ export async function runBackendMonitor(state) {
   if (
     closedTrades.length > 0 &&
     activePositions.length < MAX_POSITIONS &&
-    capital >= SLOT_SIZE
+    canOpenPosition(capital)
   ) {
     try {
       const refill = await refillOpenSlots(

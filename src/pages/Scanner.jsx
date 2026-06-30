@@ -17,6 +17,7 @@ import { useToast } from '../components/ui/useToast'
 import { useTrading } from '../context/useTrading'
 import { fetchMarketData } from '../services/api'
 import { EUROPEAN_TICKERS } from '../services/marketUniverse'
+import { LEGACY_POSITION_SIZE } from '../services/positionSizing'
 import {
   MAX_AUTO_ATR_PCT,
   getAtrPct,
@@ -351,7 +352,6 @@ export default function Scanner() {
     recordScanComplete,
     recordScanError,
     recordScanStart,
-    slotSize,
   } = useTrading()
   const [results, setResults] = useState(lastScanResults || [])
   const slotsFull = positions.length >= maxPositions
@@ -752,7 +752,7 @@ export default function Scanner() {
               </TableHeader>
               <TableBody>
                 {recentClosedTrades.map((trade, index) => {
-                  const recovered = getRecoveredCapital(trade, slotSize)
+                  const recovered = getRecoveredCapital(trade, LEGACY_POSITION_SIZE)
                   const pnlPositive = Number(trade.pnlEur) >= 0
 
                   return (
@@ -760,7 +760,9 @@ export default function Scanner() {
                       <TableCell>{trade.ticker}</TableCell>
                       <TableCell>{formatDateTime(trade.openedAt)}</TableCell>
                       <TableCell>{formatDateTime(trade.exitDate)}</TableCell>
-                      <TableCell>{formatCurrency(trade.invested || slotSize)}</TableCell>
+                      <TableCell>
+                        {formatCurrency(trade.invested || LEGACY_POSITION_SIZE)}
+                      </TableCell>
                       <TableCell className="font-semibold text-white">
                         {formatCurrency(recovered)}
                       </TableCell>

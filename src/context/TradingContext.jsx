@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchLatestPrice } from '../services/api'
 import {
+  LEGACY_POSITION_SIZE,
+  MIN_POSITION_SIZE,
+  calculatePositionSize,
+  canOpenPosition,
+} from '../services/positionSizing'
+import {
   loadRemoteTradingState,
   saveRemoteTradingState,
 } from '../services/remoteState'
 import { useAuth } from '../services/useAuth'
 import { TradingContext } from './tradingState'
 
-const SLOT_SIZE = 2000
 const MAX_POSITIONS = 5
 const STORAGE_KEY = 'spapple_state'
 const STORAGE_VERSION = 4
@@ -142,7 +147,7 @@ function loadInitialState() {
   }
 }
 
-function buildTrade(ticker, price, atr, type, profile = null) {
+function buildTrade(ticker, price, atr, type, invested, profile = null) {
   const atrPct = (atr / price) * 100
   const targetPct = atrPct < 1.5 ? 0.3 : 0.5
   const long = type === 'LONG'
@@ -161,7 +166,7 @@ function buildTrade(ticker, price, atr, type, profile = null) {
     ),
     stopLoss: roundPrice(long ? price - atr * 1.5 : price + atr * 1.5),
     daysHeld: 0,
-    invested: SLOT_SIZE,
+    invested: roundPrice(invested),
     targetPct,
   }
 }
@@ -187,7 +192,8 @@ function evaluatePositions(current, positionsWithPrices, { incrementDays }) {
       return
     }
 
-    const quantity = position.invested / position.entryPrice
+    const investedAtRisk = position.invested || LEGACY_POSITION_SIZE
+    const quantity = investedAtRisk / position.entryPrice
     const long = position.type === 'LONG'
     const pnlEur = long
       ? (latestPrice - position.entryPrice) * quantity
@@ -210,7 +216,7 @@ function evaluatePositions(current, positionsWithPrices, { incrementDays }) {
     }
 
     const roundedPnl = roundPrice(pnlEur)
-    const invested = position.invested || SLOT_SIZE
+    const invested = investedAtRisk
     const recoveredCapital = Math.max(invested + roundedPnl, 0)
 
     if (isWin) {
@@ -447,7 +453,9 @@ export function TradingProvider({ children }) {
       throw new Error('Slot operativi esauriti')
     }
 
-    if (current.capital < SLOT_SIZE) {
+    const positionSize = calculatePositionSize(current.capital)
+
+    if (!canOpenPosition(current.capital)) {
       throw new Error('Capitale operativo insufficiente')
     }
 
@@ -455,10 +463,10 @@ export function TradingProvider({ children }) {
       throw new Error(`${ticker} è già presente in portafoglio`)
     }
 
-    const trade = buildTrade(ticker, price, atr, type, profile)
+    const trade = buildTrade(ticker, price, atr, type, positionSize, profile)
     const nextState = {
       ...current,
-      capital: current.capital - SLOT_SIZE,
+      capital: roundPrice(current.capital - positionSize),
       positions: [...current.positions, trade],
       engineStatus: 'Posizione aperta',
       ...appendLogs(
@@ -467,7 +475,9 @@ export function TradingProvider({ children }) {
           type: 'trade',
           status: 'done',
           title: `Ordine ${type === 'LONG' ? 'Long' : 'Short'} aperto`,
-          detail: `${ticker}: slot da 2.000€ allocato. Take profit ${roundPrice(
+          detail: `${ticker}: posizione da ${positionSize.toFixed(
+            2,
+          )}€ allocata. Take profit ${roundPrice(
             trade.takeProfit,
           )}, stop loss ${roundPrice(trade.stopLoss)}.`,
         }),
@@ -502,7 +512,7 @@ export function TradingProvider({ children }) {
       const canOpen =
         ['LONG', 'SHORT'].includes(type) &&
         positions.length < MAX_POSITIONS &&
-        capital >= SLOT_SIZE &&
+        canOpenPosition(capital) &&
         !alreadyOpen
 
       if (!canOpen) {
@@ -510,22 +520,26 @@ export function TradingProvider({ children }) {
         return
       }
 
+      const positionSize = calculatePositionSize(capital)
       const trade = buildTrade(
         row.ticker,
         row.currentPrice,
         row.atr,
         type,
+        positionSize,
         row.profile || null,
       )
       positions.push(trade)
-      capital -= SLOT_SIZE
+      capital = roundPrice(capital - positionSize)
       openedTrades.push(trade)
       appendLocalLog(
         createActivity({
           type: 'trade',
           status: 'done',
           title: `Ordine automatico ${type === 'LONG' ? 'Long' : 'Short'}`,
-          detail: `${row.ticker}: segnale validato e slot da 2.000€ allocato.`,
+          detail: `${row.ticker}: segnale validato e posizione da ${positionSize.toFixed(
+            2,
+          )}€ allocata.`,
         }),
       )
     })
@@ -580,14 +594,14 @@ export function TradingProvider({ children }) {
     }
 
     const latestPrice = await fetchLatestPrice(position.ticker)
-    const quantity = position.invested / position.entryPrice
+    const invested = position.invested || LEGACY_POSITION_SIZE
+    const quantity = invested / position.entryPrice
     const long = position.type === 'LONG'
     const pnlEur = long
       ? (latestPrice - position.entryPrice) * quantity
       : (position.entryPrice - latestPrice) * quantity
     const roundedPnl = roundPrice(pnlEur)
     const result = roundedPnl >= 0 ? 'WIN' : 'LOSS'
-    const invested = position.invested || SLOT_SIZE
     const recoveredCapital = Math.max(invested + roundedPnl, 0)
     const closedTrade = {
       ticker: position.ticker,
@@ -884,7 +898,8 @@ export function TradingProvider({ children }) {
       runEOD,
       setAutomationEnabled,
       setLiveMonitorEnabled,
-      slotSize: SLOT_SIZE,
+      slotSize: calculatePositionSize(state.capital),
+      minPositionSize: MIN_POSITION_SIZE,
       maxPositions: MAX_POSITIONS,
     }),
     [

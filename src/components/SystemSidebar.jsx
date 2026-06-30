@@ -250,6 +250,7 @@ export function SystemSidebar() {
     setAutomationEnabled,
     setLiveMonitorEnabled,
     slotSize,
+    minPositionSize,
   } = useTrading()
   const [, setNow] = useState(Date.now())
 
@@ -272,7 +273,8 @@ export function SystemSidebar() {
     lastSignalCount,
   })
   const availableSlots = Math.max(maxPositions - positions.length, 0)
-  const capitalSlots = Math.floor(capital / slotSize)
+  const capitalSlots =
+    slotSize >= minPositionSize ? Math.floor(capital / slotSize) : 0
   const executableSlots = Math.min(availableSlots, capitalSlots)
   const assistantMessages = useMemo(
     () =>
@@ -482,7 +484,8 @@ export function SystemSidebar() {
             <li>P/E positivo obbligatorio.</li>
             <li>RSI sotto 30 o sopra 70.</li>
             <li>Massimo {maxPositions} posizioni aperte.</li>
-            <li>Ogni slot usa 2.000€.</li>
+            <li>Ogni nuova posizione usa il 10% del capitale operativo.</li>
+            <li>Minimo 1.000€, massimo 5.000€ per posizione.</li>
           </ul>
         </div>
       </section>

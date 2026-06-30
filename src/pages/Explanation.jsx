@@ -19,11 +19,11 @@ const analysisRules = [
 const automationRules = [
   {
     title: 'Gestione Capitale',
-    text: 'Divide i tuoi 30.000€ in slot da 2.000€ ciascuno, usando al massimo 5 posizioni attive alla volta. Non scommetterà mai tutto su un solo cavallo.',
+    text: 'Usa al massimo 5 posizioni attive alla volta. Ogni nuova posizione investe il 10% del capitale operativo disponibile, con un minimo di 1.000€ e un massimo di 5.000€.',
   },
   {
     title: 'Il Salvadanaio Blindato',
-    text: 'Quando chiudi un’operazione in profitto, rimette i 2.000€ nel capitale per il prossimo trade, ma il guadagno reale lo sposta nel Salvadanaio. Quei soldi sono intoccabili e non verranno mai re-investiti.',
+    text: 'Quando chiudi un’operazione in profitto, rimette il capitale investito nel capitale operativo per il prossimo trade, ma il guadagno reale lo sposta nel Salvadanaio. Quei soldi sono intoccabili e non verranno mai re-investiti.',
   },
   {
     title: 'Il Blocco di 3 Giorni (Time Lock)',
@@ -42,7 +42,7 @@ const routineSteps = [
   },
   {
     title: 'Approvi gli Ordini',
-    text: 'Dalla tabella dei risultati, scegli quali titoli inserire in portafoglio cliccando su "Acquista" per una posizione Long o "Apri Short" per una posizione al ribasso. L’app scalerà 2.000€ per ogni click.',
+    text: 'Dalla tabella dei risultati, scegli quali titoli inserire in portafoglio cliccando su "Acquista" per una posizione Long o "Apri Short" per una posizione al ribasso. L’app calcolerà l’importo in automatico in base al capitale operativo disponibile.',
   },
   {
     title: 'Il Check Serale',
