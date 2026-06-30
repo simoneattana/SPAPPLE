@@ -1,3 +1,5 @@
+import { CRYPTO_TICKERS } from '../services/cryptoUniverse.js'
+
 export const CRYPTO_MARKET_ID = 'crypto'
 
 export const cryptoStrategy = {
@@ -5,10 +7,10 @@ export const cryptoStrategy = {
   label: 'Criptovalute',
   shortLabel: 'Crypto',
   currency: 'EUR',
-  universe: [],
-  initialCapital: 0,
+  universe: CRYPTO_TICKERS,
+  initialCapital: 5000,
   maxPositions: 3,
-  enabled: false,
+  enabled: true,
   positionSizing: {
     mode: 'percentuale_capitale',
     percent: 0.05,
@@ -17,9 +19,8 @@ export const cryptoStrategy = {
   },
   rules: {
     profitabilityFilter: 'Non applicabile: il P/E non esiste sulle crypto',
-    liquidityFilter: 'Volume minimo e market cap minima obbligatori',
+    liquidityFilter: 'Liquidità giornaliera minima obbligatoria',
     signalFilter: 'RSI estremo adattato a mercato 24/7',
-    volatilityFilter: 'ATR e rischio più restrittivi rispetto alle azioni',
+    volatilityFilter: 'ATR massimo più largo ma controllato',
   },
 }
-

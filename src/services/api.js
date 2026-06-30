@@ -1,4 +1,5 @@
 import { ATR, RSI } from 'technicalindicators'
+import { fetchLatestCryptoPrice } from './cryptoApi'
 import { mergeTickerProfile } from './tickerMetadata'
 
 const MIN_HISTORY_LENGTH = 30
@@ -205,7 +206,11 @@ async function mapWithConcurrency(items, limit, mapper) {
   return results
 }
 
-export async function fetchLatestPrice(ticker) {
+export async function fetchLatestPrice(ticker, marketId = 'equities') {
+  if (marketId === 'crypto') {
+    return fetchLatestCryptoPrice(ticker)
+  }
+
   const encodedTicker = encodeURIComponent(ticker)
   const summaryData = await fetchJson(
     `/api/yahoo/summary?symbol=${encodedTicker}`,

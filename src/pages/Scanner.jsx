@@ -16,6 +16,17 @@ import {
 import { useToast } from '../components/ui/useToast'
 import { useTrading } from '../context/useTrading'
 import { fetchMarketData } from '../services/api'
+import { fetchCryptoMarketData } from '../services/cryptoApi'
+import {
+  CRYPTO_MAX_AUTO_ATR_PCT,
+  getCryptoAtrPct,
+  getCryptoAutoScore,
+  isCryptoActionableResult,
+  isCryptoAutoEligibleResult,
+  isCryptoRejectedResult,
+  sortByCryptoAutoScore,
+} from '../services/cryptoRules'
+import { CRYPTO_TICKERS } from '../services/cryptoUniverse'
 import { EUROPEAN_TICKERS } from '../services/marketUniverse'
 import { LEGACY_POSITION_SIZE } from '../services/positionSizing'
 import {
@@ -227,6 +238,8 @@ function ReasonCell({ row }) {
 }
 
 function TechnicalTooltip({ row }) {
+  const isCrypto = row.market === 'crypto'
+
   return (
     <div className="group relative inline-flex">
       <Button size="sm" variant="ghost">
@@ -244,10 +257,10 @@ function TechnicalTooltip({ row }) {
           </div>
           <div className="rounded-lg border border-slate-800 bg-slate-950 p-2">
             <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">
-              P/E
+              {isCrypto ? 'Volume €' : 'P/E'}
             </p>
             <p className="mt-1 text-sm font-semibold text-white">
-              {formatNumber(row.pe)}
+              {isCrypto ? formatCurrency(row.volumeEur) : formatNumber(row.pe)}
             </p>
           </div>
           <div className="rounded-lg border border-slate-800 bg-slate-950 p-2">
@@ -271,15 +284,20 @@ function TechnicalTooltip({ row }) {
 }
 
 function AutoRuleCell({ row }) {
-  const atrPct = getAtrPct(row)
+  const isCrypto = row.market === 'crypto'
+  const atrPct = isCrypto ? getCryptoAtrPct(row) : getAtrPct(row)
+  const maxAtrPct = isCrypto ? CRYPTO_MAX_AUTO_ATR_PCT : MAX_AUTO_ATR_PCT
+  const eligible = isCrypto
+    ? isCryptoAutoEligibleResult(row)
+    : isAutoEligibleResult(row)
+  const score = isCrypto ? getCryptoAutoScore(row) : getAutoScore(row)
 
-  if (isAutoEligibleResult(row)) {
+  if (eligible) {
     return (
       <div className="min-w-52">
         <Badge variant="positive">AUTO OK</Badge>
         <p className="mt-2 text-xs leading-5 text-slate-500">
-          RSI forte e ATR sotto {MAX_AUTO_ATR_PCT}%. Priorità:{' '}
-          {formatNumber(getAutoScore(row))}
+          RSI forte e ATR sotto {maxAtrPct}%. Priorità: {formatNumber(score)}
         </p>
       </div>
     )
@@ -289,7 +307,7 @@ function AutoRuleCell({ row }) {
     <div className="min-w-52">
       <Badge>SOLO MANUALE</Badge>
       <p className="mt-2 text-xs leading-5 text-slate-500">
-        {atrPct && atrPct > MAX_AUTO_ATR_PCT
+        {atrPct && atrPct > maxAtrPct
           ? `ATR ${formatNumber(atrPct)}%: volatilità troppo alta per il pilota.`
           : `RSI non abbastanza estremo per il pilota automatico.`}
       </p>
@@ -321,12 +339,12 @@ function InvestmentCell({ position }) {
   )
 }
 
-function WatchlistBadge({ row }) {
+function WatchlistBadge({ row, isActionable }) {
   if (row.status !== 'ok') {
     return <Badge variant="negative">SCARTATO</Badge>
   }
 
-  if (isActionableResult(row)) {
+  if (isActionable(row)) {
     return <StrategyBadge rsi={row.rsi} />
   }
 
@@ -345,28 +363,62 @@ export default function Scanner() {
     executeAutomatedTrades,
     executeTrade,
     history,
+    activeMarket,
+    currentStrategy,
     lastScanAt,
     lastScanResults,
+    marketLabel,
     positions,
     maxPositions,
     recordScanComplete,
     recordScanError,
     recordScanStart,
   } = useTrading()
+  const scannerConfig = useMemo(() => {
+    if (activeMarket === 'crypto') {
+      return {
+        provider: 'Kraken',
+        universe: CRYPTO_TICKERS,
+        fetcher: fetchCryptoMarketData,
+        isActionable: isCryptoActionableResult,
+        isAutoEligible: isCryptoAutoEligibleResult,
+        isRejected: isCryptoRejectedResult,
+        sortByScore: sortByCryptoAutoScore,
+        getScore: getCryptoAutoScore,
+        scanLabel: 'crypto liquide',
+        diagnosticLabel: 'crypto',
+        errorLabel: 'Kraken',
+      }
+    }
+
+    return {
+      provider: 'Yahoo Finance',
+      universe: EUROPEAN_TICKERS,
+      fetcher: fetchMarketData,
+      isActionable: isActionableResult,
+      isAutoEligible: isAutoEligibleResult,
+      isRejected: isRejectedResult,
+      sortByScore: sortByAutoScore,
+      getScore: getAutoScore,
+      scanLabel: 'titoli europei',
+      diagnosticLabel: 'titoli',
+      errorLabel: 'Yahoo Finance',
+    }
+  }, [activeMarket])
   const [results, setResults] = useState(lastScanResults || [])
   const slotsFull = positions.length >= maxPositions
 
   const filteredResults = useMemo(
-    () => results.filter(isActionableResult),
-    [results],
+    () => results.filter(scannerConfig.isActionable),
+    [results, scannerConfig],
   )
   const autoEligibleResults = useMemo(
-    () => sortByAutoScore(results.filter(isAutoEligibleResult)),
-    [results],
+    () => scannerConfig.sortByScore(results.filter(scannerConfig.isAutoEligible)),
+    [results, scannerConfig],
   )
   const rejectedResults = useMemo(
-    () => results.filter(isRejectedResult),
-    [results],
+    () => results.filter(scannerConfig.isRejected),
+    [results, scannerConfig],
   )
   const resultsByTicker = useMemo(
     () => new Map(results.map((row) => [row.ticker, row])),
@@ -377,6 +429,10 @@ export default function Scanner() {
   useEffect(() => {
     setResults(lastScanResults || [])
   }, [lastScanResults])
+
+  useEffect(() => {
+    autoScanStarted.current = false
+  }, [activeMarket])
 
   const scanIsFromToday = useMemo(() => {
     if (!lastScanAt) {
@@ -389,12 +445,14 @@ export default function Scanner() {
   const handleScan = useCallback(async ({ automatic = false } = {}) => {
     setLoading(true)
     setError('')
-    recordScanStart(EUROPEAN_TICKERS.length)
+    recordScanStart(scannerConfig.universe.length)
 
     try {
-      const marketData = await fetchMarketData(EUROPEAN_TICKERS)
-      const actionableRows = marketData.filter(isActionableResult)
-      const automaticRows = sortByAutoScore(marketData.filter(isAutoEligibleResult))
+      const marketData = await scannerConfig.fetcher(scannerConfig.universe)
+      const actionableRows = marketData.filter(scannerConfig.isActionable)
+      const automaticRows = scannerConfig.sortByScore(
+        marketData.filter(scannerConfig.isAutoEligible),
+      )
 
       setResults(marketData)
       recordScanComplete({
@@ -426,7 +484,7 @@ export default function Scanner() {
       setError(apiError.message)
       recordScanError(apiError.message)
       toast({
-        title: 'Errore dati: Controlla la connessione o Yahoo Finance',
+        title: `Errore dati: Controlla la connessione o ${scannerConfig.errorLabel}`,
         variant: 'destructive',
       })
     } finally {
@@ -438,6 +496,7 @@ export default function Scanner() {
     recordScanComplete,
     recordScanError,
     recordScanStart,
+    scannerConfig,
     toast,
   ])
 
@@ -492,23 +551,23 @@ export default function Scanner() {
         return leftOpen ? -1 : 1
       }
 
-      return getAutoScore(right) - getAutoScore(left)
+      return scannerConfig.getScore(right) - scannerConfig.getScore(left)
     })
-  }, [filteredResults, positions])
+  }, [filteredResults, positions, scannerConfig])
 
   const refillAfterManualClose = async (closedTicker) => {
     if (!automationEnabled) {
       return
     }
 
-    recordScanStart(EUROPEAN_TICKERS.length)
+    recordScanStart(scannerConfig.universe.length)
 
     try {
-      const marketData = await fetchMarketData(EUROPEAN_TICKERS)
-      const actionableRows = marketData.filter(isActionableResult)
-      const automaticRows = sortByAutoScore(
+      const marketData = await scannerConfig.fetcher(scannerConfig.universe)
+      const actionableRows = marketData.filter(scannerConfig.isActionable)
+      const automaticRows = scannerConfig.sortByScore(
         marketData.filter(
-          (row) => isAutoEligibleResult(row) && row.ticker !== closedTicker,
+          (row) => scannerConfig.isAutoEligible(row) && row.ticker !== closedTicker,
         ),
       )
 
@@ -565,11 +624,12 @@ export default function Scanner() {
             Scanner quantitativo
           </p>
           <h1 className="mt-3 text-2xl font-semibold text-white sm:text-3xl">
-            Scanner di Mercato
+            Scanner di Mercato: {marketLabel || currentStrategy?.label}
           </h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
-            Analisi EOD automatica su 80 titoli europei. I risultati restano
-            visibili dall’ultima scansione e puoi aggiornarli manualmente.
+            Analisi EOD automatica su {scannerConfig.universe.length}{' '}
+            {scannerConfig.scanLabel} con dati reali da {scannerConfig.provider}.
+            I risultati restano visibili dall’ultima scansione.
           </p>
         </div>
 
@@ -598,7 +658,7 @@ export default function Scanner() {
 
       {error ? (
         <div className="rounded-lg border border-[#ef8f8f]/35 bg-[#ef8f8f]/10 p-4 text-sm text-[#ef8f8f]">
-          Errore dati: Controlla la connessione o Yahoo Finance
+          Errore dati: Controlla la connessione o {scannerConfig.errorLabel}
         </div>
       ) : null}
 
@@ -799,8 +859,8 @@ export default function Scanner() {
           <div>
             <CardTitle>Risultati filtrati</CardTitle>
             <p className="mt-2 text-sm text-slate-500">
-              Sono visibili solo società profittevoli con RSI estremo. La
-              strategia indica se Spapple cerca rialzo o ribasso.
+              Sono visibili solo gli asset che rispettano le regole del mercato
+              attivo. La strategia indica se Spapple cerca rialzo o ribasso.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -883,12 +943,15 @@ export default function Scanner() {
           <div>
             <CardTitle>Diagnostica della scansione</CardTitle>
             <p className="mt-2 text-sm text-slate-500">
-              Tutti gli 80 ticker europei analizzati, inclusi quelli scartati e
-              il motivo della decisione.
+              Tutti i {scannerConfig.universe.length}{' '}
+              {scannerConfig.diagnosticLabel} analizzati, inclusi quelli
+              scartati e il motivo della decisione.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Badge>{results.length} titoli</Badge>
+            <Badge>
+              {results.length} {scannerConfig.diagnosticLabel}
+            </Badge>
             <Badge>{filteredResults.length} ammessi</Badge>
           </div>
         </CardHeader>
@@ -911,7 +974,10 @@ export default function Scanner() {
                     </TableCell>
                     <TableCell>{formatCurrency(row.currentPrice)}</TableCell>
                     <TableCell>
-                      <WatchlistBadge row={row} />
+                      <WatchlistBadge
+                        row={row}
+                        isActionable={scannerConfig.isActionable}
+                      />
                     </TableCell>
                     <TableCell>
                       <TechnicalTooltip row={row} />

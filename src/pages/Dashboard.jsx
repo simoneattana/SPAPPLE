@@ -95,6 +95,7 @@ export default function Dashboard() {
     lastScanAt,
     lastScanCount,
     lastSignalCount,
+    marketLabel,
     maxPositions,
     positions,
     vault,
@@ -146,7 +147,7 @@ export default function Dashboard() {
               Dashboard operativo
             </p>
             <h1 className="mt-3 text-2xl font-semibold text-white sm:text-3xl">
-              Spapple sta monitorando capitale, segnali e posizioni
+              Spapple sta monitorando {marketLabel}: capitale, segnali e posizioni
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-500">
               Ultima scansione: {lastScanText}. Segnali trovati:{' '}

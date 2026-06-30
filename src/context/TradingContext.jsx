@@ -122,13 +122,23 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
   const fallback = createInitialMarketState(strategy)
   const capital = Number(rawMarketState.capital)
   const vault = Number(rawMarketState.vault)
+  const unusedMarket =
+    !rawMarketState.positions?.length &&
+    !rawMarketState.history?.length &&
+    !rawMarketState.events?.length
+  const normalizedCapital =
+    strategy.id === 'crypto' && capital === 0 && unusedMarket
+      ? fallback.capital
+      : Number.isFinite(capital)
+        ? capital
+        : fallback.capital
 
   return {
     ...fallback,
     ...rawMarketState,
     marketId,
     marketLabel: strategy.label,
-    capital: Number.isFinite(capital) ? capital : fallback.capital,
+    capital: normalizedCapital,
     vault: Number.isFinite(vault) ? vault : fallback.vault,
     positions: Array.isArray(rawMarketState.positions)
       ? rawMarketState.positions
@@ -268,14 +278,32 @@ function loadInitialState() {
   }
 }
 
-function buildTrade(ticker, price, atr, type, invested, profile = null) {
+function getStrategyMaxPositions(strategy) {
+  return Number.isFinite(Number(strategy.maxPositions))
+    ? Number(strategy.maxPositions)
+    : MAX_POSITIONS
+}
+
+function buildTrade(
+  ticker,
+  price,
+  atr,
+  type,
+  invested,
+  profile = null,
+  strategy = getTradingStrategy(),
+) {
   const atrPct = (atr / price) * 100
-  const targetPct = atrPct < 1.5 ? 0.3 : 0.5
+  const isCrypto = strategy.id === 'crypto'
+  const targetPct = isCrypto ? (atrPct < 4 ? 0.8 : 1.2) : atrPct < 1.5 ? 0.3 : 0.5
+  const stopMultiplier = isCrypto ? 1.8 : 1.5
   const long = type === 'LONG'
   const openedAt = new Date().toISOString()
 
   return {
     id: `${ticker}-${type}-${Date.now()}`,
+    marketId: strategy.id,
+    marketLabel: strategy.label,
     ticker,
     profile,
     type,
@@ -285,7 +313,9 @@ function buildTrade(ticker, price, atr, type, invested, profile = null) {
     takeProfit: roundPrice(
       long ? price * (1 + targetPct / 100) : price * (1 - targetPct / 100),
     ),
-    stopLoss: roundPrice(long ? price - atr * 1.5 : price + atr * 1.5),
+    stopLoss: roundPrice(
+      long ? price - atr * stopMultiplier : price + atr * stopMultiplier,
+    ),
     daysHeld: 0,
     invested: roundPrice(invested),
     targetPct,
@@ -505,6 +535,31 @@ export function TradingProvider({ children }) {
     }))
   }, [updateTradingState])
 
+  const setActiveMarket = useCallback((marketId) => {
+    updateTradingState((current) => {
+      const nextStrategy = getTradingStrategy(marketId)
+      const currentSynced = syncActiveMarketState(current)
+      const nextMarketState = normalizeMarketState(
+        nextStrategy.id,
+        currentSynced.markets?.[nextStrategy.id],
+      )
+      const activity = createActivity({
+        type: 'market',
+        status: 'done',
+        title: `Mercato attivo: ${nextStrategy.label}`,
+        detail: `Spapple ora mostra capitale, posizioni, scansioni e storico del mercato ${nextStrategy.label}.`,
+      })
+
+      return {
+        ...currentSynced,
+        activeMarket: nextStrategy.id,
+        markets: currentSynced.markets,
+        ...nextMarketState,
+        ...appendLogs(nextMarketState, activity),
+      }
+    })
+  }, [updateTradingState])
+
   const recordScanStart = useCallback((tickerCount) => {
     updateTradingState((current) => ({
       ...current,
@@ -565,18 +620,21 @@ export function TradingProvider({ children }) {
 
   const executeTrade = useCallback((ticker, price, atr, type, profile = null) => {
     const current = stateRef.current
+    const strategy = getTradingStrategy(current.activeMarket)
+    const sizing = strategy.positionSizing
+    const maxPositions = getStrategyMaxPositions(strategy)
 
     if (!['LONG', 'SHORT'].includes(type)) {
       throw new Error('Tipo ordine non valido')
     }
 
-    if (current.positions.length >= MAX_POSITIONS) {
+    if (current.positions.length >= maxPositions) {
       throw new Error('Slot operativi esauriti')
     }
 
-    const positionSize = calculatePositionSize(current.capital)
+    const positionSize = calculatePositionSize(current.capital, sizing)
 
-    if (!canOpenPosition(current.capital)) {
+    if (!canOpenPosition(current.capital, sizing)) {
       throw new Error('Capitale operativo insufficiente')
     }
 
@@ -584,8 +642,16 @@ export function TradingProvider({ children }) {
       throw new Error(`${ticker} è già presente in portafoglio`)
     }
 
-    const trade = buildTrade(ticker, price, atr, type, positionSize, profile)
-    const nextState = {
+    const trade = buildTrade(
+      ticker,
+      price,
+      atr,
+      type,
+      positionSize,
+      profile,
+      strategy,
+    )
+    const nextState = syncActiveMarketState({
       ...current,
       capital: roundPrice(current.capital - positionSize),
       positions: [...current.positions, trade],
@@ -603,7 +669,7 @@ export function TradingProvider({ children }) {
           )}, stop loss ${roundPrice(trade.stopLoss)}.`,
         }),
       ),
-    }
+    })
 
     stateRef.current = nextState
     setState(nextState)
@@ -613,6 +679,9 @@ export function TradingProvider({ children }) {
 
   const executeAutomatedTrades = useCallback((rows) => {
     const current = stateRef.current
+    const strategy = getTradingStrategy(current.activeMarket)
+    const sizing = strategy.positionSizing
+    const maxPositions = getStrategyMaxPositions(strategy)
     let capital = current.capital
     const positions = [...current.positions]
     const openedTrades = []
@@ -632,8 +701,8 @@ export function TradingProvider({ children }) {
       )
       const canOpen =
         ['LONG', 'SHORT'].includes(type) &&
-        positions.length < MAX_POSITIONS &&
-        canOpenPosition(capital) &&
+        positions.length < maxPositions &&
+        canOpenPosition(capital, sizing) &&
         !alreadyOpen
 
       if (!canOpen) {
@@ -641,7 +710,7 @@ export function TradingProvider({ children }) {
         return
       }
 
-      const positionSize = calculatePositionSize(capital)
+      const positionSize = calculatePositionSize(capital, sizing)
       const trade = buildTrade(
         row.ticker,
         row.currentPrice,
@@ -649,6 +718,7 @@ export function TradingProvider({ children }) {
         type,
         positionSize,
         row.profile || null,
+        strategy,
       )
       positions.push(trade)
       capital = roundPrice(capital - positionSize)
@@ -681,7 +751,7 @@ export function TradingProvider({ children }) {
       }),
     )
 
-    const nextState = {
+    const nextState = syncActiveMarketState({
       ...current,
       capital,
       positions,
@@ -689,7 +759,7 @@ export function TradingProvider({ children }) {
         openedTrades.length > 0 ? 'Pilota automatico eseguito' : current.engineStatus,
       activityLog,
       events,
-    }
+    })
 
     stateRef.current = nextState
     setState(nextState)
@@ -698,10 +768,15 @@ export function TradingProvider({ children }) {
   }, [])
 
   const fetchPositionPrices = useCallback(async (positions) => {
+    const marketId = stateRef.current.activeMarket
+
     return Promise.all(
       positions.map(async (position) => ({
         position,
-        latestPrice: await fetchLatestPrice(position.ticker),
+        latestPrice: await fetchLatestPrice(
+          position.ticker,
+          position.marketId || marketId,
+        ),
       })),
     )
   }, [])
@@ -714,7 +789,10 @@ export function TradingProvider({ children }) {
       throw new Error('Posizione non trovata')
     }
 
-    const latestPrice = await fetchLatestPrice(position.ticker)
+    const latestPrice = await fetchLatestPrice(
+      position.ticker,
+      position.marketId || snapshot.activeMarket,
+    )
     const invested = position.invested || LEGACY_POSITION_SIZE
     const quantity = invested / position.entryPrice
     const long = position.type === 'LONG'
@@ -1019,9 +1097,16 @@ export function TradingProvider({ children }) {
       runEOD,
       setAutomationEnabled,
       setLiveMonitorEnabled,
-      slotSize: calculatePositionSize(state.capital),
-      minPositionSize: MIN_POSITION_SIZE,
-      maxPositions: MAX_POSITIONS,
+      setActiveMarket,
+      strategies: Object.values(TRADING_STRATEGIES),
+      currentStrategy: getTradingStrategy(state.activeMarket),
+      slotSize: calculatePositionSize(
+        state.capital,
+        getTradingStrategy(state.activeMarket).positionSizing,
+      ),
+      minPositionSize:
+        getTradingStrategy(state.activeMarket).positionSizing.min || MIN_POSITION_SIZE,
+      maxPositions: getStrategyMaxPositions(getTradingStrategy(state.activeMarket)),
     }),
     [
       closePositionManually,
@@ -1035,6 +1120,7 @@ export function TradingProvider({ children }) {
       runEOD,
       setAutomationEnabled,
       setLiveMonitorEnabled,
+      setActiveMarket,
       state,
       remoteStatus,
     ],

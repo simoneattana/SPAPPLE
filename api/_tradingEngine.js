@@ -1,5 +1,11 @@
 import { createClient } from '@supabase/supabase-js'
 import { ATR, RSI } from 'technicalindicators'
+import { CRYPTO_TICKERS } from '../src/services/cryptoUniverse.js'
+import {
+  isCryptoActionableResult,
+  isCryptoAutoEligibleResult,
+  sortByCryptoAutoScore,
+} from '../src/services/cryptoRules.js'
 import { EUROPEAN_TICKERS } from '../src/services/marketUniverse.js'
 import {
   isActionableResult,
@@ -28,6 +34,12 @@ const MIN_HISTORY_LENGTH = 30
 const RSI_PERIOD = 14
 const ATR_PERIOD = 14
 const REQUEST_CONCURRENCY = 8
+
+function getStrategyMaxPositions(strategy) {
+  return Number.isFinite(Number(strategy.maxPositions))
+    ? Number(strategy.maxPositions)
+    : MAX_POSITIONS
+}
 
 const marketStateFields = [
   'capital',
@@ -90,20 +102,45 @@ function pickMarketState(state) {
 function normalizeMarketState(marketId, rawMarketState = {}) {
   const strategy = getTradingStrategy(marketId)
   const fallback = {
-    ...initialState,
     marketId: strategy.id,
     marketLabel: strategy.label,
     capital: strategy.initialCapital,
+    vault: 0,
+    positions: [],
+    history: [],
+    activityLog: [],
+    events: [],
+    automationEnabled: true,
+    liveMonitorEnabled: true,
+    backendMonitorEnabled: true,
+    lastScanAt: null,
+    lastScanCount: 0,
+    lastSignalCount: 0,
+    lastScanResults: [],
+    lastLiveCheckAt: null,
+    lastBackendCheckAt: null,
+    nextLiveCheckAt: null,
+    engineStatus: 'In attesa',
   }
   const capital = Number(rawMarketState.capital)
   const vault = Number(rawMarketState.vault)
+  const unusedMarket =
+    !rawMarketState.positions?.length &&
+    !rawMarketState.history?.length &&
+    !rawMarketState.events?.length
+  const normalizedCapital =
+    strategy.id === 'crypto' && capital === 0 && unusedMarket
+      ? fallback.capital
+      : Number.isFinite(capital)
+        ? capital
+        : fallback.capital
 
   return {
     ...fallback,
     ...rawMarketState,
     marketId,
     marketLabel: strategy.label,
-    capital: Number.isFinite(capital) ? capital : fallback.capital,
+    capital: normalizedCapital,
     vault: Number.isFinite(vault) ? vault : fallback.vault,
     positions: Array.isArray(rawMarketState.positions)
       ? rawMarketState.positions
@@ -189,8 +226,6 @@ export function normalizeTradingState(payload) {
     activeMarket,
     markets[activeMarket] || markets[DEFAULT_MARKET_ID],
   )
-  const capital = Number(state.capital)
-  const vault = Number(state.vault)
 
   return syncActiveMarketState({
     ...initialState,
@@ -199,24 +234,6 @@ export function normalizeTradingState(payload) {
     activeMarket,
     markets,
     ...activeMarketState,
-    capital: Number.isFinite(capital) ? capital : initialState.capital,
-    vault: Number.isFinite(vault) ? vault : initialState.vault,
-    positions: Array.isArray(state.positions) ? state.positions : [],
-    history: Array.isArray(state.history) ? state.history : [],
-    activityLog: Array.isArray(state.activityLog) ? state.activityLog : [],
-    events: Array.isArray(state.events) ? state.events : [],
-    automationEnabled:
-      typeof state.automationEnabled === 'boolean'
-        ? state.automationEnabled
-        : initialState.automationEnabled,
-    liveMonitorEnabled:
-      typeof state.liveMonitorEnabled === 'boolean'
-        ? state.liveMonitorEnabled
-        : initialState.liveMonitorEnabled,
-    backendMonitorEnabled:
-      typeof state.backendMonitorEnabled === 'boolean'
-        ? state.backendMonitorEnabled
-        : initialState.backendMonitorEnabled,
   })
 }
 
@@ -307,7 +324,69 @@ async function fetchChartPrice(ticker) {
   return number
 }
 
-export async function fetchLatestMarketPrice(ticker) {
+function getCryptoMeta(ticker) {
+  return CRYPTO_TICKERS.find(
+    (item) => item.ticker === ticker || item.krakenPair === ticker,
+  )
+}
+
+async function fetchKrakenOhlc(pair) {
+  const krakenUrl = new URL('https://api.kraken.com/0/public/OHLC')
+  krakenUrl.searchParams.set('pair', pair)
+  krakenUrl.searchParams.set('interval', '1440')
+
+  const krakenResponse = await fetch(krakenUrl)
+  const data = await krakenResponse.json()
+
+  if (!krakenResponse.ok || data.error?.length) {
+    throw new Error(
+      data.error?.join(', ') || 'Kraken non ha restituito dati utilizzabili',
+    )
+  }
+
+  return data
+}
+
+function extractKrakenHistory(payload, ticker) {
+  const result = payload?.result || {}
+  const pairKey = Object.keys(result).find((key) => key !== 'last')
+  const rows = pairKey ? result[pairKey] : null
+
+  if (!Array.isArray(rows)) {
+    throw new Error(`${ticker}: storico Kraken non disponibile`)
+  }
+
+  const history = rows
+    .map((row) => ({
+      date: new Date(Number(row[0]) * 1000).toISOString().slice(0, 10),
+      high: assertNumber(row[2], `${ticker}: massimo`),
+      low: assertNumber(row[3], `${ticker}: minimo`),
+      close: assertNumber(row[4], `${ticker}: chiusura`),
+      volume: assertNumber(row[6], `${ticker}: volume`),
+    }))
+    .filter((bar) => bar.high > 0 && bar.low > 0 && bar.close > 0)
+
+  if (history.length < MIN_HISTORY_LENGTH) {
+    throw new Error(`${ticker}: storico giornaliero insufficiente`)
+  }
+
+  return history
+}
+
+export async function fetchLatestMarketPrice(ticker, marketId = DEFAULT_MARKET_ID) {
+  if (marketId === 'crypto') {
+    const meta = getCryptoMeta(ticker)
+
+    if (!meta?.krakenPair) {
+      throw new Error(`${ticker}: coppia Kraken non configurata`)
+    }
+
+    const payload = await fetchKrakenOhlc(meta.krakenPair)
+    const history = extractKrakenHistory(payload, ticker)
+
+    return history.at(-1).close
+  }
+
   try {
     return await fetchSummaryPrice(ticker)
   } catch {
@@ -469,6 +548,83 @@ async function fetchTickerDiagnostic(ticker) {
   }
 }
 
+function buildCryptoProfile(meta) {
+  return {
+    name: meta.name,
+    isin: null,
+    country: 'Mercato crypto globale',
+    sector: meta.sector || 'Criptovalute',
+    industry: 'Asset digitale',
+    website: null,
+    description: meta.description || null,
+  }
+}
+
+function getCryptoDiagnostic(row) {
+  if (row.status === 'error') {
+    return row.reason || 'Dati non disponibili'
+  }
+
+  if (Number(row.volumeEur) < 100000) {
+    return 'Scartata: liquidità giornaliera troppo bassa'
+  }
+
+  if (row.rsi >= 30 && row.rsi <= 70) {
+    return 'Scartata: RSI in zona neutrale'
+  }
+
+  if (row.rsi < 30) {
+    return 'Ammessa: crypto liquida e RSI sotto 30'
+  }
+
+  return 'Ammessa: crypto liquida e RSI sopra 70'
+}
+
+async function fetchCryptoTickerDiagnostic(meta) {
+  try {
+    const payload = await fetchKrakenOhlc(meta.krakenPair)
+    const history = extractKrakenHistory(payload, meta.ticker)
+    const latestBar = history.at(-1)
+    const { rsi, atr } = calculateIndicators(history, meta.ticker)
+    const row = {
+      ticker: meta.ticker,
+      market: 'crypto',
+      provider: 'Kraken',
+      profile: buildCryptoProfile(meta),
+      currentPrice: latestBar.close,
+      pe: null,
+      volume: latestBar.volume,
+      volumeEur: latestBar.volume * latestBar.close,
+      rsi,
+      atr,
+      status: 'ok',
+    }
+
+    return {
+      ...row,
+      reason: getCryptoDiagnostic(row),
+    }
+  } catch (error) {
+    return {
+      ticker: meta.ticker,
+      market: 'crypto',
+      provider: 'Kraken',
+      profile: buildCryptoProfile(meta),
+      currentPrice: null,
+      pe: null,
+      volume: null,
+      volumeEur: null,
+      rsi: null,
+      atr: null,
+      status: 'error',
+      reason: getCryptoDiagnostic({
+        status: 'error',
+        reason: error.message || `${meta.ticker}: dati non disponibili`,
+      }),
+    }
+  }
+}
+
 async function mapWithConcurrency(items, limit, mapper) {
   const results = []
 
@@ -481,23 +637,31 @@ async function mapWithConcurrency(items, limit, mapper) {
   return results
 }
 
-async function fetchBackendMarketData() {
-  return mapWithConcurrency(
-    EUROPEAN_TICKERS,
-    REQUEST_CONCURRENCY,
-    fetchTickerDiagnostic,
-  )
+async function fetchBackendMarketData(marketId = DEFAULT_MARKET_ID) {
+  if (marketId === 'crypto') {
+    return mapWithConcurrency(
+      CRYPTO_TICKERS,
+      REQUEST_CONCURRENCY,
+      fetchCryptoTickerDiagnostic,
+    )
+  }
+
+  return mapWithConcurrency(EUROPEAN_TICKERS, REQUEST_CONCURRENCY, fetchTickerDiagnostic)
 }
 
-function buildTrade(row, invested) {
+function buildTrade(row, invested, strategy = getTradingStrategy()) {
   const atrPct = (row.atr / row.currentPrice) * 100
-  const targetPct = atrPct < 1.5 ? 0.3 : 0.5
+  const isCrypto = strategy.id === 'crypto'
+  const targetPct = isCrypto ? (atrPct < 4 ? 0.8 : 1.2) : atrPct < 1.5 ? 0.3 : 0.5
+  const stopMultiplier = isCrypto ? 1.8 : 1.5
   const long = row.rsi < 30
   const type = long ? 'LONG' : 'SHORT'
   const openedAt = new Date().toISOString()
 
   return {
     id: `${row.ticker}-${type}-${Date.now()}-${crypto.randomUUID()}`,
+    marketId: strategy.id,
+    marketLabel: strategy.label,
     ticker: row.ticker,
     profile: row.profile || null,
     type,
@@ -510,7 +674,9 @@ function buildTrade(row, invested) {
         : row.currentPrice * (1 - targetPct / 100),
     ),
     stopLoss: roundPrice(
-      long ? row.currentPrice - row.atr * 1.5 : row.currentPrice + row.atr * 1.5,
+      long
+        ? row.currentPrice - row.atr * stopMultiplier
+        : row.currentPrice + row.atr * stopMultiplier,
     ),
     daysHeld: 0,
     invested: roundPrice(invested),
@@ -519,28 +685,37 @@ function buildTrade(row, invested) {
 }
 
 async function refillOpenSlots(state, excludedTickers = []) {
-  const marketData = await fetchBackendMarketData()
-  const actionableRows = marketData.filter(isActionableResult)
+  const strategy = getTradingStrategy(state.activeMarket)
+  const marketData = await fetchBackendMarketData(strategy.id)
+  const actionableRows = marketData.filter(
+    strategy.id === 'crypto' ? isCryptoActionableResult : isActionableResult,
+  )
+  const isAutoEligible =
+    strategy.id === 'crypto' ? isCryptoAutoEligibleResult : isAutoEligibleResult
+  const sortRows =
+    strategy.id === 'crypto' ? sortByCryptoAutoScore : sortByAutoScore
   const excluded = new Set([
     ...excludedTickers,
     ...state.positions.map((position) => position.ticker),
   ])
-  const automaticRows = sortByAutoScore(
+  const automaticRows = sortRows(
     marketData.filter(
-      (row) => isAutoEligibleResult(row) && !excluded.has(row.ticker),
+      (row) => isAutoEligible(row) && !excluded.has(row.ticker),
     ),
   )
   const positions = [...state.positions]
   const openedTrades = []
   let capital = state.capital
+  const maxPositions = getStrategyMaxPositions(strategy)
+  const sizing = strategy.positionSizing
 
   automaticRows.forEach((row) => {
-    if (positions.length >= MAX_POSITIONS || !canOpenPosition(capital)) {
+    if (positions.length >= maxPositions || !canOpenPosition(capital, sizing)) {
       return
     }
 
-    const positionSize = calculatePositionSize(capital)
-    const trade = buildTrade(row, positionSize)
+    const positionSize = calculatePositionSize(capital, sizing)
+    const trade = buildTrade(row, positionSize, strategy)
     positions.push(trade)
     capital = roundPrice(capital - positionSize)
     openedTrades.push(trade)
@@ -599,6 +774,9 @@ function evaluatePosition(position, latestPrice) {
 
 export async function runBackendMonitor(state) {
   const current = normalizeTradingState(state)
+  const strategy = getTradingStrategy(current.activeMarket)
+  const sizing = strategy.positionSizing
+  const maxPositions = getStrategyMaxPositions(strategy)
 
   if (!current.backendMonitorEnabled || !current.automationEnabled) {
     const activity = createActivity({
@@ -623,7 +801,7 @@ export async function runBackendMonitor(state) {
     const refillErrors = []
     let refill = null
 
-    if (canOpenPosition(current.capital)) {
+    if (canOpenPosition(current.capital, sizing)) {
       try {
         refill = await refillOpenSlots(current)
       } catch (error) {
@@ -652,7 +830,9 @@ export async function runBackendMonitor(state) {
             : `Nessuna posizione aperta. ${
                 refill
                   ? `${refill.scannedCount} titoli scansionati, ${refill.signalCount} segnali trovati, nessuno abbastanza forte per il pilota.`
-                  : `Capitale operativo sotto il minimo di ${MIN_POSITION_SIZE}€ per aprire nuovi slot.`
+                  : `Capitale operativo sotto il minimo di ${
+                      sizing.min || MIN_POSITION_SIZE
+                    }€ per aprire nuovi slot.`
               }`,
     })
 
@@ -691,7 +871,10 @@ export async function runBackendMonitor(state) {
 
   for (const position of current.positions) {
     try {
-      const latestPrice = await fetchLatestMarketPrice(position.ticker)
+      const latestPrice = await fetchLatestMarketPrice(
+        position.ticker,
+        position.marketId || current.activeMarket,
+      )
       const { monitoredPosition, closedTrade } = evaluatePosition(
         position,
         latestPrice,
@@ -722,8 +905,8 @@ export async function runBackendMonitor(state) {
 
   if (
     closedTrades.length > 0 &&
-    activePositions.length < MAX_POSITIONS &&
-    canOpenPosition(capital)
+    activePositions.length < maxPositions &&
+    canOpenPosition(capital, sizing)
   ) {
     try {
       const refill = await refillOpenSlots(

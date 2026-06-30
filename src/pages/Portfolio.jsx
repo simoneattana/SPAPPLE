@@ -7,6 +7,13 @@ import { TickerInfo } from '../components/TickerInfo'
 import { useToast } from '../components/ui/useToast'
 import { useTrading } from '../context/useTrading'
 import { fetchMarketData } from '../services/api'
+import { fetchCryptoMarketData } from '../services/cryptoApi'
+import {
+  isCryptoActionableResult,
+  isCryptoAutoEligibleResult,
+  sortByCryptoAutoScore,
+} from '../services/cryptoRules'
+import { CRYPTO_TICKERS } from '../services/cryptoUniverse'
 import { EUROPEAN_TICKERS } from '../services/marketUniverse'
 import {
   isActionableResult,
@@ -66,6 +73,7 @@ export default function Portfolio() {
     automationEnabled,
     closePositionManually,
     executeAutomatedTrades,
+    activeMarket,
     positions,
     capital,
     vault,
@@ -74,6 +82,7 @@ export default function Portfolio() {
     recordScanStart,
     runEOD,
     maxPositions,
+    marketLabel,
   } = useTrading()
   const { toast } = useToast()
   const [runningEOD, setRunningEOD] = useState(false)
@@ -102,14 +111,31 @@ export default function Portfolio() {
       return
     }
 
-    recordScanStart(EUROPEAN_TICKERS.length)
+    const config =
+      activeMarket === 'crypto'
+        ? {
+            universe: CRYPTO_TICKERS,
+            fetcher: fetchCryptoMarketData,
+            isActionable: isCryptoActionableResult,
+            isAutoEligible: isCryptoAutoEligibleResult,
+            sortByScore: sortByCryptoAutoScore,
+          }
+        : {
+            universe: EUROPEAN_TICKERS,
+            fetcher: fetchMarketData,
+            isActionable: isActionableResult,
+            isAutoEligible: isAutoEligibleResult,
+            sortByScore: sortByAutoScore,
+          }
+
+    recordScanStart(config.universe.length)
 
     try {
-      const marketData = await fetchMarketData(EUROPEAN_TICKERS)
-      const actionableRows = marketData.filter(isActionableResult)
-      const automaticRows = sortByAutoScore(
+      const marketData = await config.fetcher(config.universe)
+      const actionableRows = marketData.filter(config.isActionable)
+      const automaticRows = config.sortByScore(
         marketData.filter(
-          (row) => isAutoEligibleResult(row) && row.ticker !== closedTicker,
+          (row) => config.isAutoEligible(row) && row.ticker !== closedTicker,
         ),
       )
 
@@ -167,7 +193,7 @@ export default function Portfolio() {
             Portafoglio virtuale
           </p>
           <h1 className="mt-3 text-2xl font-semibold text-white sm:text-3xl">
-            Posizioni Forward Testing
+            Posizioni Forward Testing: {marketLabel}
           </h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
             Gestione degli slot operativi, target autotuning e motore EOD.

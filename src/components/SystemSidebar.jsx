@@ -232,8 +232,10 @@ function ActivityItem({ item }) {
 export function SystemSidebar() {
   const {
     activityLog,
+    activeMarket,
     automationEnabled,
     capital,
+    currentStrategy,
     engineStatus,
     lastScanAt,
     lastScanCount,
@@ -248,8 +250,10 @@ export function SystemSidebar() {
     positions,
     remoteStatus,
     runLiveCheck,
+    setActiveMarket,
     setAutomationEnabled,
     setLiveMonitorEnabled,
+    strategies,
     slotSize,
     minPositionSize,
   } = useTrading()
@@ -325,6 +329,18 @@ export function SystemSidebar() {
           <p className="mt-1 text-sm font-semibold text-[#deff9a]">
             {marketLabel || 'Azioni Europa'}
           </p>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            {(strategies || []).map((strategy) => (
+              <Button
+                key={strategy.id}
+                size="sm"
+                variant={activeMarket === strategy.id ? 'default' : 'ghost'}
+                onClick={() => setActiveMarket(strategy.id)}
+              >
+                {strategy.shortLabel || strategy.label}
+              </Button>
+            ))}
+          </div>
           <p className="mt-3 text-base font-semibold text-white">
             {operatingState.title}
           </p>
@@ -488,11 +504,24 @@ export function SystemSidebar() {
             <p className="text-sm font-semibold text-white">Regole attive</p>
           </div>
           <ul className="mt-2 space-y-2 text-xs leading-5 text-slate-400">
-            <li>P/E positivo obbligatorio.</li>
-            <li>RSI sotto 30 o sopra 70.</li>
+            {currentStrategy?.rules?.profitabilityFilter ? (
+              <li>{currentStrategy.rules.profitabilityFilter}.</li>
+            ) : null}
+            {currentStrategy?.rules?.liquidityFilter ? (
+              <li>{currentStrategy.rules.liquidityFilter}.</li>
+            ) : null}
+            <li>{currentStrategy?.rules?.signalFilter || 'RSI sotto 30 o sopra 70'}.</li>
             <li>Massimo {maxPositions} posizioni aperte.</li>
-            <li>Ogni nuova posizione usa il 10% del capitale operativo.</li>
-            <li>Minimo 1.000€, massimo 5.000€ per posizione.</li>
+            <li>
+              Ogni nuova posizione usa circa{' '}
+              {Math.round((currentStrategy?.positionSizing?.percent || 0.1) * 100)}
+              % del capitale operativo.
+            </li>
+            <li>
+              Minimo {currencyFormatter.format(minPositionSize)}, massimo{' '}
+              {currencyFormatter.format(currentStrategy?.positionSizing?.max || 0)}
+              per posizione.
+            </li>
           </ul>
         </div>
       </section>
