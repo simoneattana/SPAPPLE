@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   BarChart3,
   BookOpen,
@@ -51,7 +51,13 @@ const utilityNavigation = [
 export default function MainLayout() {
   const { logout } = useAuth()
   const { activeMarket } = useTrading()
-  const theme = getMarketTheme(activeMarket)
+  const location = useLocation()
+  const routeMarket = location.pathname.startsWith('/crypto')
+    ? 'crypto'
+    : location.pathname.startsWith('/azioni')
+      ? 'equities'
+      : activeMarket
+  const theme = getMarketTheme(routeMarket)
   const navigate = useNavigate()
   const styleVars = {
     '--market-accent': theme.accent,
@@ -87,14 +93,14 @@ export default function MainLayout() {
             <div
               key={section.id}
               className={
-                activeMarket === section.id
+                routeMarket === section.id
                   ? 'rounded-lg border border-[var(--market-accent-border)] bg-[var(--market-accent-soft)] p-2'
                   : 'rounded-lg border border-slate-800/70 p-2'
               }
             >
               <p
                 className={
-                  activeMarket === section.id
+                  routeMarket === section.id
                     ? 'px-2 pb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--market-accent)]'
                     : 'px-2 pb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-600'
                 }
