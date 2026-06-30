@@ -216,6 +216,24 @@ function AutoRuleCell({ row }) {
   )
 }
 
+function InvestmentCell({ row, slotSize }) {
+  const estimatedQuantity =
+    Number.isFinite(Number(row.currentPrice)) && row.currentPrice > 0
+      ? slotSize / row.currentPrice
+      : null
+
+  return (
+    <div className="min-w-36">
+      <p className="font-semibold text-white">{formatCurrency(slotSize)}</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">
+        {estimatedQuantity
+          ? `Circa ${formatNumber(estimatedQuantity)} azioni`
+          : 'Quantità non calcolabile'}
+      </p>
+    </div>
+  )
+}
+
 function WatchlistBadge({ row }) {
   if (row.status !== 'ok') {
     return <Badge variant="negative">SCARTATO</Badge>
@@ -244,6 +262,7 @@ export default function Scanner() {
     recordScanComplete,
     recordScanError,
     recordScanStart,
+    slotSize,
   } = useTrading()
   const [results, setResults] = useState(lastScanResults || [])
   const slotsFull = positions.length >= maxPositions
@@ -432,6 +451,7 @@ export default function Scanner() {
               <TableRow className="hover:bg-transparent">
                 <TableHead>Ticker</TableHead>
                 <TableHead>Prezzo</TableHead>
+                <TableHead>Importo</TableHead>
                 <TableHead>Dati</TableHead>
                 <TableHead>Strategia suggerita</TableHead>
                 <TableHead>Criterio pilota</TableHead>
@@ -445,6 +465,9 @@ export default function Scanner() {
                     <TickerInfo ticker={row.ticker} profile={row.profile} />
                   </TableCell>
                   <TableCell>{formatCurrency(row.currentPrice)}</TableCell>
+                  <TableCell>
+                    <InvestmentCell row={row} slotSize={slotSize} />
+                  </TableCell>
                   <TableCell>
                     <TechnicalTooltip row={row} />
                   </TableCell>
