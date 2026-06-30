@@ -146,12 +146,14 @@ function buildTrade(ticker, price, atr, type, profile = null) {
   const atrPct = (atr / price) * 100
   const targetPct = atrPct < 1.5 ? 0.3 : 0.5
   const long = type === 'LONG'
+  const openedAt = new Date().toISOString()
 
   return {
     id: `${ticker}-${type}-${Date.now()}`,
     ticker,
     profile,
     type,
+    openedAt,
     entryPrice: roundPrice(price),
     atrAtEntry: roundPrice(atr),
     takeProfit: roundPrice(
@@ -208,21 +210,28 @@ function evaluatePositions(current, positionsWithPrices, { incrementDays }) {
     }
 
     const roundedPnl = roundPrice(pnlEur)
+    const invested = position.invested || SLOT_SIZE
+    const recoveredCapital = Math.max(invested + roundedPnl, 0)
 
     if (isWin) {
-      capital += position.invested
+      capital += invested
       vault += Math.max(roundedPnl, 0)
     } else {
-      capital += Math.max(position.invested - Math.abs(roundedPnl), 0)
+      capital += recoveredCapital
     }
 
     closedTrades.push({
       ticker: position.ticker,
       type: position.type,
+      openedAt: position.openedAt || null,
+      entryPrice: position.entryPrice,
+      invested,
       pnlEur: roundedPnl,
       result: isWin ? 'WIN' : 'LOSS',
       exitDate: new Date().toISOString(),
       exitPrice: roundPrice(latestPrice),
+      exitReason: isWin ? 'TAKE_PROFIT' : 'STOP_LOSS',
+      recoveredCapital: roundPrice(recoveredCapital),
     })
   })
 
@@ -578,14 +587,20 @@ export function TradingProvider({ children }) {
       : (position.entryPrice - latestPrice) * quantity
     const roundedPnl = roundPrice(pnlEur)
     const result = roundedPnl >= 0 ? 'WIN' : 'LOSS'
+    const invested = position.invested || SLOT_SIZE
+    const recoveredCapital = Math.max(invested + roundedPnl, 0)
     const closedTrade = {
       ticker: position.ticker,
       type: position.type,
+      openedAt: position.openedAt || null,
+      entryPrice: position.entryPrice,
+      invested,
       pnlEur: roundedPnl,
       result,
       exitDate: new Date().toISOString(),
       exitPrice: roundPrice(latestPrice),
       exitReason: 'MANUALE',
+      recoveredCapital: roundPrice(recoveredCapital),
     }
 
     updateTradingState((current) => {
@@ -594,8 +609,8 @@ export function TradingProvider({ children }) {
       )
       const capitalReturn =
         roundedPnl >= 0
-          ? position.invested
-          : Math.max(position.invested - Math.abs(roundedPnl), 0)
+          ? invested
+          : recoveredCapital
       const vaultGain = roundedPnl > 0 ? roundedPnl : 0
 
       return {

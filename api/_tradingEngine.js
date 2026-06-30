@@ -166,7 +166,8 @@ export async function fetchLatestMarketPrice(ticker) {
 }
 
 function evaluatePosition(position, latestPrice) {
-  const quantity = position.invested / position.entryPrice
+  const invested = position.invested || SLOT_SIZE
+  const quantity = invested / position.entryPrice
   const long = position.type === 'LONG'
   const pnlEur = long
     ? (latestPrice - position.entryPrice) * quantity
@@ -177,6 +178,8 @@ function evaluatePosition(position, latestPrice) {
   const isLoss = long
     ? latestPrice <= position.stopLoss
     : latestPrice >= position.stopLoss
+  const roundedPnl = roundPrice(pnlEur)
+  const recoveredCapital = Math.max(invested + roundedPnl, 0)
 
   return {
     monitoredPosition: {
@@ -189,10 +192,15 @@ function evaluatePosition(position, latestPrice) {
         ? {
             ticker: position.ticker,
             type: position.type,
-            pnlEur: roundPrice(pnlEur),
+            openedAt: position.openedAt || null,
+            entryPrice: position.entryPrice,
+            invested,
+            pnlEur: roundedPnl,
             result: isWin ? 'WIN' : 'LOSS',
             exitDate: new Date().toISOString(),
             exitPrice: roundPrice(latestPrice),
+            exitReason: isWin ? 'TAKE_PROFIT' : 'STOP_LOSS',
+            recoveredCapital: roundPrice(recoveredCapital),
           }
         : null,
   }
@@ -260,13 +268,10 @@ export async function runBackendMonitor(state) {
       }
 
       if (closedTrade.result === 'WIN') {
-        capital += position.invested || SLOT_SIZE
+        capital += closedTrade.invested || SLOT_SIZE
         vault += Math.max(closedTrade.pnlEur, 0)
       } else {
-        capital += Math.max(
-          (position.invested || SLOT_SIZE) - Math.abs(closedTrade.pnlEur),
-          0,
-        )
+        capital += closedTrade.recoveredCapital || 0
       }
 
       closedTrades.push(closedTrade)

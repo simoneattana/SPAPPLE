@@ -84,6 +84,76 @@ function formatNumber(value) {
     : 'Non disponibile'
 }
 
+function formatDateTime(value) {
+  if (!value) {
+    return 'Non disponibile'
+  }
+
+  return new Intl.DateTimeFormat('it-IT', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value))
+}
+
+function getPositionOpenedAt(position) {
+  if (position.openedAt) {
+    return position.openedAt
+  }
+
+  const timestamp = Number(String(position.id || '').split('-').at(-1))
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null
+}
+
+function getRecoveredCapital(trade, fallbackSlotSize) {
+  if (Number.isFinite(Number(trade.recoveredCapital))) {
+    return Number(trade.recoveredCapital)
+  }
+
+  const invested = Number.isFinite(Number(trade.invested))
+    ? Number(trade.invested)
+    : fallbackSlotSize
+  const pnl = Number.isFinite(Number(trade.pnlEur)) ? Number(trade.pnlEur) : 0
+
+  return Math.max(invested + pnl, 0)
+}
+
+function getPositionLivePrice(position, scanRow) {
+  const scanPrice = Number(scanRow?.currentPrice)
+  const latestPrice = Number(position.latestPrice)
+
+  if (Number.isFinite(scanPrice)) {
+    return scanPrice
+  }
+
+  return Number.isFinite(latestPrice) ? latestPrice : null
+}
+
+function calculatePositionPnl(position, scanRow) {
+  const livePrice = getPositionLivePrice(position, scanRow)
+
+  if (!Number.isFinite(Number(livePrice))) {
+    return null
+  }
+
+  const invested = Number(position.invested)
+  const entryPrice = Number(position.entryPrice)
+
+  if (!Number.isFinite(invested) || !Number.isFinite(entryPrice) || entryPrice <= 0) {
+    return null
+  }
+
+  const quantity = invested / entryPrice
+  const pnl =
+    position.type === 'LONG'
+      ? (livePrice - entryPrice) * quantity
+      : (entryPrice - livePrice) * quantity
+
+  return pnl
+}
+
 function StrategyBadge({ rsi }) {
   if (rsi < 30) {
     return <Badge variant="positive">LONG / RIALZO</Badge>
@@ -255,12 +325,15 @@ function WatchlistBadge({ row }) {
 export default function Scanner() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [closingId, setClosingId] = useState(null)
   const autoScanStarted = useRef(false)
   const { toast } = useToast()
   const {
     automationEnabled,
+    closePositionManually,
     executeAutomatedTrades,
     executeTrade,
+    history,
     lastScanAt,
     lastScanResults,
     positions,
@@ -268,6 +341,7 @@ export default function Scanner() {
     recordScanComplete,
     recordScanError,
     recordScanStart,
+    slotSize,
   } = useTrading()
   const [results, setResults] = useState(lastScanResults || [])
   const slotsFull = positions.length >= maxPositions
@@ -284,6 +358,11 @@ export default function Scanner() {
     () => results.filter(isRejectedResult),
     [results],
   )
+  const resultsByTicker = useMemo(
+    () => new Map(results.map((row) => [row.ticker, row])),
+    [results],
+  )
+  const recentClosedTrades = useMemo(() => history.slice(0, 5), [history])
 
   useEffect(() => {
     setResults(lastScanResults || [])
@@ -392,6 +471,82 @@ export default function Scanner() {
   const getOpenPosition = (ticker) =>
     positions.find((position) => position.ticker === ticker)
 
+  const visibleSignalRows = useMemo(() => {
+    const openTickers = new Set(positions.map((position) => position.ticker))
+
+    return [...filteredResults].sort((left, right) => {
+      const leftOpen = openTickers.has(left.ticker)
+      const rightOpen = openTickers.has(right.ticker)
+
+      if (leftOpen !== rightOpen) {
+        return leftOpen ? -1 : 1
+      }
+
+      return getAutoScore(right) - getAutoScore(left)
+    })
+  }, [filteredResults, positions])
+
+  const refillAfterManualClose = async (closedTicker) => {
+    if (!automationEnabled) {
+      return
+    }
+
+    recordScanStart(EUROPEAN_TICKERS.length)
+
+    try {
+      const marketData = await fetchMarketData(EUROPEAN_TICKERS)
+      const actionableRows = marketData.filter(isActionableResult)
+      const automaticRows = sortByAutoScore(
+        marketData.filter(
+          (row) => isAutoEligibleResult(row) && row.ticker !== closedTicker,
+        ),
+      )
+
+      setResults(marketData)
+      recordScanComplete({
+        scannedCount: marketData.length,
+        signalCount: actionableRows.length,
+        results: marketData,
+      })
+
+      const { openedTrades } = executeAutomatedTrades(automaticRows)
+
+      toast({
+        title:
+          openedTrades.length > 0
+            ? `Slot riempito: ${openedTrades[0].ticker} aperto dal pilota`
+            : 'Slot libero: nessun nuovo titolo abbastanza forte',
+      })
+    } catch (scanError) {
+      recordScanError(scanError.message)
+      toast({
+        title: 'Chiusura eseguita, ma nuova scansione non riuscita',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const handleManualClose = async (position) => {
+    setClosingId(position.id)
+
+    try {
+      const closedTrade = await closePositionManually(position.id)
+
+      toast({
+        title: `${position.ticker} chiuso: P/L ${formatCurrency(closedTrade.pnlEur)}`,
+      })
+
+      await refillAfterManualClose(position.ticker)
+    } catch (closeError) {
+      toast({
+        title: closeError.message || 'Chiusura manuale non riuscita',
+        variant: 'destructive',
+      })
+    } finally {
+      setClosingId(null)
+    }
+  }
+
   return (
     <div className="flex flex-1 flex-col gap-7">
       <header className="flex flex-col gap-5 rounded-lg border border-slate-800 bg-[#090b10] p-5 shadow-xl shadow-black/20 sm:flex-row sm:items-center sm:justify-between">
@@ -437,6 +592,179 @@ export default function Scanner() {
         </div>
       ) : null}
 
+      <Card className="overflow-hidden border-[#deff9a]/20">
+        <CardHeader className="items-center justify-between gap-4 border-b border-slate-800">
+          <div>
+            <CardTitle>Posizioni aperte</CardTitle>
+            <p className="mt-2 text-sm text-slate-500">
+              Prima vedi cosa hai realmente in portafoglio: quando è stato
+              investito, quanto è investito e il P/L aggiornato con l’ultimo
+              prezzo disponibile.
+            </p>
+          </div>
+          <Badge>{positions.length} aperte</Badge>
+        </CardHeader>
+        <CardContent className="p-0">
+          {positions.length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>Ticker</TableHead>
+                  <TableHead>Investito il</TableHead>
+                  <TableHead>Investito</TableHead>
+                  <TableHead>Ingresso</TableHead>
+                  <TableHead>Prezzo live</TableHead>
+                  <TableHead>Guadagno live</TableHead>
+                  <TableHead>Target / Stop</TableHead>
+                  <TableHead>Azione</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {positions.map((position) => {
+                  const scanRow = resultsByTicker.get(position.ticker)
+                  const livePrice = getPositionLivePrice(position, scanRow)
+                  const livePnl = calculatePositionPnl(position, scanRow)
+                  const pnlPositive = Number(livePnl) >= 0
+
+                  return (
+                    <TableRow key={`aperta-${position.id}`}>
+                      <TableCell>
+                        <div className="flex flex-col gap-2">
+                          <TickerInfo
+                            ticker={position.ticker}
+                            profile={position.profile}
+                          />
+                          <StrategyBadge rsi={position.type === 'LONG' ? 0 : 100} />
+                        </div>
+                      </TableCell>
+                      <TableCell>{formatDateTime(getPositionOpenedAt(position))}</TableCell>
+                      <TableCell className="font-semibold text-[#deff9a]">
+                        {formatCurrency(position.invested)}
+                      </TableCell>
+                      <TableCell>{formatCurrency(position.entryPrice)}</TableCell>
+                      <TableCell>
+                        <div>
+                          <p>{formatCurrency(livePrice)}</p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {scanRow ? 'Da ultima scansione' : 'Da monitor'}
+                          </p>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <p
+                          className={
+                            Number.isFinite(Number(livePnl))
+                              ? pnlPositive
+                                ? 'font-semibold text-[#deff9a]'
+                                : 'font-semibold text-[#ef8f8f]'
+                              : 'text-slate-400'
+                          }
+                        >
+                          {formatCurrency(livePnl)}
+                        </p>
+                      </TableCell>
+                      <TableCell>
+                        <div className="min-w-36 text-sm leading-6">
+                          <p>TP {formatCurrency(position.takeProfit)}</p>
+                          <p className="text-slate-500">
+                            SL {formatCurrency(position.stopLoss)}
+                          </p>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={closingId === position.id}
+                          onClick={() => handleManualClose(position)}
+                        >
+                          {closingId === position.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : null}
+                          Chiudi ora
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          ) : (
+            <div className="p-6 text-sm text-slate-500">
+              Nessuna posizione aperta. Quando il pilota apre o tu apri una
+              posizione, comparirà qui sopra ai segnali.
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="overflow-hidden">
+        <CardHeader className="items-center justify-between gap-4 border-b border-slate-800">
+          <div>
+            <CardTitle>Ultime vendite</CardTitle>
+            <p className="mt-2 text-sm text-slate-500">
+              Qui vedi quando hai investito, quando hai venduto e quanto è
+              rientrato dopo la chiusura.
+            </p>
+          </div>
+          <Badge>{history.length} chiuse</Badge>
+        </CardHeader>
+        <CardContent className="p-0">
+          {recentClosedTrades.length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>Ticker</TableHead>
+                  <TableHead>Investito il</TableHead>
+                  <TableHead>Venduto il</TableHead>
+                  <TableHead>Investito</TableHead>
+                  <TableHead>Ricavato</TableHead>
+                  <TableHead>P/L</TableHead>
+                  <TableHead>Esito</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {recentClosedTrades.map((trade, index) => {
+                  const recovered = getRecoveredCapital(trade, slotSize)
+                  const pnlPositive = Number(trade.pnlEur) >= 0
+
+                  return (
+                    <TableRow key={`${trade.ticker}-${trade.exitDate}-${index}`}>
+                      <TableCell>{trade.ticker}</TableCell>
+                      <TableCell>{formatDateTime(trade.openedAt)}</TableCell>
+                      <TableCell>{formatDateTime(trade.exitDate)}</TableCell>
+                      <TableCell>{formatCurrency(trade.invested || slotSize)}</TableCell>
+                      <TableCell className="font-semibold text-white">
+                        {formatCurrency(recovered)}
+                      </TableCell>
+                      <TableCell
+                        className={
+                          pnlPositive
+                            ? 'font-semibold text-[#deff9a]'
+                            : 'font-semibold text-[#ef8f8f]'
+                        }
+                      >
+                        {formatCurrency(trade.pnlEur)}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={trade.result === 'WIN' ? 'positive' : 'negative'}>
+                          {trade.result === 'WIN' ? 'Utile' : 'Perdita'}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          ) : (
+            <div className="p-6 text-sm text-slate-500">
+              Nessuna vendita registrata. Appena una posizione verrà chiusa,
+              vedrai qui ricavato e risultato.
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <Card className="overflow-hidden">
         <CardHeader className="items-center justify-between gap-4 border-b border-slate-800">
           <div>
@@ -467,7 +795,7 @@ export default function Scanner() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredResults.map((row) => (
+              {visibleSignalRows.map((row) => (
                 <TableRow key={row.ticker}>
                   <TableCell>
                     <TickerInfo ticker={row.ticker} profile={row.profile} />
