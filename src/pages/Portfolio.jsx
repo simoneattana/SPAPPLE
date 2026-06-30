@@ -53,7 +53,7 @@ function Metric({ label, value }) {
 
 function PnlMetric({ value }) {
   const pnl = Number(value)
-  const color = pnl >= 0 ? 'text-[#deff9a]' : 'text-[#ef8f8f]'
+  const color = pnl >= 0 ? 'text-[var(--market-accent)]' : 'text-[#ef8f8f]'
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
@@ -202,7 +202,7 @@ export default function Portfolio() {
             Portafoglio virtuale · {marketCopy.eyebrow}
           </p>
           <h1 className="mt-3 text-2xl font-semibold text-white sm:text-3xl">
-            Posizioni Forward Testing: {marketLabel}
+            Portafoglio {marketLabel}
           </h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
             Gestione separata di capitale, posizioni, target e stop per{' '}
@@ -229,10 +229,10 @@ export default function Portfolio() {
         <Card>
           <CardHeader className="flex-row items-start justify-between gap-4">
             <CardTitle>Capitale Operativo</CardTitle>
-            <Wallet className="h-5 w-5 text-[#deff9a]" />
+            <Wallet className="h-5 w-5 text-[var(--market-accent)]" />
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-semibold text-[#deff9a]">
+            <p className="text-2xl font-semibold text-[var(--market-accent)]">
               {currencyFormatter.format(capital)}
             </p>
           </CardContent>
@@ -240,10 +240,10 @@ export default function Portfolio() {
         <Card>
           <CardHeader className="flex-row items-start justify-between gap-4">
             <CardTitle>Salvadanaio Profitti</CardTitle>
-            <Target className="h-5 w-5 text-[#deff9a]" />
+            <Target className="h-5 w-5 text-[var(--market-accent)]" />
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-semibold text-[#deff9a]">
+            <p className="text-2xl font-semibold text-[var(--market-accent)]">
               {currencyFormatter.format(vault)}
             </p>
           </CardContent>
@@ -330,8 +330,8 @@ export default function Portfolio() {
       ) : (
         <section className="flex min-h-[420px] items-center justify-center rounded-lg border border-slate-800 bg-[#090b10] p-8 text-center shadow-xl shadow-black/20">
           <div>
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-lg border border-[#deff9a]/25 bg-[#deff9a]/10">
-              <Wallet className="h-6 w-6 text-[#deff9a]" />
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-lg border border-[var(--market-accent-border)] bg-[var(--market-accent-soft)]">
+              <Wallet className="h-6 w-6 text-[var(--market-accent)]" />
             </div>
             <h2 className="mt-5 text-2xl font-semibold text-white">
               Nessuna posizione attiva

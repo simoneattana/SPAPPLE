@@ -72,20 +72,20 @@ function activityStyles(status) {
   if (status === 'working') {
     return {
       icon: Radio,
-      dot: 'bg-[#deff9a] animate-pulse',
-      text: 'text-[#deff9a]',
-      border: 'border-[#deff9a]/30',
-      bg: 'bg-[#deff9a]/10',
+      dot: 'bg-[var(--market-accent)] animate-pulse',
+      text: 'text-[var(--market-accent)]',
+      border: 'border-[var(--market-accent-border)]',
+      bg: 'bg-[var(--market-accent-soft)]',
     }
   }
 
   if (status === 'attention') {
     return {
       icon: PlayCircle,
-      dot: 'bg-[#deff9a]',
-      text: 'text-[#deff9a]',
-      border: 'border-[#deff9a]/30',
-      bg: 'bg-[#deff9a]/10',
+      dot: 'bg-[var(--market-accent)]',
+      text: 'text-[var(--market-accent)]',
+      border: 'border-[var(--market-accent-border)]',
+      bg: 'bg-[var(--market-accent-soft)]',
     }
   }
 
@@ -101,7 +101,7 @@ function activityStyles(status) {
 
   return {
     icon: CheckCircle2,
-    dot: 'bg-[#deff9a]',
+    dot: 'bg-[var(--market-accent)]',
     text: 'text-slate-200',
     border: 'border-slate-800',
     bg: 'bg-slate-950',
@@ -253,10 +253,8 @@ export function SystemSidebar() {
     positions,
     remoteStatus,
     runLiveCheck,
-    setActiveMarket,
     setAutomationEnabled,
     setLiveMonitorEnabled,
-    strategies,
     slotSize,
     minPositionSize,
   } = useTrading()
@@ -318,8 +316,8 @@ export function SystemSidebar() {
               Pannello Operativo
             </h2>
           </div>
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-[#deff9a]/30 bg-[#deff9a]/10">
-            <Bot className="h-5 w-5 text-[#deff9a]" />
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--market-accent-border)] bg-[var(--market-accent-soft)]">
+            <Bot className="h-5 w-5 text-[var(--market-accent)]" />
           </div>
         </div>
 
@@ -333,21 +331,13 @@ export function SystemSidebar() {
           <p className="mt-3 text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
             Mercato attivo
           </p>
-          <p className="mt-1 text-sm font-semibold text-[#deff9a]">
+          <p className="mt-1 text-sm font-semibold text-[var(--market-accent)]">
             {marketLabel || 'Azioni Europa'}
           </p>
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            {(strategies || []).map((strategy) => (
-              <Button
-                key={strategy.id}
-                size="sm"
-                variant={activeMarket === strategy.id ? 'default' : 'ghost'}
-                onClick={() => setActiveMarket(strategy.id)}
-              >
-                {strategy.shortLabel || strategy.label}
-              </Button>
-            ))}
-          </div>
+          <p className="mt-2 rounded-lg border border-[var(--market-accent-border)] bg-[var(--market-accent-soft)] px-3 py-2 text-xs leading-5 text-slate-300">
+            Ambiente separato: dati, capitale, posizioni e storico appartengono
+            solo a {marketLabel}.
+          </p>
           <p className="mt-3 text-base font-semibold text-white">
             {operatingState.title}
           </p>
@@ -361,7 +351,7 @@ export function SystemSidebar() {
             <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
               Slot usabili
             </p>
-            <p className="mt-2 text-xl font-semibold text-[#deff9a]">
+            <p className="mt-2 text-xl font-semibold text-[var(--market-accent)]">
               {executableSlots}
             </p>
           </div>
@@ -405,7 +395,7 @@ export function SystemSidebar() {
 
         <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950 p-3">
           <div className="flex items-center gap-2">
-            <ListChecks className="h-4 w-4 text-[#deff9a]" />
+            <ListChecks className="h-4 w-4 text-[var(--market-accent)]" />
             <p className="text-sm font-semibold text-white">Prossima azione</p>
           </div>
           <p className="mt-2 text-sm leading-6 text-slate-400">{nextAction}</p>
@@ -414,7 +404,7 @@ export function SystemSidebar() {
               <p className="uppercase tracking-[0.12em] text-slate-600">
                 Prossimo controllo
               </p>
-              <p className="mt-1 font-semibold text-[#deff9a]">
+              <p className="mt-1 font-semibold text-[var(--market-accent)]">
                 {formatCountdown(nextLiveCheckAt)}
               </p>
             </div>
@@ -448,7 +438,7 @@ export function SystemSidebar() {
         {positions.length > 0 ? (
           <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950 p-3">
             <div className="flex items-center gap-2">
-              <Radio className="h-4 w-4 text-[#deff9a]" />
+              <Radio className="h-4 w-4 text-[var(--market-accent)]" />
               <p className="text-sm font-semibold text-white">
                 Posizioni monitorate
               </p>
@@ -457,7 +447,7 @@ export function SystemSidebar() {
               {positions.slice(0, 5).map((position) => {
                 const pnl = Number(position.unrealizedPnl)
                 const pnlReady = Number.isFinite(pnl)
-                const pnlColor = pnl >= 0 ? 'text-[#deff9a]' : 'text-[#ef8f8f]'
+                const pnlColor = pnl >= 0 ? 'text-[var(--market-accent)]' : 'text-[#ef8f8f]'
 
                 return (
                   <div
@@ -509,7 +499,7 @@ export function SystemSidebar() {
             </Badge>
           </div>
           <div className="flex items-center gap-2">
-            <ShieldCheck className="h-4 w-4 text-[#deff9a]" />
+            <ShieldCheck className="h-4 w-4 text-[var(--market-accent)]" />
             <p className="text-sm font-semibold text-white">Regole attive</p>
           </div>
           <ul className="mt-2 space-y-2 text-xs leading-5 text-slate-400">
@@ -545,14 +535,14 @@ export function SystemSidebar() {
               Chat operativa
             </h2>
           </div>
-          <Activity className="h-5 w-5 text-[#deff9a]" />
+          <Activity className="h-5 w-5 text-[var(--market-accent)]" />
         </div>
 
         <div className="mt-4 space-y-2">
           {assistantMessages.map((message) => (
             <div
               key={message}
-              className="rounded-lg border border-[#deff9a]/20 bg-[#deff9a]/10 p-3 text-sm leading-6 text-slate-200"
+              className="rounded-lg border border-[var(--market-accent-border)] bg-[var(--market-accent-soft)] p-3 text-sm leading-6 text-slate-200"
             >
               {message}
             </div>

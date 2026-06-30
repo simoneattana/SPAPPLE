@@ -1,4 +1,5 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
+import { useEffect } from 'react'
 import { AuthProvider } from './services/AuthContext'
 import { ToastProvider } from './components/ui/Toast'
 import { TradingProvider } from './context/TradingContext'
@@ -12,6 +13,7 @@ import Portfolio from './pages/Portfolio'
 import Scanner from './pages/Scanner'
 import Settings from './pages/Settings'
 import { useAuth } from './services/useAuth'
+import { useTrading } from './context/useTrading'
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth()
@@ -33,6 +35,37 @@ function PublicRoute({ children }) {
   return children
 }
 
+function MarketScope({ marketId, children }) {
+  const { activeMarket, setActiveMarket } = useTrading()
+
+  useEffect(() => {
+    if (activeMarket !== marketId) {
+      setActiveMarket(marketId)
+    }
+  }, [activeMarket, marketId, setActiveMarket])
+
+  if (activeMarket !== marketId) {
+    return (
+      <div className="flex min-h-[520px] items-center justify-center rounded-lg border border-slate-800 bg-[#090b10] p-8 text-center">
+        <div>
+          <p className="text-sm font-semibold text-[var(--market-accent)]">
+            Cambio ambiente operativo...
+          </p>
+          <p className="mt-2 text-sm text-slate-500">
+            Sto caricando il mercato selezionato.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  return children
+}
+
+function MarketPage({ marketId, children }) {
+  return <MarketScope marketId={marketId}>{children}</MarketScope>
+}
+
 function AppRoutes() {
   return (
     <Routes>
@@ -52,16 +85,56 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<Navigate to="/dashboard" replace />} />
-        <Route path="dashboard" element={<Dashboard />} />
-        <Route path="scanner" element={<Scanner />} />
-        <Route path="portafoglio" element={<Portfolio />} />
-        <Route path="diario" element={<Diary />} />
-        <Route path="storico" element={<History />} />
+        <Route index element={<Navigate to="/azioni/dashboard" replace />} />
+        <Route path="dashboard" element={<Navigate to="/azioni/dashboard" replace />} />
+        <Route path="scanner" element={<Navigate to="/azioni/scanner" replace />} />
+        <Route path="portafoglio" element={<Navigate to="/azioni/portafoglio" replace />} />
+        <Route path="diario" element={<Navigate to="/azioni/diario" replace />} />
+        <Route path="storico" element={<Navigate to="/azioni/storico" replace />} />
+        <Route
+          path="azioni/dashboard"
+          element={<MarketPage marketId="equities"><Dashboard /></MarketPage>}
+        />
+        <Route
+          path="azioni/scanner"
+          element={<MarketPage marketId="equities"><Scanner /></MarketPage>}
+        />
+        <Route
+          path="azioni/portafoglio"
+          element={<MarketPage marketId="equities"><Portfolio /></MarketPage>}
+        />
+        <Route
+          path="azioni/diario"
+          element={<MarketPage marketId="equities"><Diary /></MarketPage>}
+        />
+        <Route
+          path="azioni/storico"
+          element={<MarketPage marketId="equities"><History /></MarketPage>}
+        />
+        <Route
+          path="crypto/dashboard"
+          element={<MarketPage marketId="crypto"><Dashboard /></MarketPage>}
+        />
+        <Route
+          path="crypto/scanner"
+          element={<MarketPage marketId="crypto"><Scanner /></MarketPage>}
+        />
+        <Route
+          path="crypto/portafoglio"
+          element={<MarketPage marketId="crypto"><Portfolio /></MarketPage>}
+        />
+        <Route
+          path="crypto/diario"
+          element={<MarketPage marketId="crypto"><Diary /></MarketPage>}
+        />
+        <Route
+          path="crypto/storico"
+          element={<MarketPage marketId="crypto"><History /></MarketPage>}
+        />
         <Route path="spiegazione" element={<Explanation />} />
         <Route path="impostazioni" element={<Settings />} />
       </Route>
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      <Route path="*" element={<Navigate to="/azioni/dashboard" replace />} />
     </Routes>
   )
 }

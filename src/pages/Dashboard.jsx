@@ -120,14 +120,14 @@ export default function Dashboard() {
       value: currencyFormatter.format(capital),
       detail: 'Liquidità disponibile',
       icon: BadgeEuro,
-      accent: 'text-[#deff9a]',
+      accent: 'text-[var(--market-accent)]',
     },
     {
       title: 'Salvadanaio Profitti',
       value: currencyFormatter.format(vault),
       detail: 'Profitti consolidati',
       icon: PiggyBank,
-      accent: 'text-[#deff9a]',
+      accent: 'text-[var(--market-accent)]',
     },
     {
       title: 'Posizioni Attive',
@@ -141,7 +141,7 @@ export default function Dashboard() {
       value: engineStatus,
       detail: automationEnabled ? 'Pilota automatico attivo' : 'Pilota manuale',
       icon: ShieldCheck,
-      accent: 'text-[#deff9a]',
+      accent: 'text-[var(--market-accent)]',
     },
   ]
 
@@ -154,15 +154,21 @@ export default function Dashboard() {
               Dashboard operativo · {marketCopy.eyebrow}
             </p>
             <h1 className="mt-3 text-2xl font-semibold text-white sm:text-3xl">
-              Spapple sta monitorando {marketLabel}: capitale, segnali e posizioni
+              Dashboard {marketLabel}
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-500">
+              Ambiente operativo separato.{' '}
               Ultima scansione: {lastScanText}. Segnali trovati:{' '}
               {lastSignalCount} su {lastScanCount} {marketCopy.assetPlural}{' '}
               analizzati.
             </p>
+            {marketCopy.budgetReason ? (
+              <p className="mt-3 max-w-3xl rounded-lg border border-[var(--market-accent-border)] bg-[var(--market-accent-soft)] px-3 py-2 text-sm leading-6 text-slate-300">
+                {marketCopy.budgetReason}
+              </p>
+            ) : null}
           </div>
-          <div className="flex items-center gap-2 rounded-lg border border-[#deff9a]/25 bg-[#deff9a]/10 px-3 py-2 text-sm font-medium text-[#deff9a]">
+          <div className="flex items-center gap-2 rounded-lg border border-[var(--market-accent-border)] bg-[var(--market-accent-soft)] px-3 py-2 text-sm font-medium text-[var(--market-accent)]">
             {automationEnabled ? (
               <Activity className="h-4 w-4" />
             ) : (
@@ -229,7 +235,7 @@ export default function Dashboard() {
                 : 'N/D'
             }
             detail="Percentuale di trade chiusi in profitto"
-            accent="text-[#deff9a]"
+            accent="text-[var(--market-accent)]"
           />
           <StatBox
             label="Expectancy"
@@ -240,7 +246,7 @@ export default function Dashboard() {
             }
             detail="Profitto medio atteso per trade"
             accent={
-              strategyStats.expectancy >= 0 ? 'text-[#deff9a]' : 'text-[#ef8f8f]'
+              strategyStats.expectancy >= 0 ? 'text-[var(--market-accent)]' : 'text-[#ef8f8f]'
             }
           />
           <StatBox
@@ -253,7 +259,7 @@ export default function Dashboard() {
         <div className="mt-4 grid gap-4 md:grid-cols-2">
           <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
             <div className="flex items-center gap-2">
-              <TrendingUp className="h-4 w-4 text-[#deff9a]" />
+              <TrendingUp className="h-4 w-4 text-[var(--market-accent)]" />
               <p className="text-sm font-semibold text-white">
                 Lettura corretta
               </p>
@@ -296,7 +302,7 @@ export default function Dashboard() {
 
         <div className="mt-8 flex h-64 items-center justify-center rounded-lg border border-dashed border-slate-700 bg-[linear-gradient(135deg,rgba(222,255,154,0.08),rgba(15,23,42,0.22))]">
           <div className="text-center">
-            <ChartNoAxesCombined className="mx-auto h-8 w-8 text-[#deff9a]" />
+            <ChartNoAxesCombined className="mx-auto h-8 w-8 text-[var(--market-accent)]" />
             <p className="mt-3 text-sm text-slate-400">
               Area riservata al grafico del capitale
             </p>

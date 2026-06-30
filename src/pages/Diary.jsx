@@ -31,7 +31,7 @@ function ResultBadge({ result }) {
 }
 
 function resultTextColor(result) {
-  return result === 'WIN' ? 'text-[#deff9a]' : 'text-[#ef8f8f]'
+  return result === 'WIN' ? 'text-[var(--market-accent)]' : 'text-[#ef8f8f]'
 }
 
 export default function Diary() {
@@ -61,10 +61,10 @@ export default function Diary() {
               Solo profitti realizzati da operazioni vincenti.
             </p>
           </div>
-          <PiggyBank className="h-6 w-6 text-[#deff9a]" />
+          <PiggyBank className="h-6 w-6 text-[var(--market-accent)]" />
         </CardHeader>
         <CardContent>
-          <p className="text-4xl font-semibold text-[#deff9a]">
+          <p className="text-4xl font-semibold text-[var(--market-accent)]">
             {currencyFormatter.format(vault)}
           </p>
         </CardContent>

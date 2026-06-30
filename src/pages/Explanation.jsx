@@ -146,8 +146,8 @@ export default function Explanation() {
 
       <section className="rounded-lg border border-slate-800 bg-[#090b10] p-6 shadow-xl shadow-black/20">
         <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-lg border border-[#deff9a]/30 bg-[#deff9a]/10">
-            <Bot className="h-5 w-5 text-[#deff9a]" />
+          <div className="flex h-11 w-11 items-center justify-center rounded-lg border border-[var(--market-accent-border)] bg-[var(--market-accent-soft)]">
+            <Bot className="h-5 w-5 text-[var(--market-accent)]" />
           </div>
           <div>
             <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">
@@ -168,7 +168,7 @@ export default function Explanation() {
       <section className="rounded-lg border border-slate-800 bg-[#090b10] p-6 shadow-xl shadow-black/20">
         <div className="flex items-center gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-lg border border-slate-700 bg-slate-950">
-            <ClipboardCheck className="h-5 w-5 text-[#deff9a]" />
+            <ClipboardCheck className="h-5 w-5 text-[var(--market-accent)]" />
           </div>
           <div>
             <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">
@@ -191,7 +191,7 @@ export default function Explanation() {
               className="rounded-lg border border-slate-800 bg-slate-950 p-4 text-sm leading-6 text-slate-300"
             >
               <p className="font-semibold text-white">
-                <span className="mr-2 text-[#deff9a]">{index + 1}.</span>
+                <span className="mr-2 text-[var(--market-accent)]">{index + 1}.</span>
                 {step.title}
               </p>
               <p className="mt-2 text-slate-400">{step.text}</p>
@@ -200,9 +200,9 @@ export default function Explanation() {
         </ol>
       </section>
 
-      <section className="rounded-lg border border-[#deff9a]/25 bg-[#deff9a]/10 p-6">
+      <section className="rounded-lg border border-[var(--market-accent-border)] bg-[var(--market-accent-soft)] p-6">
         <div className="flex items-start gap-3">
-          <ShieldCheck className="mt-1 h-5 w-5 shrink-0 text-[#deff9a]" />
+          <ShieldCheck className="mt-1 h-5 w-5 shrink-0 text-[var(--market-accent)]" />
           <p className="text-sm leading-6 text-slate-200">
             Niente grafici complessi da interpretare e niente ansia durante
             l’orario di lavoro: Spapple è progettato per darti una routine

@@ -129,7 +129,9 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
     !rawMarketState.history?.length &&
     !rawMarketState.events?.length
   const normalizedCapital =
-    strategy.id === 'crypto' && capital === 0 && unusedMarket
+    strategy.id === 'crypto' &&
+    (capital === 0 || capital === 5000) &&
+    unusedMarket
       ? fallback.capital
       : Number.isFinite(capital)
         ? capital

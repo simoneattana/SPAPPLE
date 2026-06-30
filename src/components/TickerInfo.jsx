@@ -56,11 +56,11 @@ export function TickerInfo({ ticker, profile, compact = false, assetType = 'soci
           <div className="w-full max-w-xl rounded-lg border border-slate-800 bg-[#090b10] shadow-2xl shadow-black/60">
             <div className="flex items-start justify-between gap-4 border-b border-slate-800 p-5">
               <div className="flex items-start gap-3">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-[#deff9a]/30 bg-[#deff9a]/10">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-[var(--market-accent-border)] bg-[var(--market-accent-soft)]">
                   {isCrypto ? (
-                    <Coins className="h-5 w-5 text-[#deff9a]" />
+                    <Coins className="h-5 w-5 text-[var(--market-accent)]" />
                   ) : (
-                    <Building2 className="h-5 w-5 text-[#deff9a]" />
+                    <Building2 className="h-5 w-5 text-[var(--market-accent)]" />
                   )}
                 </div>
                 <div>
@@ -106,7 +106,7 @@ export function TickerInfo({ ticker, profile, compact = false, assetType = 'soci
             {tickerProfile.website ? (
               <div className="border-t border-slate-800 p-5">
                 <a
-                  className="inline-flex items-center gap-2 text-sm font-semibold text-[#deff9a] hover:text-[#e7ffb8]"
+                  className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--market-accent)] hover:text-[var(--market-accent-hover)]"
                   href={tickerProfile.website}
                   rel="noreferrer"
                   target="_blank"

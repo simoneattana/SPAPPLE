@@ -299,7 +299,7 @@ function InvestmentCell({ position }) {
 
   return (
     <div className="min-w-36">
-      <p className="font-semibold text-[#deff9a]">
+      <p className="font-semibold text-[var(--market-accent)]">
         {formatCurrency(position.invested)}
       </p>
       <p className="mt-1 text-xs leading-5 text-slate-500">
@@ -598,7 +598,7 @@ export default function Scanner() {
             Scanner quantitativo · {scannerConfig.copy.eyebrow}
           </p>
           <h1 className="mt-3 text-2xl font-semibold text-white sm:text-3xl">
-            Scanner di Mercato: {marketLabel || currentStrategy?.label}
+            Scanner {marketLabel || currentStrategy?.label}
           </h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
             Analisi {scannerConfig.copy.scanMode} automatica su{' '}
@@ -637,7 +637,7 @@ export default function Scanner() {
         </div>
       ) : null}
 
-      <Card className="overflow-hidden border-[#deff9a]/20">
+      <Card className="overflow-hidden border-[var(--market-accent-border)]">
         <CardHeader className="items-center justify-between gap-4 border-b border-slate-800">
           <div>
             <CardTitle>Posizioni aperte</CardTitle>
@@ -686,7 +686,7 @@ export default function Scanner() {
                         </div>
                       </TableCell>
                       <TableCell>{formatDateTime(getPositionOpenedAt(position))}</TableCell>
-                      <TableCell className="font-semibold text-[#deff9a]">
+                      <TableCell className="font-semibold text-[var(--market-accent)]">
                         {formatCurrency(position.invested)}
                       </TableCell>
                       <TableCell>{formatCurrency(position.entryPrice)}</TableCell>
@@ -703,7 +703,7 @@ export default function Scanner() {
                           className={
                             Number.isFinite(Number(livePnl))
                               ? pnlPositive
-                                ? 'font-semibold text-[#deff9a]'
+                                ? 'font-semibold text-[var(--market-accent)]'
                                 : 'font-semibold text-[#ef8f8f]'
                               : 'text-slate-400'
                           }
@@ -716,7 +716,7 @@ export default function Scanner() {
                           className={
                             Number.isFinite(Number(livePnlPct))
                               ? pnlPositive
-                                ? 'font-semibold text-[#deff9a]'
+                                ? 'font-semibold text-[var(--market-accent)]'
                                 : 'font-semibold text-[#ef8f8f]'
                               : 'text-slate-400'
                           }
@@ -805,7 +805,7 @@ export default function Scanner() {
                       <TableCell
                         className={
                           pnlPositive
-                            ? 'font-semibold text-[#deff9a]'
+                            ? 'font-semibold text-[var(--market-accent)]'
                             : 'font-semibold text-[#ef8f8f]'
                         }
                       >
@@ -988,8 +988,8 @@ export default function Scanner() {
       <Card>
         <CardHeader className="items-start gap-3 border-b border-slate-800">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-[#deff9a]/30 bg-[#deff9a]/10">
-              <BookOpenText className="h-5 w-5 text-[#deff9a]" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--market-accent-border)] bg-[var(--market-accent-soft)]">
+              <BookOpenText className="h-5 w-5 text-[var(--market-accent)]" />
             </div>
             <div>
               <CardTitle>Legenda veloce</CardTitle>

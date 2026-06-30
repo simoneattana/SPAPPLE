@@ -8,7 +8,7 @@ const sizes = {
 
 const variants = {
   default:
-    'bg-[#deff9a] text-slate-950 shadow-lg shadow-[#deff9a]/10 hover:bg-[#e7ffb8]',
+    'bg-[var(--market-accent)] text-slate-950 shadow-lg shadow-[var(--market-accent-soft)] hover:bg-[var(--market-accent-hover)]',
   ghost:
     'border border-slate-800 bg-transparent text-slate-400 hover:bg-slate-900 hover:text-white',
 }
@@ -24,7 +24,7 @@ export function Button({
     <button
       type={type}
       className={cn(
-        'inline-flex items-center justify-center gap-2 rounded-lg text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-[#deff9a]/70 focus:ring-offset-2 focus:ring-offset-[#050608]',
+        'inline-flex items-center justify-center gap-2 rounded-lg text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-[var(--market-accent)] focus:ring-offset-2 focus:ring-offset-[#050608]',
         'disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-55',
         variants[variant],
         sizes[size],

@@ -2,7 +2,8 @@ import { cn } from '../../services/utils'
 
 const variants = {
   default: 'border-slate-700 bg-slate-900 text-slate-200',
-  positive: 'border-[#deff9a]/40 bg-[#deff9a]/12 text-[#deff9a]',
+  positive:
+    'border-[var(--market-accent-border)] bg-[var(--market-accent-soft)] text-[var(--market-accent)]',
   negative: 'border-[#ef8f8f]/40 bg-[#ef8f8f]/12 text-[#ef8f8f]',
 }
 

@@ -116,7 +116,7 @@ function eventColor(record) {
     record.status === 'working' ||
     record.result === 'WIN'
   ) {
-    return 'text-[#deff9a]'
+    return 'text-[var(--market-accent)]'
   }
 
   return 'text-slate-300'
@@ -242,8 +242,8 @@ export default function History() {
               organizzato per mese e filtrabile per tipologia di azione.
             </p>
           </div>
-          <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-[#deff9a]/30 bg-[#deff9a]/10">
-            <HistoryIcon className="h-6 w-6 text-[#deff9a]" />
+          <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-[var(--market-accent-border)] bg-[var(--market-accent-soft)]">
+            <HistoryIcon className="h-6 w-6 text-[var(--market-accent)]" />
           </div>
         </div>
       </header>
@@ -287,7 +287,7 @@ export default function History() {
               >
                 <div className="flex items-center justify-between gap-4 border-b border-slate-800 p-5">
                   <div className="flex items-center gap-3">
-                    <CalendarDays className="h-5 w-5 text-[#deff9a]" />
+                    <CalendarDays className="h-5 w-5 text-[var(--market-accent)]" />
                     <h2 className="text-lg font-semibold capitalize text-white">
                       {monthFormatter.format(normalizeDate(firstRecord.createdAt))}
                     </h2>

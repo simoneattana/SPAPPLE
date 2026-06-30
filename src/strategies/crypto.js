@@ -8,7 +8,7 @@ export const cryptoStrategy = {
   shortLabel: 'Crypto',
   currency: 'EUR',
   universe: CRYPTO_TICKERS,
-  initialCapital: 5000,
+  initialCapital: 10000,
   maxPositions: 3,
   enabled: true,
   positionSizing: {
