@@ -11,7 +11,14 @@ export const cryptoStrategy = {
   initialCapital: 20000,
   maxPositions: 5,
   reentryCooldownMs: 60 * 60 * 1000,
+  reentryCooldownAfterWinMs: 60 * 60 * 1000,
+  reentryCooldownAfterLossMs: 6 * 60 * 60 * 1000,
   enabled: true,
+  riskLimits: {
+    maxDailyOrders: 12,
+    maxDailyCapitalPct: 1,
+    maxConsecutiveLosses: 3,
+  },
   positionSizing: {
     mode: 'percentuale_capitale',
     percent: 0.05,

@@ -114,7 +114,7 @@ export default function Settings() {
             <ul className="space-y-3 text-sm leading-6 text-slate-400">
               <li>
                 Massimo <strong className="text-white">{riskLimits.maxDailyOrders}</strong>{' '}
-                ordini al giorno.
+                aperture eseguite al giorno.
               </li>
               <li>
                 Massimo{' '}

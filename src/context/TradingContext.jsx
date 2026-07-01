@@ -100,6 +100,14 @@ function getMarketScanIntervalMs(marketId) {
   return marketId === 'crypto' ? CRYPTO_SCAN_INTERVAL_MS : EQUITIES_SCAN_INTERVAL_MS
 }
 
+function getRiskLimits(strategy, riskLimits = {}) {
+  return {
+    ...DEFAULT_RISK_LIMITS,
+    ...(riskLimits || {}),
+    ...(strategy?.riskLimits || {}),
+  }
+}
+
 function getNextEquitiesOpenAt(now = new Date()) {
   const currentRomeTime = getTimeInTimezone(
     now,
@@ -209,7 +217,7 @@ function createInitialMarketState(strategy = getTradingStrategy()) {
     events: [initialActivity],
     executionMode: EXECUTION_MODE,
     killSwitchEnabled: false,
-    riskLimits: DEFAULT_RISK_LIMITS,
+    riskLimits: getRiskLimits(strategy),
     automationEnabled: true,
     lastScanAt: null,
     lastScanCount: 0,
@@ -450,10 +458,7 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
         : fallback.events,
     executionMode: rawMarketState.executionMode || fallback.executionMode,
     killSwitchEnabled: false,
-    riskLimits: {
-      ...DEFAULT_RISK_LIMITS,
-      ...(rawMarketState.riskLimits || {}),
-    },
+    riskLimits: getRiskLimits(strategy, rawMarketState.riskLimits),
     automationEnabled: true,
     lastScanAt: rawMarketState.lastScanAt || fallback.lastScanAt,
     lastScanCount: Number.isFinite(Number(rawMarketState.lastScanCount))
@@ -611,12 +616,31 @@ function formatCooldownDuration(remainingMs) {
   return `${Math.ceil(minutes / 60)} ore`
 }
 
-function getTickerCooldownReason(marketState, ticker, strategy) {
-  const cooldownMs = Number.isFinite(Number(strategy.reentryCooldownMs))
-    ? Number(strategy.reentryCooldownMs)
-    : DEFAULT_REENTRY_COOLDOWN_MS
+function getReentryCooldownMs(strategy, latestClosedTrade) {
+  const pnlEur = Number(latestClosedTrade?.pnlEur)
+  const isLoss =
+    latestClosedTrade?.result === 'LOSS' || (Number.isFinite(pnlEur) && pnlEur < 0)
+  const isWin =
+    latestClosedTrade?.result === 'WIN' || (Number.isFinite(pnlEur) && pnlEur >= 0)
+  const dynamicCooldownMs = isLoss
+    ? strategy?.reentryCooldownAfterLossMs
+    : isWin
+      ? strategy?.reentryCooldownAfterWinMs
+      : null
 
-  if (!ticker || cooldownMs <= 0) {
+  if (Number.isFinite(Number(dynamicCooldownMs))) {
+    return Number(dynamicCooldownMs)
+  }
+
+  if (Number.isFinite(Number(strategy?.reentryCooldownMs))) {
+    return Number(strategy.reentryCooldownMs)
+  }
+
+  return DEFAULT_REENTRY_COOLDOWN_MS
+}
+
+function getTickerCooldownReason(marketState, ticker, strategy) {
+  if (!ticker) {
     return null
   }
 
@@ -625,6 +649,12 @@ function getTickerCooldownReason(marketState, ticker, strategy) {
   )
 
   if (!latestClosedTrade) {
+    return null
+  }
+
+  const cooldownMs = getReentryCooldownMs(strategy, latestClosedTrade)
+
+  if (cooldownMs <= 0) {
     return null
   }
 
@@ -641,10 +671,7 @@ function getTickerCooldownReason(marketState, ticker, strategy) {
 }
 
 function getOpeningOrderBlockReason(marketState, notional, strategy) {
-  const riskLimits = {
-    ...DEFAULT_RISK_LIMITS,
-    ...(marketState.riskLimits || {}),
-  }
+  const riskLimits = getRiskLimits(strategy, marketState.riskLimits)
 
   if (marketState.executionMode !== EXECUTION_MODE) {
     return 'Modalità operativa non supportata: al momento Spapple può eseguire solo ordini simulati.'
@@ -678,7 +705,7 @@ function getOpeningOrderBlockReason(marketState, notional, strategy) {
   )
 
   if (todaysOpeningOrders.length >= riskLimits.maxDailyOrders) {
-    return `Limite giornaliero raggiunto: massimo ${riskLimits.maxDailyOrders} ordini al giorno.`
+    return `Limite giornaliero raggiunto: massimo ${riskLimits.maxDailyOrders} aperture eseguite al giorno.`
   }
 
   const dailyCapitalLimit =

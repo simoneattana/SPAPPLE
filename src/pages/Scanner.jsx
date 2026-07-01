@@ -507,9 +507,7 @@ export default function Scanner({ marketId }) {
   const slotsFull = visiblePositions.length >= routeMaxPositions
   const getCooldownRemainingMs = useCallback(
     (ticker) => {
-      const cooldownMs = Number(effectiveStrategy.reentryCooldownMs || 0)
-
-      if (!ticker || cooldownMs <= 0) {
+      if (!ticker) {
         return 0
       }
 
@@ -521,12 +519,37 @@ export default function Scanner({ marketId }) {
         return 0
       }
 
+      const pnlEur = Number(latestClosedTrade.pnlEur)
+      const isLoss =
+        latestClosedTrade.result === 'LOSS' ||
+        (Number.isFinite(pnlEur) && pnlEur < 0)
+      const isWin =
+        latestClosedTrade.result === 'WIN' ||
+        (Number.isFinite(pnlEur) && pnlEur >= 0)
+      const dynamicCooldownMs = isLoss
+        ? effectiveStrategy.reentryCooldownAfterLossMs
+        : isWin
+          ? effectiveStrategy.reentryCooldownAfterWinMs
+          : null
+      const cooldownMs = Number.isFinite(Number(dynamicCooldownMs))
+        ? Number(dynamicCooldownMs)
+        : Number(effectiveStrategy.reentryCooldownMs || 0)
+
+      if (cooldownMs <= 0) {
+        return 0
+      }
+
       const closedAt = new Date(latestClosedTrade.exitDate).getTime()
       const remainingMs = closedAt + cooldownMs - Date.now()
 
       return Number.isFinite(remainingMs) && remainingMs > 0 ? remainingMs : 0
     },
-    [effectiveStrategy.reentryCooldownMs, visibleHistory],
+    [
+      effectiveStrategy.reentryCooldownAfterLossMs,
+      effectiveStrategy.reentryCooldownAfterWinMs,
+      effectiveStrategy.reentryCooldownMs,
+      visibleHistory,
+    ],
   )
   const isTickerInCooldown = useCallback(
     (ticker) => getCooldownRemainingMs(ticker) > 0,
