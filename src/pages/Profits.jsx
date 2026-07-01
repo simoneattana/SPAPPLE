@@ -16,7 +16,6 @@ import { getMarketCopy } from '../services/marketCopy'
 import {
   calculateRealizedTotals,
   filterTradesByMonthKey,
-  getMonthOptionsFromTrades,
   groupTradesByDay,
 } from '../services/profitStats'
 import { getTradingStrategy } from '../strategies'
@@ -38,6 +37,16 @@ function getCurrentMonthKey() {
   const today = new Date()
 
   return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
+}
+
+function getRecentMonthKeys(count = 3) {
+  const today = new Date()
+
+  return Array.from({ length: count }, (_, index) => {
+    const date = new Date(today.getFullYear(), today.getMonth() - index, 1)
+
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+  })
 }
 
 function parseMonthKey(key) {
@@ -115,12 +124,7 @@ export default function Profits({ marketId }) {
     : EMPTY_ARRAY
   const marketLabel = routeMarketState.marketLabel || strategy.label
   const marketCopy = getMarketCopy(effectiveMarket)
-  const availableMonths = useMemo(() => {
-    const months = getMonthOptionsFromTrades(history)
-    const current = getCurrentMonthKey()
-
-    return months.includes(current) ? months : [current, ...months]
-  }, [history])
+  const availableMonths = useMemo(() => getRecentMonthKeys(3), [])
   const [selectedMonth, setSelectedMonth] = useState(availableMonths[0])
   const selectedMonthIndex = availableMonths.indexOf(selectedMonth)
   const selectedMonthTrades = useMemo(
@@ -174,7 +178,8 @@ export default function Profits({ marketId }) {
             </h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
               Vista mensile semplice: ogni giorno mostra utili realizzati e P/L
-              netto delle chiusure registrate.
+              netto delle chiusure registrate. Mantiene la lettura operativa
+              sul mese corrente e sui due mesi precedenti.
             </p>
           </div>
 
@@ -188,17 +193,22 @@ export default function Profits({ marketId }) {
             >
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <select
-              className="h-10 rounded-lg border border-slate-800 bg-slate-950 px-3 text-sm font-semibold capitalize text-white outline-none focus:border-[var(--market-accent-border)]"
-              value={selectedMonth}
-              onChange={(event) => setSelectedMonth(event.target.value)}
-            >
-              {availableMonths.map((month) => (
-                <option key={month} value={month}>
-                  {formatMonthKey(month)}
-                </option>
-              ))}
-            </select>
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+                Mese dell’anno
+              </span>
+              <select
+                className="h-10 rounded-lg border border-slate-800 bg-slate-950 px-3 text-sm font-semibold capitalize text-white outline-none focus:border-[var(--market-accent-border)]"
+                value={selectedMonth}
+                onChange={(event) => setSelectedMonth(event.target.value)}
+              >
+                {availableMonths.map((month) => (
+                  <option key={month} value={month}>
+                    {formatMonthKey(month)}
+                  </option>
+                ))}
+              </select>
+            </label>
             <Button
               size="icon"
               variant="ghost"
