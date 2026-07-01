@@ -77,19 +77,18 @@ function calculateStrategyStats(history) {
   const wins = closedTrades.filter((trade) => trade.result === 'WIN')
   const losses = closedTrades.filter((trade) => trade.result === 'LOSS')
   const total = closedTrades.length
+  const grossWins = wins.reduce(
+    (sum, trade) => sum + Math.max(Number(trade.pnlEur || 0), 0),
+    0,
+  )
+  const grossLosses = losses.reduce(
+    (sum, trade) => sum + Math.abs(Math.min(Number(trade.pnlEur || 0), 0)),
+    0,
+  )
+  const netPnl = grossWins - grossLosses
   const winRate = total > 0 ? wins.length / total : 0
-  const averageWin =
-    wins.length > 0
-      ? wins.reduce((sum, trade) => sum + Number(trade.pnlEur || 0), 0) /
-        wins.length
-      : 0
-  const averageLoss =
-    losses.length > 0
-      ? Math.abs(
-          losses.reduce((sum, trade) => sum + Number(trade.pnlEur || 0), 0) /
-            losses.length,
-        )
-      : 0
+  const averageWin = wins.length > 0 ? grossWins / wins.length : 0
+  const averageLoss = losses.length > 0 ? grossLosses / losses.length : 0
   const expectancy =
     total > 0 ? winRate * averageWin - (1 - winRate) * averageLoss : 0
 
@@ -108,7 +107,10 @@ function calculateStrategyStats(history) {
     averageLoss,
     averageWin,
     expectancy,
+    grossLosses,
+    grossWins,
     losses: losses.length,
+    netPnl,
     sampleLabel,
     sampleVariant,
     total,
@@ -204,25 +206,30 @@ export default function Dashboard({ marketId }) {
       accent: 'text-[var(--market-accent)]',
     },
     {
-      title: 'Salvadanaio',
+      title: 'Salvadanaio utili',
       value: currencyFormatter.format(vault),
-      info: 'Somma dei profitti realizzati. Non viene reinvestita automaticamente.',
+      info: 'Somma dei soli profitti realizzati. È blindato: le perdite non lo riducono, ma riducono il capitale operativo.',
       icon: PiggyBank,
       accent: 'text-[var(--market-accent)]',
     },
     {
-      title: 'Slot',
-      value: `${positions.length}/${maxPositions}`,
-      info: 'Numero di posizioni aperte rispetto al limite massimo del mercato.',
+      title: 'P/L netto',
+      value: currencyFormatter.format(strategyStats.netPnl),
+      info: `Risultato netto delle chiusure: utili ${currencyFormatter.format(
+        strategyStats.grossWins,
+      )} meno perdite ${currencyFormatter.format(strategyStats.grossLosses)}.`,
       icon: ChartNoAxesCombined,
-      accent: 'text-white',
+      accent:
+        strategyStats.netPnl >= 0
+          ? 'text-[var(--market-accent)]'
+          : 'text-[#ef8f8f]',
     },
     {
-      title: 'Sistema',
-      value: engineStatus,
-      info: 'Stato operativo attuale del motore: scansione, monitoraggio, attesa o errore.',
+      title: 'Slot',
+      value: `${positions.length}/${maxPositions}`,
+      info: `Stato motore: ${engineStatus}. Numero di posizioni aperte rispetto al limite massimo del mercato.`,
       icon: ShieldCheck,
-      accent: 'text-[var(--market-accent)]',
+      accent: 'text-white',
     },
   ]
 
@@ -447,6 +454,14 @@ export default function Dashboard({ marketId }) {
               label="Chiusure"
               value={`${strategyStats.total}`}
               info={`${strategyStats.wins} operazioni in utile e ${strategyStats.losses} in perdita.`}
+            />
+            <MiniMetric
+              label="Perdite"
+              value={currencyFormatter.format(strategyStats.grossLosses)}
+              info="Somma delle perdite realizzate. Non viene sottratta dal salvadanaio, ma dal capitale operativo."
+              accent={
+                strategyStats.grossLosses > 0 ? 'text-[#ef8f8f]' : 'text-white'
+              }
             />
             <MiniMetric
               label="Size"

@@ -1,4 +1,4 @@
-import { BookOpen, PiggyBank } from 'lucide-react'
+import { BadgeEuro, BookOpen, PiggyBank, TrendingDown } from 'lucide-react'
 import { Badge } from '../components/ui/Badge'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card'
 import {
@@ -41,6 +41,25 @@ function formatCurrency(value) {
     : 'N/D'
 }
 
+function calculateRealizedTotals(history = []) {
+  const wins = history.filter((trade) => trade.result === 'WIN')
+  const losses = history.filter((trade) => trade.result === 'LOSS')
+  const grossWins = wins.reduce(
+    (sum, trade) => sum + Math.max(Number(trade.pnlEur || 0), 0),
+    0,
+  )
+  const grossLosses = losses.reduce(
+    (sum, trade) => sum + Math.abs(Math.min(Number(trade.pnlEur || 0), 0)),
+    0,
+  )
+
+  return {
+    grossLosses,
+    grossWins,
+    netPnl: grossWins - grossLosses,
+  }
+}
+
 export default function Diary({ marketId }) {
   const { activeMarket, markets } = useTrading()
   const effectiveMarket = marketId || activeMarket
@@ -54,6 +73,7 @@ export default function Diary({ marketId }) {
     : 0
   const marketLabel = routeMarketState.marketLabel || strategy.label
   const marketCopy = getMarketCopy(effectiveMarket)
+  const realizedTotals = calculateRealizedTotals(history)
 
   return (
     <div className="flex flex-1 flex-col gap-7">
@@ -70,22 +90,71 @@ export default function Diary({ marketId }) {
         </p>
       </header>
 
-      <Card>
-        <CardHeader className="flex-row items-start justify-between gap-4">
-          <div>
-            <CardTitle>Salvadanaio Totale</CardTitle>
-            <p className="mt-2 text-sm text-slate-500">
-              Solo profitti realizzati da operazioni vincenti.
+      <section className="grid gap-4 md:grid-cols-3">
+        <Card>
+          <CardHeader className="flex-row items-start justify-between gap-4">
+            <div>
+              <CardTitle>Salvadanaio utili</CardTitle>
+              <p className="mt-2 text-sm text-slate-500">
+                Solo profitti realizzati da operazioni vincenti. Le perdite non
+                lo intaccano.
+              </p>
+            </div>
+            <PiggyBank className="h-6 w-6 text-[var(--market-accent)]" />
+          </CardHeader>
+          <CardContent>
+            <p className="text-3xl font-semibold text-[var(--market-accent)]">
+              {currencyFormatter.format(vault)}
             </p>
-          </div>
-          <PiggyBank className="h-6 w-6 text-[var(--market-accent)]" />
-        </CardHeader>
-        <CardContent>
-          <p className="text-4xl font-semibold text-[var(--market-accent)]">
-            {currencyFormatter.format(vault)}
-          </p>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex-row items-start justify-between gap-4">
+            <div>
+              <CardTitle>Perdite realizzate</CardTitle>
+              <p className="mt-2 text-sm text-slate-500">
+                Somma delle chiusure negative registrate nello storico.
+              </p>
+            </div>
+            <TrendingDown className="h-6 w-6 text-[#ef8f8f]" />
+          </CardHeader>
+          <CardContent>
+            <p className="text-3xl font-semibold text-[#ef8f8f]">
+              {currencyFormatter.format(realizedTotals.grossLosses)}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex-row items-start justify-between gap-4">
+            <div>
+              <CardTitle>P/L netto</CardTitle>
+              <p className="mt-2 text-sm text-slate-500">
+                Utili realizzati meno perdite realizzate.
+              </p>
+            </div>
+            <BadgeEuro
+              className={`h-6 w-6 ${
+                realizedTotals.netPnl >= 0
+                  ? 'text-[var(--market-accent)]'
+                  : 'text-[#ef8f8f]'
+              }`}
+            />
+          </CardHeader>
+          <CardContent>
+            <p
+              className={`text-3xl font-semibold ${
+                realizedTotals.netPnl >= 0
+                  ? 'text-[var(--market-accent)]'
+                  : 'text-[#ef8f8f]'
+              }`}
+            >
+              {currencyFormatter.format(realizedTotals.netPnl)}
+            </p>
+          </CardContent>
+        </Card>
+      </section>
 
       <Card className="overflow-hidden">
         <CardHeader className="items-center justify-between gap-4 border-b border-slate-800">
