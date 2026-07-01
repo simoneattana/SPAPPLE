@@ -25,6 +25,7 @@ import {
   filterTradesByCurrentMonth,
   filterTradesByToday,
 } from '../services/profitStats'
+import { LEGACY_POSITION_SIZE } from '../services/positionSizing'
 import { getTradingStrategy } from '../strategies'
 
 const currencyFormatter = new Intl.NumberFormat('it-IT', {
@@ -54,6 +55,19 @@ function formatCurrency(value) {
 
 function formatDate(value) {
   return value ? dateTimeFormatter.format(new Date(value)) : 'N/D'
+}
+
+function getRecoveredCapital(trade, fallbackSlotSize) {
+  if (Number.isFinite(Number(trade.recoveredCapital))) {
+    return Number(trade.recoveredCapital)
+  }
+
+  const invested = Number.isFinite(Number(trade.invested))
+    ? Number(trade.invested)
+    : fallbackSlotSize
+  const pnl = Number.isFinite(Number(trade.pnlEur)) ? Number(trade.pnlEur) : 0
+
+  return Math.max(invested + pnl, 0)
 }
 
 function exitReasonLabel(reason) {
@@ -366,89 +380,167 @@ export default function Dashboard({ marketId }) {
       </section>
 
       <section className="grid gap-5 2xl:grid-cols-[minmax(0,1fr)_24rem]">
-        <Card className="overflow-hidden">
-          <CardHeader className="items-center justify-between gap-4 border-b border-slate-800 p-4">
-            <div className="flex items-center gap-2">
-              <CardTitle className="text-white">Chiusure di oggi</CardTitle>
-              <InfoTip>
-                Mostra solo le operazioni chiuse oggi dal monitor live, dal
-                backend o manualmente. Per il dettaglio completo usa lo Storico.
-              </InfoTip>
-            </div>
-            <Badge>{todayClosedTrades.length} oggi</Badge>
-          </CardHeader>
-          <CardContent className="p-0">
-            {todayClosedTrades.length > 0 ? (
-              <Table>
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead>Data</TableHead>
-                    <TableHead>Ticker</TableHead>
-                    <TableHead>Direzione</TableHead>
-                    <TableHead>Motivo</TableHead>
-                    <TableHead>P/L</TableHead>
-                    <TableHead>Esito</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {todayClosedTrades.map((trade, index) => {
-                    const closeOrder = ordersById.get(trade.closeOrderId)
-                    const isWin = trade.result === 'WIN'
-
-                    return (
-                      <TableRow key={`${trade.ticker}-${trade.exitDate}-${index}`}>
-                        <TableCell>{formatDate(trade.exitDate)}</TableCell>
-                        <TableCell className="font-semibold text-white">
-                          {trade.ticker}
-                        </TableCell>
-                        <TableCell>
-                          {trade.type === 'LONG' ? 'Long' : 'Short'}
-                        </TableCell>
-                        <TableCell>
-                          <div>
-                            <p>{exitReasonLabel(trade.exitReason)}</p>
-                            <p className="mt-1 text-xs text-slate-500">
-                              {closeSourceLabel(closeOrder?.source)}
-                            </p>
-                            {trade.dataQuality === 'incomplete' ? (
-                              <p className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-[#ef8f8f]">
-                                Dato incompleto
-                              </p>
-                            ) : null}
-                          </div>
-                        </TableCell>
-                        <TableCell
-                          className={
-                            isWin
-                              ? 'font-semibold text-[var(--market-accent)]'
-                              : 'font-semibold text-[#ef8f8f]'
-                          }
-                        >
-                          {formatCurrency(trade.pnlEur)}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={isWin ? 'positive' : 'negative'}>
-                            {isWin ? 'Utile' : 'Perdita'}
-                          </Badge>
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
-            ) : (
-              <div className="flex min-h-36 items-center justify-center p-5 text-center">
-                <div>
-                  <p className="font-medium text-white">Nessuna chiusura oggi</p>
-                  <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
-                    Le chiusure automatiche o manuali della giornata appariranno
-                    qui.
-                  </p>
-                </div>
+        <div className="grid gap-5">
+          <Card className="overflow-hidden">
+            <CardHeader className="items-center justify-between gap-4 border-b border-slate-800 p-4">
+              <div className="flex items-center gap-2">
+                <CardTitle className="text-white">Chiusure di oggi</CardTitle>
+                <InfoTip>
+                  Mostra solo le operazioni chiuse oggi dal monitor live, dal
+                  backend o manualmente. Per il dettaglio completo usa lo Storico.
+                </InfoTip>
               </div>
-            )}
-          </CardContent>
-        </Card>
+              <Badge>{todayClosedTrades.length} oggi</Badge>
+            </CardHeader>
+            <CardContent className="p-0">
+              {todayClosedTrades.length > 0 ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead>Data</TableHead>
+                      <TableHead>Ticker</TableHead>
+                      <TableHead>Direzione</TableHead>
+                      <TableHead>Motivo</TableHead>
+                      <TableHead>P/L</TableHead>
+                      <TableHead>Esito</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {todayClosedTrades.map((trade, index) => {
+                      const closeOrder = ordersById.get(trade.closeOrderId)
+                      const isWin = trade.result === 'WIN'
+
+                      return (
+                        <TableRow key={`${trade.ticker}-${trade.exitDate}-${index}`}>
+                          <TableCell>{formatDate(trade.exitDate)}</TableCell>
+                          <TableCell className="font-semibold text-white">
+                            {trade.ticker}
+                          </TableCell>
+                          <TableCell>
+                            {trade.type === 'LONG' ? 'Long' : 'Short'}
+                          </TableCell>
+                          <TableCell>
+                            <div>
+                              <p>{exitReasonLabel(trade.exitReason)}</p>
+                              <p className="mt-1 text-xs text-slate-500">
+                                {closeSourceLabel(closeOrder?.source)}
+                              </p>
+                              {trade.dataQuality === 'incomplete' ? (
+                                <p className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-[#ef8f8f]">
+                                  Dato incompleto
+                                </p>
+                              ) : null}
+                            </div>
+                          </TableCell>
+                          <TableCell
+                            className={
+                              isWin
+                                ? 'font-semibold text-[var(--market-accent)]'
+                                : 'font-semibold text-[#ef8f8f]'
+                            }
+                          >
+                            {formatCurrency(trade.pnlEur)}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={isWin ? 'positive' : 'negative'}>
+                              {isWin ? 'Utile' : 'Perdita'}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              ) : (
+                <div className="flex min-h-36 items-center justify-center p-5 text-center">
+                  <div>
+                    <p className="font-medium text-white">Nessuna chiusura oggi</p>
+                    <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
+                      Le chiusure automatiche o manuali della giornata appariranno
+                      qui.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="overflow-hidden">
+            <CardHeader className="items-center justify-between gap-4 border-b border-slate-800 p-4">
+              <div className="flex items-center gap-2">
+                <CardTitle className="text-white">Ultime vendite</CardTitle>
+                <InfoTip>
+                  Vista rapida delle ultime chiusure del mercato selezionato:
+                  investimento, ricavato, P/L ed esito.
+                </InfoTip>
+              </div>
+              <Badge>{recentClosedTrades.length} recenti</Badge>
+            </CardHeader>
+            <CardContent className="p-0">
+              {recentClosedTrades.length > 0 ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead>Ticker</TableHead>
+                      <TableHead>Investito il</TableHead>
+                      <TableHead>Venduto il</TableHead>
+                      <TableHead>Investito</TableHead>
+                      <TableHead>Ricavato</TableHead>
+                      <TableHead>P/L</TableHead>
+                      <TableHead>Esito</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {recentClosedTrades.map((trade, index) => {
+                      const recovered = getRecoveredCapital(trade, LEGACY_POSITION_SIZE)
+                      const pnlPositive = Number(trade.pnlEur) >= 0
+
+                      return (
+                        <TableRow key={`${trade.ticker}-${trade.exitDate}-${index}`}>
+                          <TableCell className="font-semibold text-white">
+                            {trade.ticker}
+                          </TableCell>
+                          <TableCell>{formatDate(trade.openedAt)}</TableCell>
+                          <TableCell>{formatDate(trade.exitDate)}</TableCell>
+                          <TableCell>
+                            {formatCurrency(trade.invested || LEGACY_POSITION_SIZE)}
+                          </TableCell>
+                          <TableCell className="font-semibold text-white">
+                            {formatCurrency(recovered)}
+                          </TableCell>
+                          <TableCell
+                            className={
+                              pnlPositive
+                                ? 'font-semibold text-[var(--market-accent)]'
+                                : 'font-semibold text-[#ef8f8f]'
+                            }
+                          >
+                            {formatCurrency(trade.pnlEur)}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={trade.result === 'WIN' ? 'positive' : 'negative'}>
+                              {trade.result === 'WIN' ? 'Utile' : 'Perdita'}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              ) : (
+                <div className="flex min-h-36 items-center justify-center p-5 text-center">
+                  <div>
+                    <p className="font-medium text-white">Nessuna vendita registrata</p>
+                    <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
+                      Quando una posizione viene chiusa, apparirà qui con
+                      ricavato e risultato.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
 
         <Card>
           <CardHeader className="items-center justify-between gap-3 p-4 pb-2">

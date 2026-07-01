@@ -37,7 +37,6 @@ import {
 import { CRYPTO_TICKERS } from '../services/cryptoUniverse'
 import { EUROPEAN_TICKERS } from '../services/marketUniverse'
 import { getMarketCopy } from '../services/marketCopy'
-import { LEGACY_POSITION_SIZE } from '../services/positionSizing'
 import { getTradingStrategy } from '../strategies'
 import {
   MAX_AUTO_ATR_PCT,
@@ -107,19 +106,6 @@ function getPositionOpenedAt(position) {
 
   const timestamp = Number(String(position.id || '').split('-').at(-1))
   return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null
-}
-
-function getRecoveredCapital(trade, fallbackSlotSize) {
-  if (Number.isFinite(Number(trade.recoveredCapital))) {
-    return Number(trade.recoveredCapital)
-  }
-
-  const invested = Number.isFinite(Number(trade.invested))
-    ? Number(trade.invested)
-    : fallbackSlotSize
-  const pnl = Number.isFinite(Number(trade.pnlEur)) ? Number(trade.pnlEur) : 0
-
-  return Math.max(invested + pnl, 0)
 }
 
 function getPositionLivePrice(position, scanRow) {
@@ -390,18 +376,43 @@ function InvestmentCell({ position }) {
   )
 }
 
-function WatchlistBadge({ row, isActionable }) {
+function getExtendedScanReason(row, scannerConfig) {
+  const isCrypto = row.market === 'crypto'
+
+  if (row.mappingIssue) {
+    return `Asset escluso: il mapping tra simbolo visibile e coppia operativa non è confermato. ${row.mappingIssue}`
+  }
+
+  if (row.mappingWarning) {
+    return `Asset controllato con alias operativo: ${row.mappingWarning}`
+  }
+
   if (row.status !== 'ok') {
-    return <Badge variant="negative">SCARTATO</Badge>
+    return row.reason || 'Asset escluso perché i dati reali non sono disponibili o non sono completi.'
   }
 
-  if (isActionable(row)) {
+  if (scannerConfig.isActionable(row)) {
     const type = getRowTradeType(row)
+    const direction =
+      type === 'LONG'
+        ? 'possibile rimbalzo al rialzo'
+        : 'possibile correzione al ribasso'
+    const autoText = scannerConfig.isAutoEligible(row)
+      ? 'Il segnale è abbastanza forte per il pilota automatico.'
+      : 'Il segnale è visibile, ma non abbastanza forte per l’apertura automatica.'
 
-    return <StrategyBadge rsi={type === 'LONG' ? 0 : type === 'SHORT' ? 100 : 50} />
+    return `Asset scelto dal criterio: prezzo e dati tecnici validi, RSI ${formatNumber(row.rsi)} con ${direction}. ${autoText}`
   }
 
-  return <Badge>NESSUN SEGNALE</Badge>
+  if (row.reason) {
+    return row.reason
+  }
+
+  if (isCrypto) {
+    return `Asset scartato: RSI ${formatNumber(row.rsi)} in zona neutrale oppure liquidità/capitalizzazione non sufficienti per il pilota prudente.`
+  }
+
+  return `Titolo scartato: P/E non valido oppure RSI ${formatNumber(row.rsi)} fuori dalle zone operative richieste.`
 }
 
 export default function Scanner({ marketId }) {
@@ -565,17 +576,9 @@ export default function Scanner({ marketId }) {
     () => scannerConfig.sortByScore(results.filter(scannerConfig.isAutoEligible)),
     [results, scannerConfig],
   )
-  const rejectedResults = useMemo(
-    () => results.filter(scannerConfig.isRejected),
-    [results, scannerConfig],
-  )
   const resultsByTicker = useMemo(
     () => new Map(results.map((row) => [row.ticker, row])),
     [results],
-  )
-  const recentClosedTrades = useMemo(
-    () => visibleHistory.slice(0, 5),
-    [visibleHistory],
   )
   const cryptoMappingAlerts = useMemo(
     () =>
@@ -738,6 +741,11 @@ export default function Scanner({ marketId }) {
       return scannerConfig.getScore(right) - scannerConfig.getScore(left)
     })
   }, [filteredResults, visiblePositions, scannerConfig])
+  const discardedRows = useMemo(() => {
+    const selectedTickers = new Set(visibleSignalRows.map((row) => row.ticker))
+
+    return results.filter((row) => !selectedTickers.has(row.ticker))
+  }, [results, visibleSignalRows])
 
   const refillAfterManualClose = async (closedTicker) => {
     if (!routeAutomationEnabled) {
@@ -1022,236 +1030,146 @@ export default function Scanner({ marketId }) {
       <Card className="overflow-hidden">
         <CardHeader className="items-center justify-between gap-4 border-b border-slate-800">
           <div>
-            <CardTitle>Ultime vendite</CardTitle>
+            <CardTitle>Risultati e diagnostica</CardTitle>
             <p className="mt-2 text-sm text-slate-500">
-              Qui vedi quando hai investito, quando hai venduto e quanto è
-              rientrato dopo la chiusura.
-            </p>
-          </div>
-          <Badge>{visibleHistory.length} chiuse</Badge>
-        </CardHeader>
-        <CardContent className="p-0">
-          {recentClosedTrades.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead>Ticker</TableHead>
-                  <TableHead>Investito il</TableHead>
-                  <TableHead>Venduto il</TableHead>
-                  <TableHead>Investito</TableHead>
-                  <TableHead>Ricavato</TableHead>
-                  <TableHead>P/L</TableHead>
-                  <TableHead>Esito</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {recentClosedTrades.map((trade, index) => {
-                  const recovered = getRecoveredCapital(trade, LEGACY_POSITION_SIZE)
-                  const pnlPositive = Number(trade.pnlEur) >= 0
-
-                  return (
-                    <TableRow key={`${trade.ticker}-${trade.exitDate}-${index}`}>
-                      <TableCell>{trade.ticker}</TableCell>
-                      <TableCell>{formatDateTime(trade.openedAt)}</TableCell>
-                      <TableCell>{formatDateTime(trade.exitDate)}</TableCell>
-                      <TableCell>
-                        {formatCurrency(trade.invested || LEGACY_POSITION_SIZE)}
-                      </TableCell>
-                      <TableCell className="font-semibold text-white">
-                        {formatCurrency(recovered)}
-                      </TableCell>
-                      <TableCell
-                        className={
-                          pnlPositive
-                            ? 'font-semibold text-[var(--market-accent)]'
-                            : 'font-semibold text-[#ef8f8f]'
-                        }
-                      >
-                        {formatCurrency(trade.pnlEur)}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={trade.result === 'WIN' ? 'positive' : 'negative'}>
-                          {trade.result === 'WIN' ? 'Utile' : 'Perdita'}
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-              </TableBody>
-            </Table>
-          ) : (
-            <div className="p-6 text-sm text-slate-500">
-              Nessuna vendita registrata. Appena una posizione verrà chiusa,
-              vedrai qui ricavato e risultato.
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card className="overflow-hidden">
-        <CardHeader className="items-center justify-between gap-4 border-b border-slate-800">
-          <div>
-            <CardTitle>Risultati filtrati</CardTitle>
-            <p className="mt-2 text-sm text-slate-500">
-              Sono visibili solo gli asset che rispettano le regole del mercato
-              attivo. La strategia indica se Spapple cerca rialzo o ribasso.
+              In alto trovi gli asset scelti dal criterio operativo. Subito
+              sotto trovi tutti gli altri asset analizzati con il motivo esteso
+              dello scarto.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Badge>{results.length} scansionati</Badge>
-            <Badge>{rejectedResults.length} scartati</Badge>
             <Badge>{filteredResults.length} segnali</Badge>
             <Badge>{autoEligibleResults.length} auto</Badge>
+            <Badge>{discardedRows.length} scartati</Badge>
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead>Ticker</TableHead>
-                <TableHead>Prezzo</TableHead>
-                <TableHead>Investito reale</TableHead>
-                <TableHead>Dati</TableHead>
-                <TableHead>Strategia suggerita</TableHead>
-                <TableHead>Criterio pilota</TableHead>
-                <TableHead>Azione</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {visibleSignalRows.map((row) => (
-                <TableRow key={row.ticker}>
-                  <TableCell>
-                    <TickerInfo
-                      assetType={scannerConfig.copy.assetType}
-                      ticker={row.ticker}
-                      profile={row.profile}
-                    />
-                  </TableCell>
-                  <TableCell>{formatCurrency(row.currentPrice)}</TableCell>
-                  <TableCell>
-                    <InvestmentCell position={getOpenPosition(row.ticker)} />
-                  </TableCell>
-                  <TableCell>
-                    <TechnicalTooltip row={row} />
-                  </TableCell>
-                  <TableCell>
-                    <StrategyCell row={row} marketCopy={scannerConfig.copy} />
-                  </TableCell>
-                  <TableCell>
-                    <AutoRuleCell row={row} />
-                  </TableCell>
-                  <TableCell>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={
-                        routeKillSwitchEnabled ||
-                        slotsFull ||
-                        isTickerAlreadyOpen(row.ticker) ||
-                        isTickerInCooldown(row.ticker)
-                      }
-                      onClick={() => handleExecuteTrade(row)}
-                    >
-                      {routeKillSwitchEnabled
-                        ? 'Bloccato'
-                        : isTickerAlreadyOpen(row.ticker)
-                        ? 'Già in portafoglio'
-                        : isTickerInCooldown(row.ticker)
-                        ? 'In pausa'
-                        : 'Apri posizione'}
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-
-          {!loading && filteredResults.length === 0 ? (
-            <div className="flex min-h-72 items-center justify-center border-t border-slate-800 p-8 text-center">
+          {visibleSignalRows.length > 0 ? (
+            <div>
+              <div className="border-b border-slate-800 bg-[var(--market-accent-soft)] px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--market-accent)]">
+                  Asset scelti dal criterio
+                </p>
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead>Ticker</TableHead>
+                    <TableHead>Prezzo</TableHead>
+                    <TableHead>Investito reale</TableHead>
+                    <TableHead>Dati</TableHead>
+                    <TableHead>Strategia suggerita</TableHead>
+                    <TableHead>Criterio pilota</TableHead>
+                    <TableHead>Azione</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {visibleSignalRows.map((row) => (
+                    <TableRow key={row.ticker}>
+                      <TableCell>
+                        <TickerInfo
+                          assetType={scannerConfig.copy.assetType}
+                          ticker={row.ticker}
+                          profile={row.profile}
+                        />
+                      </TableCell>
+                      <TableCell>{formatCurrency(row.currentPrice)}</TableCell>
+                      <TableCell>
+                        <InvestmentCell position={getOpenPosition(row.ticker)} />
+                      </TableCell>
+                      <TableCell>
+                        <TechnicalTooltip row={row} />
+                      </TableCell>
+                      <TableCell>
+                        <StrategyCell row={row} marketCopy={scannerConfig.copy} />
+                      </TableCell>
+                      <TableCell>
+                        <AutoRuleCell row={row} />
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={
+                            routeKillSwitchEnabled ||
+                            slotsFull ||
+                            isTickerAlreadyOpen(row.ticker) ||
+                            isTickerInCooldown(row.ticker)
+                          }
+                          onClick={() => handleExecuteTrade(row)}
+                        >
+                          {routeKillSwitchEnabled
+                            ? 'Bloccato'
+                            : isTickerAlreadyOpen(row.ticker)
+                            ? 'Già in portafoglio'
+                            : isTickerInCooldown(row.ticker)
+                            ? 'In pausa'
+                            : 'Apri posizione'}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          ) : !loading ? (
+            <div className="flex min-h-56 items-center justify-center p-8 text-center">
               <div>
                 <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-lg border border-slate-800 bg-slate-950">
                   <SearchX className="h-5 w-5 text-slate-500" />
                 </div>
                 <p className="mt-4 font-medium text-white">
-                  Nessun segnale operativo disponibile
+                  Nessun asset scelto dal criterio
                 </p>
                 <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
-                  Se l’aggiornamento automatico non ha trovato segnali, puoi
-                  usare il bottone manuale per ripetere la scansione.
+                  La scansione resta utile: sotto trovi il resto degli asset e
+                  il motivo per cui non sono stati selezionati.
                 </p>
               </div>
             </div>
           ) : null}
-        </CardContent>
-      </Card>
 
-      <Card className="overflow-hidden">
-        <CardHeader className="items-center justify-between gap-4 border-b border-slate-800">
-          <div>
-            <CardTitle>Diagnostica della scansione</CardTitle>
-            <p className="mt-2 text-sm text-slate-500">
-              Tutti i {scannerConfig.universe.length}{' '}
-              {scannerConfig.diagnosticLabel} analizzati, inclusi quelli
-              scartati e il motivo della decisione.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Badge>
-              {results.length} {scannerConfig.diagnosticLabel}
-            </Badge>
-            <Badge>{filteredResults.length} ammessi</Badge>
-          </div>
-        </CardHeader>
-        <CardContent className="p-0">
           {results.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead>Ticker</TableHead>
-                  <TableHead>Prezzo</TableHead>
-                  <TableHead>Stato</TableHead>
-                  <TableHead>Dati e motivo</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {results.map((row) => (
-                  <TableRow key={`universo-${row.ticker}`}>
-                    <TableCell>
-                      <TickerInfo
-                        assetType={scannerConfig.copy.assetType}
-                        ticker={row.ticker}
-                        profile={row.profile}
-                      />
-                    </TableCell>
-                    <TableCell>{formatCurrency(row.currentPrice)}</TableCell>
-                    <TableCell>
-                      <WatchlistBadge
-                        row={row}
-                        isActionable={scannerConfig.isActionable}
-                      />
-                      {row.mappingWarning || row.mappingIssue ? (
-                        <div className="mt-2">
-                          <Badge
-                            variant={row.mappingIssue ? 'negative' : 'default'}
-                          >
-                            Mapping
-                          </Badge>
-                        </div>
-                      ) : null}
-                    </TableCell>
-                    <TableCell>
-                      <TechnicalTooltip row={row} />
-                    </TableCell>
+            <div className="border-t border-slate-800">
+              <div className="border-b border-slate-800 bg-slate-950 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                  Asset scartati / non selezionati
+                </p>
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead>Ticker</TableHead>
+                    <TableHead>Prezzo</TableHead>
+                    <TableHead>Motivo</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {discardedRows.map((row) => (
+                    <TableRow key={`scartato-${row.ticker}`}>
+                      <TableCell>
+                        <TickerInfo
+                          assetType={scannerConfig.copy.assetType}
+                          ticker={row.ticker}
+                          profile={row.profile}
+                        />
+                      </TableCell>
+                      <TableCell>{formatCurrency(row.currentPrice)}</TableCell>
+                      <TableCell>
+                        <p className="max-w-3xl text-sm leading-6 text-slate-400">
+                          {getExtendedScanReason(row, scannerConfig)}
+                        </p>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           ) : (
             <div className="flex min-h-56 items-center justify-center p-8 text-center">
               <div>
-                <p className="font-medium text-white">
-                  Diagnostica pronta per la prossima scansione
-                </p>
+                <p className="font-medium text-white">Scansione non ancora disponibile</p>
                 <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
                   {scannerConfig.copy.diagnosticDescription}
                 </p>
