@@ -953,7 +953,14 @@ export default function Scanner({ marketId }) {
                       </TableCell>
                       <TableCell>
                         <div className="min-w-36 text-sm leading-6">
-                          <p>TP {formatCurrency(position.takeProfit)}</p>
+                          <p>
+                            Lock {formatCurrency(position.takeProfit)}
+                          </p>
+                          {position.finalTakeProfit ? (
+                            <p className="text-slate-400">
+                              Max {formatCurrency(position.finalTakeProfit)}
+                            </p>
+                          ) : null}
                           <p className="text-slate-500">
                             SL {formatCurrency(position.stopLoss)}
                           </p>

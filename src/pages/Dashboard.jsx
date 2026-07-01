@@ -61,6 +61,8 @@ function exitReasonLabel(reason) {
     MANUALE: 'Manuale',
     STOP_LOSS: 'Stop loss',
     TAKE_PROFIT: 'Take profit',
+    TAKE_PROFIT_MAX: 'Target massimo',
+    TRAILING_PROFIT: 'Trailing profit',
   }
 
   return labels[reason] || reason || 'N/D'

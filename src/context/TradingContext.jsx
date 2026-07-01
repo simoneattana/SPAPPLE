@@ -852,7 +852,9 @@ function buildTrade(
 ) {
   const atrPct = (atr / price) * 100
   const isCrypto = strategy.id === 'crypto'
-  const targetPct = isCrypto ? (atrPct < 4 ? 0.8 : 1.2) : atrPct < 1.5 ? 0.3 : 0.5
+  const targetPct = isCrypto ? (atrPct < 4 ? 0.8 : 1.2) : atrPct < 1.5 ? 0.35 : 0.6
+  const maxTargetPct = isCrypto ? targetPct : atrPct < 1.5 ? 0.8 : 1.2
+  const trailingPct = isCrypto ? null : atrPct < 1.5 ? 0.2 : 0.3
   const stopMultiplier = isCrypto ? 1.8 : 1.5
   const long = type === 'LONG'
   const openedAt = new Date().toISOString()
@@ -871,13 +873,73 @@ function buildTrade(
     takeProfit: roundPrice(
       long ? price * (1 + targetPct / 100) : price * (1 - targetPct / 100),
     ),
+    finalTakeProfit: roundPrice(
+      long
+        ? price * (1 + maxTargetPct / 100)
+        : price * (1 - maxTargetPct / 100),
+    ),
     stopLoss: roundPrice(
       long ? price - atr * stopMultiplier : price + atr * stopMultiplier,
     ),
+    profitLockArmed: false,
+    favorablePrice: roundPrice(price),
     daysHeld: 0,
     invested: roundPrice(invested),
     quantity: order?.quantity || roundQuantity(invested / price),
     targetPct,
+    maxTargetPct,
+    trailingPct,
+  }
+}
+
+function evaluateProfitExit(position, latestPrice) {
+  const long = position.type === 'LONG'
+  const trailingPct = Number(position.trailingPct)
+  const hasDynamicProfit = Number.isFinite(trailingPct) && trailingPct > 0
+  const takeProfit = Number(position.takeProfit)
+  const finalTakeProfit = Number(position.finalTakeProfit || position.takeProfit)
+
+  if (!hasDynamicProfit) {
+    return {
+      exitReason: 'TAKE_PROFIT',
+      isWin: long ? latestPrice >= takeProfit : latestPrice <= takeProfit,
+      monitoredFields: {},
+    }
+  }
+
+  const previousFavorablePrice = Number.isFinite(Number(position.favorablePrice))
+    ? Number(position.favorablePrice)
+    : Number(position.entryPrice)
+  const favorablePrice = long
+    ? Math.max(previousFavorablePrice, latestPrice)
+    : Math.min(previousFavorablePrice, latestPrice)
+  const profitLockReached = long
+    ? latestPrice >= takeProfit
+    : latestPrice <= takeProfit
+  const profitLockArmed = Boolean(position.profitLockArmed) || profitLockReached
+  const trailingStopPrice = profitLockArmed
+    ? long
+      ? favorablePrice * (1 - trailingPct / 100)
+      : favorablePrice * (1 + trailingPct / 100)
+    : null
+  const maxTargetReached = long
+    ? latestPrice >= finalTakeProfit
+    : latestPrice <= finalTakeProfit
+  const trailingTriggered =
+    profitLockArmed &&
+    Number.isFinite(Number(trailingStopPrice)) &&
+    (long ? latestPrice <= trailingStopPrice : latestPrice >= trailingStopPrice)
+
+  return {
+    exitReason: maxTargetReached ? 'TAKE_PROFIT_MAX' : 'TRAILING_PROFIT',
+    isWin: maxTargetReached || trailingTriggered,
+    monitoredFields: {
+      profitLockArmed,
+      favorablePrice: roundPrice(favorablePrice),
+      trailingStopPrice: Number.isFinite(Number(trailingStopPrice))
+        ? roundPrice(trailingStopPrice)
+        : null,
+    },
   }
 }
 
@@ -935,22 +997,23 @@ function evaluatePositions(
       latestPriceAt: new Date().toISOString(),
       unrealizedPnl: roundPrice(pnlEur),
     }
-    const isWin = long
-      ? latestPrice >= position.takeProfit
-      : latestPrice <= position.takeProfit
+    const profitExit = evaluateProfitExit(position, latestPrice)
     const isLoss = long
       ? latestPrice <= position.stopLoss
       : latestPrice >= position.stopLoss
 
-    if (!isWin && !isLoss) {
-      activePositions.push(monitoredPosition)
+    if (!profitExit.isWin && !isLoss) {
+      activePositions.push({
+        ...monitoredPosition,
+        ...profitExit.monitoredFields,
+      })
       return
     }
 
     const roundedPnl = roundPrice(pnlEur)
     const invested = investedAtRisk
     const recoveredCapital = Math.max(invested + roundedPnl, 0)
-    const exitReason = isWin ? 'TAKE_PROFIT' : 'STOP_LOSS'
+    const exitReason = profitExit.isWin ? profitExit.exitReason : 'STOP_LOSS'
     const closeOrder = createSimulationOrder({
       action: 'CLOSE',
       direction: position.type,
@@ -962,15 +1025,17 @@ function evaluatePositions(
       quantity: position.quantity || quantity,
       requestedPrice: latestPrice,
       reason:
-        exitReason === 'TAKE_PROFIT'
-          ? 'Chiusura automatica: take profit raggiunto.'
-          : 'Chiusura automatica: stop loss raggiunto.',
+        exitReason === 'STOP_LOSS'
+          ? 'Chiusura automatica: stop loss raggiunto.'
+          : exitReason === 'TRAILING_PROFIT'
+            ? 'Chiusura automatica: trailing profit attivato.'
+            : 'Chiusura automatica: target profit raggiunto.',
       side: getCloseOrderSide(position.type),
       source,
       ticker: position.ticker,
     })
 
-    if (isWin) {
+    if (profitExit.isWin) {
       capital += invested
       vault += Math.max(roundedPnl, 0)
     } else {
@@ -987,7 +1052,7 @@ function evaluatePositions(
       entryPrice: position.entryPrice,
       invested,
       pnlEur: roundedPnl,
-      result: isWin ? 'WIN' : 'LOSS',
+      result: profitExit.isWin ? 'WIN' : 'LOSS',
       exitDate: new Date().toISOString(),
       exitPrice: roundPrice(latestPrice),
       exitReason,
@@ -1462,7 +1527,11 @@ export function TradingProvider({ children }) {
             2,
           )}€ allocata. Take profit ${roundPrice(
             trade.takeProfit,
-          )}, stop loss ${roundPrice(trade.stopLoss)}.`,
+          )}${
+            trade.finalTakeProfit
+              ? `, target massimo ${roundPrice(trade.finalTakeProfit)}`
+              : ''
+          }, stop loss ${roundPrice(trade.stopLoss)}.`,
         }),
       ),
     }
