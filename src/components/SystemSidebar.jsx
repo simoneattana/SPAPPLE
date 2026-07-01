@@ -29,6 +29,9 @@ const currencyFormatter = new Intl.NumberFormat('it-IT', {
 })
 
 const EMPTY_ARRAY = []
+const EQUITIES_GUARD_TIMEZONE = 'Europe/Rome'
+const EQUITIES_STOP_MINUTES = 16 * 60 + 25
+const EQUITIES_REOPEN_MINUTES = 6 * 60
 
 function formatActivityDate(value) {
   if (!value) {
@@ -56,6 +59,84 @@ function formatCountdown(target) {
   }
 
   return `${Math.ceil(seconds / 60)} min`
+}
+
+function getRomeClockParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('it-IT', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    timeZone: EQUITIES_GUARD_TIMEZONE,
+  }).formatToParts(date)
+
+  return {
+    hour: Number(parts.find((part) => part.type === 'hour')?.value),
+    minute: Number(parts.find((part) => part.type === 'minute')?.value),
+    second: Number(parts.find((part) => part.type === 'second')?.value),
+  }
+}
+
+function formatDuration(totalSeconds) {
+  const safeSeconds = Math.max(0, Math.floor(totalSeconds))
+  const hours = Math.floor(safeSeconds / 3600)
+  const minutes = Math.floor((safeSeconds % 3600) / 60)
+  const seconds = safeSeconds % 60
+
+  if (hours > 0) {
+    return `${hours}h ${String(minutes).padStart(2, '0')}m`
+  }
+
+  return `${minutes}m ${String(seconds).padStart(2, '0')}s`
+}
+
+function getEquitiesSessionStatus(now = new Date()) {
+  const { hour, minute, second } = getRomeClockParts(now)
+
+  if (
+    !Number.isFinite(hour) ||
+    !Number.isFinite(minute) ||
+    !Number.isFinite(second)
+  ) {
+    return null
+  }
+
+  const currentSeconds = hour * 3600 + minute * 60 + second
+  const stopSeconds = EQUITIES_STOP_MINUTES * 60
+  const reopenSeconds = EQUITIES_REOPEN_MINUTES * 60
+
+  if (currentSeconds < reopenSeconds) {
+    return {
+      isStopped: true,
+      title: 'Azioni ferme fino alle 06:00',
+      detail: 'Il mondo azionario resta in protezione: nessuna nuova apertura prima della prossima finestra operativa.',
+      countdownLabel: 'Ripartenza',
+      countdown: formatDuration(reopenSeconds - currentSeconds),
+      badge: 'Fermo',
+    }
+  }
+
+  if (currentSeconds >= stopSeconds) {
+    const secondsUntilReopen = 24 * 3600 - currentSeconds + reopenSeconds
+
+    return {
+      isStopped: true,
+      title: 'Azioni ferme fino alle 06:00',
+      detail: 'Protezione 16:25 attiva: Spapple non apre nuove posizioni azionarie e chiude quelle ancora aperte al primo controllo utile.',
+      countdownLabel: 'Ripartenza',
+      countdown: formatDuration(secondsUntilReopen),
+      badge: 'Fermo',
+    }
+  }
+
+  return {
+    isStopped: false,
+    title: 'Finestra azionaria attiva',
+    detail: 'Dopo le 16:25 Spapple bloccherà nuove aperture azionarie e proteggerà le posizioni aperte.',
+    countdownLabel: 'Stop alle 16:25',
+    countdown: formatDuration(stopSeconds - currentSeconds),
+    badge: 'Attivo',
+  }
 }
 
 function getOperatingState({
@@ -177,6 +258,8 @@ export function SystemSidebar() {
     lastSignalCount,
     positions,
   })
+  const equitiesSessionStatus =
+    routeMarket === 'equities' ? getEquitiesSessionStatus(new Date()) : null
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
@@ -208,6 +291,54 @@ export function SystemSidebar() {
         </div>
         <p className="mt-2 text-xs leading-5 text-slate-200">{nextAction}</p>
       </div>
+
+      {equitiesSessionStatus ? (
+        <div
+          className={`mt-3 rounded-lg border p-3 ${
+            equitiesSessionStatus.isStopped
+              ? 'border-[#ef8f8f]/40 bg-[#2a1217]'
+              : 'border-[var(--market-accent-border)] bg-slate-950'
+          }`}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Clock3
+                className={`h-4 w-4 ${
+                  equitiesSessionStatus.isStopped
+                    ? 'text-[#ef8f8f]'
+                    : 'text-[var(--market-accent)]'
+                }`}
+              />
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                Orario azioni
+              </p>
+            </div>
+            <Badge variant={equitiesSessionStatus.isStopped ? 'negative' : 'positive'}>
+              {equitiesSessionStatus.badge}
+            </Badge>
+          </div>
+          <p className="mt-2 text-sm font-semibold text-white">
+            {equitiesSessionStatus.title}
+          </p>
+          <div className="mt-2 rounded-lg border border-slate-800 bg-[#090b10] p-2">
+            <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
+              {equitiesSessionStatus.countdownLabel}
+            </p>
+            <p
+              className={`mt-1 text-lg font-semibold ${
+                equitiesSessionStatus.isStopped
+                  ? 'text-[#ef8f8f]'
+                  : 'text-[var(--market-accent)]'
+              }`}
+            >
+              {equitiesSessionStatus.countdown}
+            </p>
+          </div>
+          <p className="mt-2 text-xs leading-5 text-slate-400">
+            {equitiesSessionStatus.detail}
+          </p>
+        </div>
+      ) : null}
 
       <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950 p-3">
         <div className="flex items-center justify-between gap-2">
