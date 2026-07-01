@@ -42,6 +42,12 @@ const MIN_HISTORY_LENGTH = 30
 const RSI_PERIOD = 14
 const ATR_PERIOD = 14
 const REQUEST_CONCURRENCY = 8
+const EXECUTION_MODE = 'simulation'
+const DEFAULT_RISK_LIMITS = {
+  maxDailyOrders: 20,
+  maxDailyCapitalPct: 1,
+  maxConsecutiveLosses: 3,
+}
 
 function getStrategyMaxPositions(strategy) {
   return Number.isFinite(Number(strategy.maxPositions))
@@ -54,8 +60,12 @@ const marketStateFields = [
   'vault',
   'positions',
   'history',
+  'orders',
   'activityLog',
   'events',
+  'executionMode',
+  'killSwitchEnabled',
+  'riskLimits',
   'automationEnabled',
   'lastScanAt',
   'lastScanCount',
@@ -78,8 +88,12 @@ const initialState = {
   vault: 0,
   positions: [],
   history: [],
+  orders: [],
   activityLog: [],
   events: [],
+  executionMode: EXECUTION_MODE,
+  killSwitchEnabled: false,
+  riskLimits: DEFAULT_RISK_LIMITS,
   automationEnabled: true,
   liveMonitorEnabled: true,
   backendMonitorEnabled: true,
@@ -152,8 +166,12 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
     vault: 0,
     positions: [],
     history: [],
+    orders: [],
     activityLog: [],
     events: [],
+    executionMode: EXECUTION_MODE,
+    killSwitchEnabled: false,
+    riskLimits: DEFAULT_RISK_LIMITS,
     automationEnabled: true,
     liveMonitorEnabled: true,
     backendMonitorEnabled: true,
@@ -182,6 +200,7 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
         : fallback.capital
 
   const history = Array.isArray(rawMarketState.history) ? rawMarketState.history : []
+  const orders = Array.isArray(rawMarketState.orders) ? rawMarketState.orders : []
   const positions = removeClosedPositions(
     Array.isArray(rawMarketState.positions)
       ? rawMarketState.positions
@@ -198,10 +217,20 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
     vault: Number.isFinite(vault) ? vault : fallback.vault,
     positions,
     history,
+    orders,
     activityLog: Array.isArray(rawMarketState.activityLog)
       ? rawMarketState.activityLog
       : [],
     events: Array.isArray(rawMarketState.events) ? rawMarketState.events : [],
+    executionMode: rawMarketState.executionMode || fallback.executionMode,
+    killSwitchEnabled:
+      typeof rawMarketState.killSwitchEnabled === 'boolean'
+        ? rawMarketState.killSwitchEnabled
+        : fallback.killSwitchEnabled,
+    riskLimits: {
+      ...DEFAULT_RISK_LIMITS,
+      ...(rawMarketState.riskLimits || {}),
+    },
     automationEnabled:
       typeof rawMarketState.automationEnabled === 'boolean'
         ? rawMarketState.automationEnabled
@@ -301,6 +330,10 @@ function roundPrice(value) {
   return Number(value.toFixed(4))
 }
 
+function roundQuantity(value) {
+  return Number(value.toFixed(8))
+}
+
 function assertNumber(value, label) {
   const number = Number(value)
 
@@ -326,6 +359,156 @@ function appendLogs(state, activity) {
   return {
     activityLog: [activity, ...(state.activityLog || [])].slice(0, 14),
     events: [activity, ...(state.events || [])],
+  }
+}
+
+function appendOrders(state, orders) {
+  const nextOrders = Array.isArray(orders) ? orders : [orders]
+  return [...nextOrders, ...(state.orders || [])].slice(0, 250)
+}
+
+function isSameDay(value, dayKey = new Date().toISOString().slice(0, 10)) {
+  return value ? String(value).slice(0, 10) === dayKey : false
+}
+
+function getConsecutiveLosses(history = []) {
+  let losses = 0
+
+  for (const trade of history) {
+    if (trade.result === 'LOSS') {
+      losses += 1
+      continue
+    }
+
+    break
+  }
+
+  return losses
+}
+
+function getOpeningOrderBlockReason(marketState, notional, strategy) {
+  const riskLimits = {
+    ...DEFAULT_RISK_LIMITS,
+    ...(marketState.riskLimits || {}),
+  }
+
+  if (marketState.executionMode !== EXECUTION_MODE) {
+    return 'Modalità operativa non supportata: al momento Spapple può eseguire solo ordini simulati.'
+  }
+
+  if (marketState.killSwitchEnabled) {
+    return 'Kill switch attivo: nuove aperture bloccate.'
+  }
+
+  const todaysOrders = (marketState.orders || []).filter((order) =>
+    isSameDay(order.createdAt),
+  )
+
+  if (todaysOrders.length >= riskLimits.maxDailyOrders) {
+    return `Limite giornaliero raggiunto: massimo ${riskLimits.maxDailyOrders} ordini al giorno.`
+  }
+
+  const dailyCapitalLimit =
+    Number(strategy.initialCapital || 0) * Number(riskLimits.maxDailyCapitalPct)
+  const dailyAllocated = todaysOrders
+    .filter((order) => order.action === 'OPEN' && order.status === 'ESEGUITO')
+    .reduce((sum, order) => sum + Number(order.notional || 0), 0)
+
+  if (
+    Number.isFinite(dailyCapitalLimit) &&
+    dailyCapitalLimit > 0 &&
+    dailyAllocated + Number(notional || 0) > dailyCapitalLimit
+  ) {
+    return `Limite capitale giornaliero superato: massimo ${Math.round(
+      riskLimits.maxDailyCapitalPct * 100,
+    )}% del capitale iniziale del mercato.`
+  }
+
+  const consecutiveLosses = getConsecutiveLosses(marketState.history || [])
+
+  if (consecutiveLosses >= riskLimits.maxConsecutiveLosses) {
+    return `Blocco prudenziale attivo: ${consecutiveLosses} perdite consecutive.`
+  }
+
+  return null
+}
+
+function getOpenOrderSide(type) {
+  return type === 'LONG' ? 'BUY' : 'SELL_SHORT'
+}
+
+function getCloseOrderSide(type) {
+  return type === 'LONG' ? 'SELL' : 'BUY_TO_COVER'
+}
+
+function createSimulationOrder({
+  action,
+  direction,
+  executedPrice = null,
+  marketId,
+  marketLabel,
+  notional = 0,
+  positionId = null,
+  quantity = null,
+  reason,
+  requestedPrice = null,
+  side,
+  source = 'backend-monitor',
+  status = 'ESEGUITO',
+  ticker,
+}) {
+  const now = new Date().toISOString()
+  const normalizedPrice = Number(executedPrice ?? requestedPrice)
+  const normalizedNotional = Number(notional)
+  const normalizedQuantity =
+    Number.isFinite(Number(quantity)) && Number(quantity) > 0
+      ? Number(quantity)
+      : Number.isFinite(normalizedPrice) && normalizedPrice > 0
+        ? normalizedNotional / normalizedPrice
+        : null
+
+  return {
+    id: `order-${Date.now()}-${crypto.randomUUID()}`,
+    marketId,
+    marketLabel,
+    executionMode: EXECUTION_MODE,
+    broker: 'simulationBroker',
+    action,
+    side,
+    direction,
+    status,
+    source,
+    ticker,
+    positionId,
+    quantity: Number.isFinite(normalizedQuantity)
+      ? roundQuantity(normalizedQuantity)
+      : null,
+    notional: Number.isFinite(normalizedNotional)
+      ? roundPrice(normalizedNotional)
+      : 0,
+    requestedPrice: Number.isFinite(Number(requestedPrice))
+      ? roundPrice(Number(requestedPrice))
+      : null,
+    executedPrice: Number.isFinite(Number(executedPrice))
+      ? roundPrice(Number(executedPrice))
+      : null,
+    fee: 0,
+    slippagePct: 0,
+    reason,
+    createdAt: now,
+    submittedAt: status === 'RIFIUTATO' ? null : now,
+    executedAt: status === 'ESEGUITO' ? now : null,
+    statusHistory:
+      status === 'RIFIUTATO'
+        ? [
+            { status: 'CREATO', at: now },
+            { status: 'RIFIUTATO', at: now, detail: reason },
+          ]
+        : [
+            { status: 'CREATO', at: now },
+            { status: 'INVIATO', at: now },
+            { status: 'ESEGUITO', at: now },
+          ],
   }
 }
 
@@ -802,7 +985,23 @@ async function fetchBackendMarketData(marketId = DEFAULT_MARKET_ID) {
   return mapWithConcurrency(EUROPEAN_TICKERS, REQUEST_CONCURRENCY, fetchTickerDiagnostic)
 }
 
-function buildTrade(row, invested, strategy = getTradingStrategy()) {
+function getSignalType(row, strategy) {
+  if (strategy.id === 'crypto') {
+    return getCryptoSignalType(row)
+  }
+
+  if (row.rsi < 30) {
+    return 'LONG'
+  }
+
+  if (row.rsi > 70) {
+    return 'SHORT'
+  }
+
+  return null
+}
+
+function buildTrade(row, invested, strategy = getTradingStrategy(), order = null) {
   const atrPct = (row.atr / row.currentPrice) * 100
   const isCrypto = strategy.id === 'crypto'
   const targetPct = isCrypto ? (atrPct < 4 ? 0.8 : 1.2) : atrPct < 1.5 ? 0.3 : 0.5
@@ -822,6 +1021,7 @@ function buildTrade(row, invested, strategy = getTradingStrategy()) {
     ticker: row.ticker,
     profile: row.profile || null,
     type,
+    openOrderId: order?.id || null,
     openedAt,
     entryPrice: roundPrice(row.currentPrice),
     atrAtEntry: roundPrice(row.atr),
@@ -837,6 +1037,7 @@ function buildTrade(row, invested, strategy = getTradingStrategy()) {
     ),
     daysHeld: 0,
     invested: roundPrice(invested),
+    quantity: order?.quantity || roundQuantity(invested / row.currentPrice),
     targetPct,
   }
 }
@@ -861,7 +1062,9 @@ async function refillOpenSlots(state, excludedTickers = []) {
     ),
   )
   const positions = [...state.positions]
+  let orders = state.orders || []
   const openedTrades = []
+  const rejectedOrders = []
   let capital = state.capital
   const maxPositions = getStrategyMaxPositions(strategy)
   const sizing = strategy.positionSizing
@@ -872,7 +1075,48 @@ async function refillOpenSlots(state, excludedTickers = []) {
     }
 
     const positionSize = calculatePositionSize(capital, sizing)
-    const trade = buildTrade(row, positionSize, strategy)
+    const type = getSignalType(row, strategy)
+    const blockReason = getOpeningOrderBlockReason(
+      { ...state, capital, positions, orders },
+      positionSize,
+      strategy,
+    )
+
+    if (blockReason) {
+      const rejectedOrder = createSimulationOrder({
+        action: 'OPEN',
+        direction: type,
+        marketId: strategy.id,
+        marketLabel: strategy.label,
+        notional: positionSize,
+        requestedPrice: row.currentPrice,
+        reason: blockReason,
+        side: getOpenOrderSide(type),
+        source: 'backend-monitor',
+        status: 'RIFIUTATO',
+        ticker: row.ticker,
+      })
+      orders = appendOrders({ orders }, rejectedOrder)
+      rejectedOrders.push(rejectedOrder)
+      return
+    }
+
+    let order = createSimulationOrder({
+      action: 'OPEN',
+      direction: type,
+      executedPrice: row.currentPrice,
+      marketId: strategy.id,
+      marketLabel: strategy.label,
+      notional: positionSize,
+      requestedPrice: row.currentPrice,
+      reason: 'Apertura automatica backend da segnale validato.',
+      side: getOpenOrderSide(type),
+      source: 'backend-monitor',
+      ticker: row.ticker,
+    })
+    const trade = buildTrade(row, positionSize, strategy, order)
+    order = { ...order, positionId: trade.id }
+    orders = appendOrders({ orders }, order)
     positions.push(trade)
     capital = roundPrice(capital - positionSize)
     openedTrades.push(trade)
@@ -881,7 +1125,9 @@ async function refillOpenSlots(state, excludedTickers = []) {
   return {
     capital: roundPrice(capital),
     positions,
+    orders,
     openedTrades,
+    rejectedOrders,
     marketData,
     scannedCount: marketData.length,
     signalCount: actionableRows.length,
@@ -903,6 +1149,28 @@ function evaluatePosition(position, latestPrice) {
     : latestPrice >= position.stopLoss
   const roundedPnl = roundPrice(pnlEur)
   const recoveredCapital = Math.max(invested + roundedPnl, 0)
+  const exitReason = isWin ? 'TAKE_PROFIT' : 'STOP_LOSS'
+  const closeOrder =
+    isWin || isLoss
+      ? createSimulationOrder({
+          action: 'CLOSE',
+          direction: position.type,
+          executedPrice: latestPrice,
+          marketId: position.marketId,
+          marketLabel: position.marketLabel,
+          notional: recoveredCapital,
+          positionId: position.id,
+          quantity: position.quantity || quantity,
+          requestedPrice: latestPrice,
+          reason:
+            exitReason === 'TAKE_PROFIT'
+              ? 'Chiusura automatica backend: take profit raggiunto.'
+              : 'Chiusura automatica backend: stop loss raggiunto.',
+          side: getCloseOrderSide(position.type),
+          source: 'backend-monitor',
+          ticker: position.ticker,
+        })
+      : null
 
   return {
     monitoredPosition: {
@@ -910,11 +1178,14 @@ function evaluatePosition(position, latestPrice) {
       latestPrice: roundPrice(latestPrice),
       unrealizedPnl: roundPrice(pnlEur),
     },
+    closeOrder,
     closedTrade:
       isWin || isLoss
         ? {
             ticker: position.ticker,
             type: position.type,
+            positionId: position.id,
+            closeOrderId: closeOrder.id,
             openedAt: position.openedAt || null,
             entryPrice: position.entryPrice,
             invested,
@@ -922,7 +1193,7 @@ function evaluatePosition(position, latestPrice) {
             result: isWin ? 'WIN' : 'LOSS',
             exitDate: new Date().toISOString(),
             exitPrice: roundPrice(latestPrice),
-            exitReason: isWin ? 'TAKE_PROFIT' : 'STOP_LOSS',
+            exitReason,
             recoveredCapital: roundPrice(recoveredCapital),
           }
         : null,
@@ -998,6 +1269,7 @@ export async function runBackendMonitor(state) {
         ...current,
         capital: refill ? refill.capital : current.capital,
         positions: refill ? refill.positions : current.positions,
+        orders: refill ? refill.orders : current.orders,
         ...(refill
           ? {
               lastScanAt: new Date().toISOString(),
@@ -1024,6 +1296,7 @@ export async function runBackendMonitor(state) {
   let vault = current.vault
   const activePositions = []
   const closedTrades = []
+  let orders = current.orders || []
   const errors = []
 
   for (const position of current.positions) {
@@ -1032,7 +1305,7 @@ export async function runBackendMonitor(state) {
         position.ticker,
         position.marketId || current.activeMarket,
       )
-      const { monitoredPosition, closedTrade } = evaluatePosition(
+      const { monitoredPosition, closedTrade, closeOrder } = evaluatePosition(
         position,
         latestPrice,
       )
@@ -1042,6 +1315,7 @@ export async function runBackendMonitor(state) {
         continue
       }
 
+      orders = appendOrders({ orders }, closeOrder)
       if (closedTrade.result === 'WIN') {
         capital += closedTrade.invested || LEGACY_POSITION_SIZE
         vault += Math.max(closedTrade.pnlEur, 0)
@@ -1077,6 +1351,7 @@ export async function runBackendMonitor(state) {
 
       capital = refill.capital
       activePositions.splice(0, activePositions.length, ...refill.positions)
+      orders = refill.orders
       openedTrades = refill.openedTrades
       scanPatch = {
         lastScanAt: new Date().toISOString(),
@@ -1122,6 +1397,7 @@ export async function runBackendMonitor(state) {
       capital: roundPrice(capital),
       vault: roundPrice(vault),
       positions: activePositions,
+      orders,
       history: [...closedTrades, ...current.history],
       ...scanPatch,
       lastBackendCheckAt: new Date().toISOString(),

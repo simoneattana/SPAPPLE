@@ -435,6 +435,7 @@ export default function Scanner({ marketId }) {
   )
   const routeMarketLabel = routeMarketState?.marketLabel || effectiveMarketLabel
   const routeMaxPositions = effectiveStrategy.maxPositions || maxPositions
+  const routeKillSwitchEnabled = Boolean(routeMarketState?.killSwitchEnabled)
   const scannerConfig = useMemo(() => {
     if (effectiveMarket === 'crypto') {
       const copy = getMarketCopy('crypto')
@@ -792,6 +793,13 @@ export default function Scanner({ marketId }) {
         </div>
       ) : null}
 
+      {routeKillSwitchEnabled ? (
+        <div className="rounded-lg border border-[#ef8f8f]/35 bg-[#ef8f8f]/10 p-4 text-sm leading-6 text-[#ef8f8f]">
+          Kill switch attivo: lo Scanner può aggiornare i dati, ma non può
+          aprire nuove posizioni finché il blocco resta attivo.
+        </div>
+      ) : null}
+
       {effectiveMarket === 'crypto' && cryptoMappingAlerts.length > 0 ? (
         <div className="rounded-lg border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-100">
           <div className="flex items-start gap-3">
@@ -1066,10 +1074,16 @@ export default function Scanner({ marketId }) {
                     <Button
                       size="sm"
                       variant="ghost"
-                      disabled={slotsFull || isTickerAlreadyOpen(row.ticker)}
+                      disabled={
+                        routeKillSwitchEnabled ||
+                        slotsFull ||
+                        isTickerAlreadyOpen(row.ticker)
+                      }
                       onClick={() => handleExecuteTrade(row)}
                     >
-                      {isTickerAlreadyOpen(row.ticker)
+                      {routeKillSwitchEnabled
+                        ? 'Bloccato'
+                        : isTickerAlreadyOpen(row.ticker)
                         ? 'Già in portafoglio'
                         : 'Apri posizione'}
                     </Button>

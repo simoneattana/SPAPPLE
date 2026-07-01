@@ -24,6 +24,12 @@ const MAX_POSITIONS = 5
 const STORAGE_KEY = 'spapple_state'
 const STORAGE_VERSION = 4
 const LIVE_MONITOR_INTERVAL_MS = 60_000
+const EXECUTION_MODE = 'simulation'
+const DEFAULT_RISK_LIMITS = {
+  maxDailyOrders: 20,
+  maxDailyCapitalPct: 1,
+  maxConsecutiveLosses: 3,
+}
 
 const initialActivity = {
   id: 'system-ready',
@@ -39,8 +45,12 @@ const marketStateFields = [
   'vault',
   'positions',
   'history',
+  'orders',
   'activityLog',
   'events',
+  'executionMode',
+  'killSwitchEnabled',
+  'riskLimits',
   'automationEnabled',
   'lastScanAt',
   'lastScanCount',
@@ -62,8 +72,12 @@ function createInitialMarketState(strategy = getTradingStrategy()) {
     vault: 0,
     positions: [],
     history: [],
+    orders: [],
     activityLog: [initialActivity],
     events: [initialActivity],
+    executionMode: EXECUTION_MODE,
+    killSwitchEnabled: false,
+    riskLimits: DEFAULT_RISK_LIMITS,
     automationEnabled: true,
     lastScanAt: null,
     lastScanCount: 0,
@@ -97,8 +111,12 @@ const initialState = {
   vault: 0,
   positions: [],
   history: [],
+  orders: [],
   activityLog: [initialActivity],
   events: [initialActivity],
+  executionMode: EXECUTION_MODE,
+  killSwitchEnabled: false,
+  riskLimits: DEFAULT_RISK_LIMITS,
   automationEnabled: true,
   lastScanAt: null,
   lastScanCount: 0,
@@ -176,6 +194,9 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
   const history = Array.isArray(rawMarketState.history)
     ? rawMarketState.history
     : fallback.history
+  const orders = Array.isArray(rawMarketState.orders)
+    ? rawMarketState.orders
+    : fallback.orders
   const positions = removeClosedPositions(
     Array.isArray(rawMarketState.positions)
       ? rawMarketState.positions
@@ -192,6 +213,7 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
     vault: Number.isFinite(vault) ? vault : fallback.vault,
     positions,
     history,
+    orders,
     activityLog: Array.isArray(rawMarketState.activityLog)
       ? rawMarketState.activityLog
       : fallback.activityLog,
@@ -200,6 +222,15 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
       : Array.isArray(rawMarketState.activityLog)
         ? rawMarketState.activityLog
         : fallback.events,
+    executionMode: rawMarketState.executionMode || fallback.executionMode,
+    killSwitchEnabled:
+      typeof rawMarketState.killSwitchEnabled === 'boolean'
+        ? rawMarketState.killSwitchEnabled
+        : fallback.killSwitchEnabled,
+    riskLimits: {
+      ...DEFAULT_RISK_LIMITS,
+      ...(rawMarketState.riskLimits || {}),
+    },
     automationEnabled:
       typeof rawMarketState.automationEnabled === 'boolean'
         ? rawMarketState.automationEnabled
@@ -291,6 +322,10 @@ function roundPrice(value) {
   return Number(value.toFixed(4))
 }
 
+function roundQuantity(value) {
+  return Number(value.toFixed(8))
+}
+
 function createActivity({ type = 'system', status = 'done', title, detail }) {
   return {
     id: `${type}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -310,6 +345,164 @@ function appendLogs(state, activity) {
   return {
     activityLog: appendActivity(state, activity),
     events: [activity, ...(state.events || [])],
+  }
+}
+
+function appendOrders(state, orders) {
+  const nextOrders = Array.isArray(orders) ? orders : [orders]
+  return [...nextOrders, ...(state.orders || [])].slice(0, 250)
+}
+
+function getTodayKey() {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function isSameDay(value, dayKey = getTodayKey()) {
+  return value ? String(value).slice(0, 10) === dayKey : false
+}
+
+function getConsecutiveLosses(history = []) {
+  let losses = 0
+
+  for (const trade of history) {
+    if (trade.result === 'LOSS') {
+      losses += 1
+      continue
+    }
+
+    break
+  }
+
+  return losses
+}
+
+function getOpeningOrderBlockReason(marketState, notional, strategy) {
+  const riskLimits = {
+    ...DEFAULT_RISK_LIMITS,
+    ...(marketState.riskLimits || {}),
+  }
+
+  if (marketState.executionMode !== EXECUTION_MODE) {
+    return 'Modalità operativa non supportata: al momento Spapple può eseguire solo ordini simulati.'
+  }
+
+  if (marketState.killSwitchEnabled) {
+    return 'Kill switch attivo: nuove aperture bloccate.'
+  }
+
+  const todaysOrders = (marketState.orders || []).filter((order) =>
+    isSameDay(order.createdAt),
+  )
+  const todaysOpeningOrders = todaysOrders.filter(
+    (order) => order.action === 'OPEN' && order.status === 'ESEGUITO',
+  )
+
+  if (todaysOrders.length >= riskLimits.maxDailyOrders) {
+    return `Limite giornaliero raggiunto: massimo ${riskLimits.maxDailyOrders} ordini al giorno.`
+  }
+
+  const dailyCapitalLimit =
+    Number(strategy.initialCapital || 0) * Number(riskLimits.maxDailyCapitalPct)
+  const dailyAllocated = todaysOpeningOrders.reduce(
+    (sum, order) => sum + Number(order.notional || 0),
+    0,
+  )
+
+  if (
+    Number.isFinite(dailyCapitalLimit) &&
+    dailyCapitalLimit > 0 &&
+    dailyAllocated + Number(notional || 0) > dailyCapitalLimit
+  ) {
+    return `Limite capitale giornaliero superato: massimo ${Math.round(
+      riskLimits.maxDailyCapitalPct * 100,
+    )}% del capitale iniziale del mercato.`
+  }
+
+  const consecutiveLosses = getConsecutiveLosses(marketState.history || [])
+
+  if (consecutiveLosses >= riskLimits.maxConsecutiveLosses) {
+    return `Blocco prudenziale attivo: ${consecutiveLosses} perdite consecutive.`
+  }
+
+  return null
+}
+
+function getOpenOrderSide(type) {
+  return type === 'LONG' ? 'BUY' : 'SELL_SHORT'
+}
+
+function getCloseOrderSide(type) {
+  return type === 'LONG' ? 'SELL' : 'BUY_TO_COVER'
+}
+
+function createSimulationOrder({
+  action,
+  direction,
+  executedPrice = null,
+  marketId,
+  marketLabel,
+  notional = 0,
+  positionId = null,
+  quantity = null,
+  reason,
+  requestedPrice = null,
+  side,
+  source = 'manual',
+  status = 'ESEGUITO',
+  ticker,
+}) {
+  const now = new Date().toISOString()
+  const normalizedPrice = Number(executedPrice ?? requestedPrice)
+  const normalizedNotional = Number(notional)
+  const normalizedQuantity =
+    Number.isFinite(Number(quantity)) && Number(quantity) > 0
+      ? Number(quantity)
+      : Number.isFinite(normalizedPrice) && normalizedPrice > 0
+        ? normalizedNotional / normalizedPrice
+        : null
+
+  return {
+    id: `order-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    marketId,
+    marketLabel,
+    executionMode: EXECUTION_MODE,
+    broker: 'simulationBroker',
+    action,
+    side,
+    direction,
+    status,
+    source,
+    ticker,
+    positionId,
+    quantity: Number.isFinite(normalizedQuantity)
+      ? roundQuantity(normalizedQuantity)
+      : null,
+    notional: Number.isFinite(normalizedNotional)
+      ? roundPrice(normalizedNotional)
+      : 0,
+    requestedPrice: Number.isFinite(Number(requestedPrice))
+      ? roundPrice(Number(requestedPrice))
+      : null,
+    executedPrice: Number.isFinite(Number(executedPrice))
+      ? roundPrice(Number(executedPrice))
+      : null,
+    fee: 0,
+    slippagePct: 0,
+    reason,
+    createdAt: now,
+    submittedAt: status === 'RIFIUTATO' ? null : now,
+    executedAt: status === 'ESEGUITO' ? now : null,
+    statusHistory:
+      status === 'RIFIUTATO'
+        ? [
+            { status: 'CREATO', at: now },
+            { status: 'RIFIUTATO', at: now, detail: reason },
+          ]
+        : [
+            { status: 'CREATO', at: now },
+            { status: 'INVIATO', at: now },
+            { status: 'ESEGUITO', at: now },
+          ],
   }
 }
 
@@ -379,6 +572,7 @@ function buildTrade(
   invested,
   profile = null,
   strategy = getTradingStrategy(),
+  order = null,
 ) {
   const atrPct = (atr / price) * 100
   const isCrypto = strategy.id === 'crypto'
@@ -394,6 +588,7 @@ function buildTrade(
     ticker,
     profile,
     type,
+    openOrderId: order?.id || null,
     openedAt,
     entryPrice: roundPrice(price),
     atrAtEntry: roundPrice(atr),
@@ -405,6 +600,7 @@ function buildTrade(
     ),
     daysHeld: 0,
     invested: roundPrice(invested),
+    quantity: order?.quantity || roundQuantity(invested / price),
     targetPct,
   }
 }
@@ -425,11 +621,16 @@ function getSignalType(row, strategy) {
   return null
 }
 
-function evaluatePositions(current, positionsWithPrices, { incrementDays }) {
+function evaluatePositions(
+  current,
+  positionsWithPrices,
+  { incrementDays, source = 'monitor' },
+) {
   let capital = current.capital
   let vault = current.vault
   const activePositions = []
   const closedTrades = []
+  const closeOrders = []
 
   current.positions.forEach((position) => {
     const priceData = positionsWithPrices.find(
@@ -472,6 +673,25 @@ function evaluatePositions(current, positionsWithPrices, { incrementDays }) {
     const roundedPnl = roundPrice(pnlEur)
     const invested = investedAtRisk
     const recoveredCapital = Math.max(invested + roundedPnl, 0)
+    const exitReason = isWin ? 'TAKE_PROFIT' : 'STOP_LOSS'
+    const closeOrder = createSimulationOrder({
+      action: 'CLOSE',
+      direction: position.type,
+      executedPrice: latestPrice,
+      marketId: position.marketId || current.marketId,
+      marketLabel: position.marketLabel || current.marketLabel,
+      notional: recoveredCapital,
+      positionId: position.id,
+      quantity: position.quantity || quantity,
+      requestedPrice: latestPrice,
+      reason:
+        exitReason === 'TAKE_PROFIT'
+          ? 'Chiusura automatica: take profit raggiunto.'
+          : 'Chiusura automatica: stop loss raggiunto.',
+      side: getCloseOrderSide(position.type),
+      source,
+      ticker: position.ticker,
+    })
 
     if (isWin) {
       capital += invested
@@ -480,9 +700,12 @@ function evaluatePositions(current, positionsWithPrices, { incrementDays }) {
       capital += recoveredCapital
     }
 
+    closeOrders.push(closeOrder)
     closedTrades.push({
       ticker: position.ticker,
       type: position.type,
+      positionId: position.id,
+      closeOrderId: closeOrder.id,
       openedAt: position.openedAt || null,
       entryPrice: position.entryPrice,
       invested,
@@ -490,7 +713,7 @@ function evaluatePositions(current, positionsWithPrices, { incrementDays }) {
       result: isWin ? 'WIN' : 'LOSS',
       exitDate: new Date().toISOString(),
       exitPrice: roundPrice(latestPrice),
-      exitReason: isWin ? 'TAKE_PROFIT' : 'STOP_LOSS',
+      exitReason,
       recoveredCapital: roundPrice(recoveredCapital),
     })
   })
@@ -500,6 +723,7 @@ function evaluatePositions(current, positionsWithPrices, { incrementDays }) {
     vault: roundPrice(vault),
     activePositions,
     closedTrades,
+    closeOrders,
   }
 }
 
@@ -658,6 +882,39 @@ export function TradingProvider({ children }) {
     })
   }, [updateTradingState])
 
+  const setKillSwitchEnabled = useCallback((enabled, targetMarketId = null) => {
+    updateTradingState((current) => {
+      const syncedCurrent = syncActiveMarketState(current)
+      const marketId = targetMarketId || syncedCurrent.activeMarket
+      const marketState = normalizeMarketState(
+        marketId,
+        syncedCurrent.markets?.[marketId],
+      )
+      const nextMarketState = {
+        ...marketState,
+        killSwitchEnabled: enabled,
+        engineStatus: enabled
+          ? 'Kill switch attivo'
+          : 'Kill switch disattivato',
+        ...appendLogs(
+          marketState,
+          createActivity({
+            type: 'risk',
+            status: enabled ? 'error' : 'done',
+            title: enabled
+              ? 'Kill switch attivato'
+              : 'Kill switch disattivato',
+            detail: enabled
+              ? 'Nuove aperture bloccate. Le posizioni gia aperte restano monitorate.'
+              : 'Le nuove aperture tornano disponibili nel rispetto dei limiti rischio.',
+          }),
+        ),
+      }
+
+      return activateMarketState(syncedCurrent, marketId, nextMarketState)
+    })
+  }, [updateTradingState])
+
   const setActiveMarket = useCallback((marketId) => {
     updateTradingState((current) => {
       const nextStrategy = getTradingStrategy(marketId)
@@ -804,6 +1061,60 @@ export function TradingProvider({ children }) {
       throw new Error(`${ticker} è già presente in portafoglio`)
     }
 
+    const blockReason = getOpeningOrderBlockReason(
+      marketState,
+      positionSize,
+      strategy,
+    )
+
+    if (blockReason) {
+      const rejectedOrder = createSimulationOrder({
+        action: 'OPEN',
+        direction: type,
+        marketId,
+        marketLabel: strategy.label,
+        notional: positionSize,
+        requestedPrice: price,
+        reason: blockReason,
+        side: getOpenOrderSide(type),
+        source: 'manual',
+        status: 'RIFIUTATO',
+        ticker,
+      })
+      const nextMarketState = {
+        ...marketState,
+        orders: appendOrders(marketState, rejectedOrder),
+        engineStatus: 'Ordine simulato rifiutato',
+        ...appendLogs(
+          marketState,
+          createActivity({
+            type: 'order',
+            status: 'error',
+            title: 'Ordine simulato rifiutato',
+            detail: `${ticker}: ${blockReason}`,
+          }),
+        ),
+      }
+      const nextState = activateMarketState(current, marketId, nextMarketState)
+
+      stateRef.current = nextState
+      setState(nextState)
+      throw new Error(blockReason)
+    }
+
+    let order = createSimulationOrder({
+      action: 'OPEN',
+      direction: type,
+      executedPrice: price,
+      marketId,
+      marketLabel: strategy.label,
+      notional: positionSize,
+      requestedPrice: price,
+      reason: 'Apertura manuale confermata dallo Scanner.',
+      side: getOpenOrderSide(type),
+      source: 'manual',
+      ticker,
+    })
     const trade = buildTrade(
       ticker,
       price,
@@ -812,19 +1123,24 @@ export function TradingProvider({ children }) {
       positionSize,
       profile,
       strategy,
+      order,
     )
+    order = { ...order, positionId: trade.id }
     const nextMarketState = {
       ...marketState,
       capital: roundPrice(marketState.capital - positionSize),
       positions: [...marketState.positions, trade],
+      orders: appendOrders(marketState, order),
       engineStatus: 'Posizione aperta',
       ...appendLogs(
         marketState,
         createActivity({
-          type: 'trade',
+          type: 'order',
           status: 'done',
-          title: `Ordine ${type === 'LONG' ? 'Long' : 'Short'} aperto`,
-          detail: `${ticker}: posizione da ${positionSize.toFixed(
+          title: `Ordine simulato ${type === 'LONG' ? 'Long' : 'Short'} eseguito`,
+          detail: `${ticker}: ordine ${order.id} eseguito a ${roundPrice(
+            price,
+          )}. Posizione da ${positionSize.toFixed(
             2,
           )}€ allocata. Take profit ${roundPrice(
             trade.takeProfit,
@@ -849,6 +1165,7 @@ export function TradingProvider({ children }) {
     const maxPositions = getStrategyMaxPositions(strategy)
     let capital = marketState.capital
     const positions = [...marketState.positions]
+    let orders = marketState.orders || []
     const openedTrades = []
     const skippedTickers = []
     let activityLog = marketState.activityLog || []
@@ -876,6 +1193,52 @@ export function TradingProvider({ children }) {
       }
 
       const positionSize = calculatePositionSize(capital, sizing)
+      const blockReason = getOpeningOrderBlockReason(
+        { ...marketState, capital, positions, orders },
+        positionSize,
+        strategy,
+      )
+
+      if (blockReason) {
+        const rejectedOrder = createSimulationOrder({
+          action: 'OPEN',
+          direction: type,
+          marketId,
+          marketLabel: strategy.label,
+          notional: positionSize,
+          requestedPrice: row.currentPrice,
+          reason: blockReason,
+          side: getOpenOrderSide(type),
+          source: 'automation',
+          status: 'RIFIUTATO',
+          ticker: row.ticker,
+        })
+        orders = appendOrders({ orders }, rejectedOrder)
+        skippedTickers.push(row.ticker)
+        appendLocalLog(
+          createActivity({
+            type: 'order',
+            status: 'error',
+            title: 'Ordine automatico rifiutato',
+            detail: `${row.ticker}: ${blockReason}`,
+          }),
+        )
+        return
+      }
+
+      let order = createSimulationOrder({
+        action: 'OPEN',
+        direction: type,
+        executedPrice: row.currentPrice,
+        marketId,
+        marketLabel: strategy.label,
+        notional: positionSize,
+        requestedPrice: row.currentPrice,
+        reason: 'Apertura automatica da segnale validato.',
+        side: getOpenOrderSide(type),
+        source: 'automation',
+        ticker: row.ticker,
+      })
       const trade = buildTrade(
         row.ticker,
         row.currentPrice,
@@ -884,16 +1247,19 @@ export function TradingProvider({ children }) {
         positionSize,
         row.profile || null,
         strategy,
+        order,
       )
+      order = { ...order, positionId: trade.id }
+      orders = appendOrders({ orders }, order)
       positions.push(trade)
       capital = roundPrice(capital - positionSize)
       openedTrades.push(trade)
       appendLocalLog(
         createActivity({
-          type: 'trade',
+          type: 'order',
           status: 'done',
-          title: `Ordine automatico ${type === 'LONG' ? 'Long' : 'Short'}`,
-          detail: `${row.ticker}: segnale validato e posizione da ${positionSize.toFixed(
+          title: `Ordine automatico simulato ${type === 'LONG' ? 'Long' : 'Short'}`,
+          detail: `${row.ticker}: ordine ${order.id} eseguito, posizione da ${positionSize.toFixed(
             2,
           )}€ allocata.`,
         }),
@@ -920,6 +1286,7 @@ export function TradingProvider({ children }) {
       ...marketState,
       capital,
       positions,
+      orders,
       engineStatus:
         openedTrades.length > 0
           ? 'Pilota automatico eseguito'
@@ -995,9 +1362,26 @@ export function TradingProvider({ children }) {
     const roundedPnl = roundPrice(pnlEur)
     const result = roundedPnl >= 0 ? 'WIN' : 'LOSS'
     const recoveredCapital = Math.max(invested + roundedPnl, 0)
+    const closeOrder = createSimulationOrder({
+      action: 'CLOSE',
+      direction: position.type,
+      executedPrice: latestPrice,
+      marketId,
+      marketLabel: marketState.marketLabel,
+      notional: recoveredCapital,
+      positionId: position.id,
+      quantity: position.quantity || quantity,
+      requestedPrice: latestPrice,
+      reason: 'Chiusura manuale richiesta dallo Scanner o dal Portafoglio.',
+      side: getCloseOrderSide(position.type),
+      source: 'manual',
+      ticker: position.ticker,
+    })
     const closedTrade = {
       ticker: position.ticker,
       type: position.type,
+      positionId: position.id,
+      closeOrderId: closeOrder.id,
       openedAt: position.openedAt || null,
       entryPrice: position.entryPrice,
       invested,
@@ -1029,6 +1413,7 @@ export function TradingProvider({ children }) {
         capital: roundPrice(currentMarketState.capital + capitalReturn),
         vault: roundPrice(currentMarketState.vault + vaultGain),
         positions: remainingPositions,
+        orders: appendOrders(currentMarketState, closeOrder),
         history: [closedTrade, ...currentMarketState.history],
         engineStatus:
           remainingPositions.length > 0
@@ -1037,10 +1422,10 @@ export function TradingProvider({ children }) {
         ...appendLogs(
           currentMarketState,
           createActivity({
-            type: 'trade',
+            type: 'order',
             status: result === 'WIN' ? 'attention' : 'error',
-            title: 'Chiusura manuale eseguita',
-            detail: `${position.ticker}: P/L realizzato ${roundedPnl.toFixed(
+            title: 'Ordine di chiusura simulato eseguito',
+            detail: `${position.ticker}: ordine ${closeOrder.id} eseguito. P/L realizzato ${roundedPnl.toFixed(
               2,
             )}€. Avvio ricerca di un nuovo asset appetibile in ${currentMarketState.marketLabel}.`,
           }),
@@ -1144,11 +1529,11 @@ export function TradingProvider({ children }) {
         syncedCurrent.markets?.[marketId],
       )
       const evaluatedCount = currentMarketState.positions.length
-      const { capital, vault, activePositions, closedTrades } = evaluatePositions(
-        currentMarketState,
-        positionsWithPrices,
-        { incrementDays: false },
-      )
+      const { capital, vault, activePositions, closedTrades, closeOrders } =
+        evaluatePositions(currentMarketState, positionsWithPrices, {
+          incrementDays: false,
+          source: 'live-monitor',
+        })
 
       return updateMarketState(syncedCurrent, marketId, {
         ...currentMarketState,
@@ -1156,6 +1541,7 @@ export function TradingProvider({ children }) {
         capital,
         vault,
         positions: activePositions,
+        orders: appendOrders(currentMarketState, closeOrders),
         history: [...closedTrades, ...currentMarketState.history],
         lastLiveCheckAt: new Date().toISOString(),
         nextLiveCheckAt:
@@ -1275,11 +1661,11 @@ export function TradingProvider({ children }) {
         syncedCurrent.markets?.[marketId],
       )
       const evaluatedCount = currentMarketState.positions.length
-      const { capital, vault, activePositions, closedTrades } = evaluatePositions(
-        currentMarketState,
-        positionsWithPrices,
-        { incrementDays: true },
-      )
+      const { capital, vault, activePositions, closedTrades, closeOrders } =
+        evaluatePositions(currentMarketState, positionsWithPrices, {
+          incrementDays: true,
+          source: 'eod',
+        })
 
       return activateMarketState(syncedCurrent, marketId, {
         ...currentMarketState,
@@ -1287,6 +1673,7 @@ export function TradingProvider({ children }) {
         capital,
         vault,
         positions: activePositions,
+        orders: appendOrders(currentMarketState, closeOrders),
         history: [...closedTrades, ...currentMarketState.history],
         lastLiveCheckAt: new Date().toISOString(),
         nextLiveCheckAt:
@@ -1402,6 +1789,7 @@ export function TradingProvider({ children }) {
       runLiveCheck,
       runEOD,
       setAutomationEnabled,
+      setKillSwitchEnabled,
       setLiveMonitorEnabled,
       setActiveMarket,
       strategies: Object.values(TRADING_STRATEGIES),
@@ -1425,6 +1813,7 @@ export function TradingProvider({ children }) {
       runLiveCheck,
       runEOD,
       setAutomationEnabled,
+      setKillSwitchEnabled,
       setLiveMonitorEnabled,
       setActiveMarket,
       state,

@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   BarChart3,
   BookOpen,
+  ClipboardList,
   History,
   Info,
   LayoutDashboard,
@@ -28,6 +29,7 @@ const marketNavigation = [
       { label: 'Dashboard Azioni', to: '/azioni/dashboard', icon: LayoutDashboard },
       { label: 'Scanner Azioni', to: '/azioni/scanner', icon: Radar },
       { label: 'Portafoglio Azioni', to: '/azioni/portafoglio', icon: Wallet },
+      { label: 'Ordini Azioni', to: '/azioni/ordini', icon: ClipboardList },
       { label: 'Diario Azioni', to: '/azioni/diario', icon: BookOpen },
       { label: 'Storico Azioni', to: '/azioni/storico', icon: History },
     ],
@@ -40,6 +42,7 @@ const marketNavigation = [
       { label: 'Dashboard Crypto', to: '/crypto/dashboard', icon: LayoutDashboard },
       { label: 'Scanner Crypto', to: '/crypto/scanner', icon: Radar },
       { label: 'Portafoglio Crypto', to: '/crypto/portafoglio', icon: Wallet },
+      { label: 'Ordini Crypto', to: '/crypto/ordini', icon: ClipboardList },
       { label: 'Diario Crypto', to: '/crypto/diario', icon: BookOpen },
       { label: 'Storico Crypto', to: '/crypto/storico', icon: History },
     ],

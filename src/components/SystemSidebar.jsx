@@ -115,12 +115,21 @@ function activityStyles(status) {
 
 function getOperatingState({
   automationEnabled,
+  killSwitchEnabled,
   marketCopy,
   positions,
   lastScanAt,
   lastSignalCount,
   engineStatus,
 }) {
+  if (killSwitchEnabled) {
+    return {
+      title: 'Nuove aperture bloccate',
+      detail: 'Il kill switch è attivo. Continuo a monitorare eventuali posizioni aperte, ma non aprirò nuovi ordini.',
+      variant: 'negative',
+    }
+  }
+
   if (engineStatus?.toLowerCase().includes('errore')) {
     return {
       title: engineStatus,
@@ -243,9 +252,10 @@ export function SystemSidebar() {
     markets,
     remoteStatus,
     runLiveCheck,
-    setAutomationEnabled,
-    setLiveMonitorEnabled,
-  } = useTrading()
+  setAutomationEnabled,
+  setKillSwitchEnabled,
+  setLiveMonitorEnabled,
+} = useTrading()
   const location = useLocation()
   const [, setNow] = useState(Date.now())
   const routeMarket = location.pathname.startsWith('/crypto')
@@ -270,6 +280,8 @@ export function SystemSidebar() {
     typeof routeMarketState.liveMonitorEnabled === 'boolean'
       ? routeMarketState.liveMonitorEnabled
       : true
+  const executionMode = routeMarketState.executionMode || 'simulation'
+  const killSwitchEnabled = Boolean(routeMarketState.killSwitchEnabled)
   const capital = Number.isFinite(Number(routeMarketState.capital))
     ? Number(routeMarketState.capital)
     : routeStrategy.initialCapital
@@ -297,6 +309,7 @@ export function SystemSidebar() {
 
   const operatingState = getOperatingState({
     automationEnabled,
+    killSwitchEnabled,
     marketCopy,
     positions,
     lastScanAt,
@@ -392,6 +405,37 @@ export function SystemSidebar() {
               {lastSignalCount}/{lastScanCount}
             </p>
           </div>
+        </div>
+
+        <div
+          className={
+            killSwitchEnabled
+              ? 'mt-4 rounded-lg border border-[#ef8f8f]/40 bg-[#ef8f8f]/10 p-3'
+              : 'mt-4 rounded-lg border border-slate-800 bg-slate-950 p-3'
+          }
+        >
+          <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
+            Esecuzione
+          </p>
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <p className="text-sm font-semibold text-[var(--market-accent)]">
+              {executionMode === 'simulation' ? 'Simulazione' : executionMode}
+            </p>
+            <Badge variant={killSwitchEnabled ? 'negative' : 'positive'}>
+              {killSwitchEnabled ? 'Blocco ON' : 'Broker simulato'}
+            </Badge>
+          </div>
+          <p className="mt-2 text-xs leading-5 text-slate-400">
+            Gli ordini passano da simulationBroker e non muovono denaro reale.
+          </p>
+          <Button
+            className="mt-3 w-full justify-between"
+            variant={killSwitchEnabled ? 'default' : 'ghost'}
+            onClick={() => setKillSwitchEnabled(!killSwitchEnabled, routeMarket)}
+          >
+            <span>{killSwitchEnabled ? 'Sblocca aperture' : 'Attiva kill switch'}</span>
+            <span>{killSwitchEnabled ? 'OFF' : 'ON'}</span>
+          </Button>
         </div>
 
         <Button

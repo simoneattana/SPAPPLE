@@ -19,8 +19,9 @@ import { getTradingStrategy } from '../strategies'
 function getFilterOptions(activeMarket) {
   return [
     { value: 'all', label: 'Tutte' },
+    { value: 'order', label: 'Ordini broker-ready' },
     { value: 'scan', label: 'Scansioni' },
-    { value: 'trade', label: 'Ordini' },
+    { value: 'trade', label: 'Trade legacy' },
     { value: 'monitor', label: 'Monitor live' },
     { value: 'backend-monitor', label: 'Monitor backend' },
     {
@@ -28,6 +29,7 @@ function getFilterOptions(activeMarket) {
       label: activeMarket === 'crypto' ? 'Controllo mercato' : 'Motore EOD',
     },
     { value: 'automation', label: 'Automazioni' },
+    { value: 'risk', label: 'Rischio' },
     { value: 'closed-trade', label: 'Trade chiusi' },
     { value: 'error', label: 'Errori' },
   ]
@@ -67,6 +69,8 @@ function eventLabel(type, activeMarket = 'equities') {
     'closed-trade': 'Trade chiuso',
     eod: activeMarket === 'crypto' ? 'Controllo mercato' : 'Motore EOD',
     monitor: 'Monitor live',
+    order: 'Ordine broker-ready',
+    risk: 'Controllo rischio',
     scan: 'Scansione',
     system: 'Sistema',
     trade: 'Ordine',
@@ -86,6 +90,8 @@ function eventIcon(type, status) {
     'closed-trade': Repeat2,
     eod: Clock3,
     monitor: Radio,
+    order: CheckCircle2,
+    risk: AlertTriangle,
     scan: Radio,
     trade: CheckCircle2,
   }
@@ -151,6 +157,24 @@ function buildClosedTradeRecord(trade) {
   }
 }
 
+function buildOrderRecord(order) {
+  return {
+    id: `order-record-${order.id}`,
+    type: 'order',
+    status: order.status === 'RIFIUTATO' ? 'error' : 'done',
+    title:
+      order.status === 'RIFIUTATO'
+        ? 'Ordine simulato rifiutato'
+        : order.action === 'CLOSE'
+          ? 'Ordine di chiusura simulato'
+          : 'Ordine di apertura simulato',
+    detail: `${order.ticker} - ${order.side || 'N/D'} - ${
+      order.status || 'N/D'
+    }. ${order.reason || ''}`,
+    createdAt: order.createdAt,
+  }
+}
+
 function groupByMonth(records) {
   return records.reduce((groups, record) => {
     const key = monthKey(record.createdAt)
@@ -208,6 +232,9 @@ export default function History({ marketId }) {
   const history = Array.isArray(routeMarketState.history)
     ? routeMarketState.history
     : EMPTY_ARRAY
+  const orders = Array.isArray(routeMarketState.orders)
+    ? routeMarketState.orders
+    : EMPTY_ARRAY
   const marketLabel = routeMarketState.marketLabel || strategy.label
   const [activeFilter, setActiveFilter] = useState('all')
   const marketCopy = getMarketCopy(effectiveMarket)
@@ -220,13 +247,14 @@ export default function History({ marketId }) {
       createdAt: event.createdAt || new Date().toISOString(),
     }))
     const closedTradeRecords = history.map(buildClosedTradeRecord)
+    const orderRecords = orders.map(buildOrderRecord)
 
-    return [...eventRecords, ...closedTradeRecords].sort(
+    return [...eventRecords, ...orderRecords, ...closedTradeRecords].sort(
       (first, second) =>
         normalizeDate(second.createdAt).getTime() -
         normalizeDate(first.createdAt).getTime(),
     )
-  }, [events, history])
+  }, [events, history, orders])
 
   const filteredRecords = useMemo(
     () => records.filter((record) => matchesFilter(record, activeFilter)),

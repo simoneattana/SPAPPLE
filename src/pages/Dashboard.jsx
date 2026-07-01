@@ -2,6 +2,7 @@ import {
   Activity,
   BadgeEuro,
   ChartNoAxesCombined,
+  CircleSlash,
   PiggyBank,
   Radar,
   ShieldCheck,
@@ -113,6 +114,12 @@ export default function Dashboard({ marketId }) {
     ? routeMarketState.history
     : []
   const engineStatus = routeMarketState.engineStatus || 'In attesa'
+  const executionMode = routeMarketState.executionMode || 'simulation'
+  const killSwitchEnabled = Boolean(routeMarketState.killSwitchEnabled)
+  const orders = Array.isArray(routeMarketState.orders)
+    ? routeMarketState.orders
+    : []
+  const executedOrders = orders.filter((order) => order.status === 'ESEGUITO')
   const lastScanAt = routeMarketState.lastScanAt || null
   const lastScanCount = Number(routeMarketState.lastScanCount || 0)
   const lastSignalCount = Number(routeMarketState.lastSignalCount || 0)
@@ -190,6 +197,64 @@ export default function Dashboard({ marketId }) {
               <Radar className="h-4 w-4" />
             )}
             {automationEnabled ? 'Pilota automatico ON' : 'Pilota automatico OFF'}
+          </div>
+        </div>
+        <div className="mt-5 grid gap-3 md:grid-cols-3">
+          <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+            <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
+              Modalità operativa
+            </p>
+            <p className="mt-2 text-sm font-semibold text-[var(--market-accent)]">
+              {executionMode === 'simulation'
+                ? 'Simulazione'
+                : executionMode}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-slate-500">
+              Nessun ordine reale viene inviato a broker o exchange.
+            </p>
+          </div>
+          <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+            <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
+              Ordini simulati
+            </p>
+            <p className="mt-2 text-sm font-semibold text-white">
+              {executedOrders.length} eseguiti / {orders.length} totali
+            </p>
+            <p className="mt-1 text-xs leading-5 text-slate-500">
+              Le posizioni passano dal registro ordini broker-ready.
+            </p>
+          </div>
+          <div
+            className={
+              killSwitchEnabled
+                ? 'rounded-lg border border-[#ef8f8f]/40 bg-[#ef8f8f]/10 p-3'
+                : 'rounded-lg border border-slate-800 bg-slate-950 p-3'
+            }
+          >
+            <div className="flex items-center gap-2">
+              <CircleSlash
+                className={
+                  killSwitchEnabled
+                    ? 'h-4 w-4 text-[#ef8f8f]'
+                    : 'h-4 w-4 text-slate-500'
+                }
+              />
+              <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
+                Kill switch
+              </p>
+            </div>
+            <p
+              className={
+                killSwitchEnabled
+                  ? 'mt-2 text-sm font-semibold text-[#ef8f8f]'
+                  : 'mt-2 text-sm font-semibold text-white'
+              }
+            >
+              {killSwitchEnabled ? 'Nuove aperture bloccate' : 'Non attivo'}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-slate-500">
+              Le posizioni aperte restano comunque monitorate.
+            </p>
           </div>
         </div>
       </header>

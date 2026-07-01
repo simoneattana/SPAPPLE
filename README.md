@@ -19,6 +19,23 @@ Accesso applicazione:
 Lo stato operativo di Spapple viene salvato tramite endpoint serverless
 `/api/state`. Il frontend non riceve mai la chiave privata Supabase.
 
+## Modalità broker-ready
+
+Spapple lavora ancora con capitale finto, ma il flusso operativo è stato
+strutturato come un sistema collegabile in futuro a broker o exchange reali.
+
+- Modalità attuale: `simulation`
+- Broker attuale: `simulationBroker`
+- Nessun ordine reale viene inviato a sistemi terzi
+- Ogni apertura e chiusura crea un record ordine persistente
+- Gli ordini possono essere `CREATO`, `INVIATO`, `ESEGUITO` o `RIFIUTATO`
+- Il kill switch blocca nuove aperture ma lascia monitorate le posizioni aperte
+- Il registro ordini e separato per mercato, come capitale, posizioni e storico
+
+Le integrazioni reali future dovranno implementare lo stesso contratto
+operativo: creazione ordine, stato ordine, prezzo eseguito, quantità,
+commissioni, slippage e ID ordine broker.
+
 Variabili richieste in locale e su Vercel:
 
 ```bash
