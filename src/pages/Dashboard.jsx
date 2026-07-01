@@ -20,6 +20,11 @@ import {
 } from '../components/ui/Table'
 import { useTrading } from '../context/useTrading'
 import { getMarketCopy } from '../services/marketCopy'
+import {
+  calculateRealizedTotals,
+  filterTradesByCurrentMonth,
+  filterTradesByToday,
+} from '../services/profitStats'
 import { getTradingStrategy } from '../strategies'
 
 const currencyFormatter = new Intl.NumberFormat('it-IT', {
@@ -51,14 +56,6 @@ function formatDate(value) {
   return value ? dateTimeFormatter.format(new Date(value)) : 'N/D'
 }
 
-function isToday(value) {
-  if (!value) {
-    return false
-  }
-
-  return new Date(value).toDateString() === new Date().toDateString()
-}
-
 function exitReasonLabel(reason) {
   const labels = {
     MANUALE: 'Manuale',
@@ -85,15 +82,7 @@ function calculateStrategyStats(history) {
   const wins = closedTrades.filter((trade) => trade.result === 'WIN')
   const losses = closedTrades.filter((trade) => trade.result === 'LOSS')
   const total = closedTrades.length
-  const grossWins = wins.reduce(
-    (sum, trade) => sum + Math.max(Number(trade.pnlEur || 0), 0),
-    0,
-  )
-  const grossLosses = losses.reduce(
-    (sum, trade) => sum + Math.abs(Math.min(Number(trade.pnlEur || 0), 0)),
-    0,
-  )
-  const netPnl = grossWins - grossLosses
+  const { grossLosses, grossWins, netPnl } = calculateRealizedTotals(closedTrades)
   const winRate = total > 0 ? wins.length / total : 0
   const averageWin = wins.length > 0 ? grossWins / wins.length : 0
   const averageLoss = losses.length > 0 ? grossLosses / losses.length : 0
@@ -143,6 +132,46 @@ function MiniMetric({ label, value, info, accent = 'text-white' }) {
   )
 }
 
+function ProfitWindowCard({ info, title, totals }) {
+  const netAccent =
+    totals.netPnl >= 0 ? 'text-[var(--market-accent)]' : 'text-[#ef8f8f]'
+
+  return (
+    <Card>
+      <CardHeader className="flex-row items-center justify-between gap-3 p-4 pb-2">
+        <div className="flex items-center gap-2">
+          <CardTitle>{title}</CardTitle>
+          <InfoTip>{info}</InfoTip>
+        </div>
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-800 bg-slate-950">
+          <PiggyBank className="h-4 w-4 text-[var(--market-accent)]" />
+        </div>
+      </CardHeader>
+      <CardContent className="grid gap-3 p-4 pt-2">
+        <div>
+          <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">
+            Salvadanaio utili
+          </p>
+          <p className="mt-1 text-xl font-semibold text-[var(--market-accent)]">
+            {currencyFormatter.format(totals.grossWins)}
+          </p>
+        </div>
+        <div className="border-t border-slate-800 pt-3">
+          <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">
+            P/L netto
+          </p>
+          <p className={`mt-1 text-xl font-semibold ${netAccent}`}>
+            {currencyFormatter.format(totals.netPnl)}
+          </p>
+        </div>
+        <p className="text-xs text-slate-500">
+          {totals.closed} chiusure · {totals.wins} utili · {totals.losses} perdite
+        </p>
+      </CardContent>
+    </Card>
+  )
+}
+
 function StatusChip({ children, variant = 'default', icon: Icon }) {
   const className =
     variant === 'negative'
@@ -187,7 +216,8 @@ export default function Dashboard({ marketId }) {
   const killSwitchEnabled = Boolean(routeMarketState.killSwitchEnabled)
   const executedOrders = orders.filter((order) => order.status === 'ESEGUITO')
   const recentClosedTrades = history.slice(0, 5)
-  const todayClosedTrades = history.filter((trade) => isToday(trade.exitDate))
+  const currentMonthTrades = filterTradesByCurrentMonth(history)
+  const todayClosedTrades = filterTradesByToday(history)
   const latestClosedTrade = recentClosedTrades[0] || null
   const ordersById = new Map(orders.map((order) => [order.id, order]))
   const lastScanAt = routeMarketState.lastScanAt || null
@@ -201,6 +231,8 @@ export default function Dashboard({ marketId }) {
   )
   const lastScanText = lastScanAt ? formatDate(lastScanAt) : 'Mai'
   const strategyStats = calculateStrategyStats(history)
+  const currentMonthStats = calculateRealizedTotals(currentMonthTrades)
+  const todayStats = calculateRealizedTotals(todayClosedTrades)
   const expectancyColor =
     strategyStats.expectancy >= 0 ? 'text-[var(--market-accent)]' : 'text-[#ef8f8f]'
   const kpis = [
@@ -210,25 +242,6 @@ export default function Dashboard({ marketId }) {
       info: 'Liquidità ancora disponibile per aprire nuove posizioni nel mercato selezionato.',
       icon: BadgeEuro,
       accent: 'text-[var(--market-accent)]',
-    },
-    {
-      title: 'Salvadanaio utili',
-      value: currencyFormatter.format(strategyStats.grossWins),
-      info: 'Calcolato direttamente dallo storico: somma dei soli profitti realizzati. Le perdite non lo riducono, ma riducono il P/L netto e il capitale operativo.',
-      icon: PiggyBank,
-      accent: 'text-[var(--market-accent)]',
-    },
-    {
-      title: 'P/L netto',
-      value: currencyFormatter.format(strategyStats.netPnl),
-      info: `Risultato netto delle chiusure: utili ${currencyFormatter.format(
-        strategyStats.grossWins,
-      )} meno perdite ${currencyFormatter.format(strategyStats.grossLosses)}.`,
-      icon: ChartNoAxesCombined,
-      accent:
-        strategyStats.netPnl >= 0
-          ? 'text-[var(--market-accent)]'
-          : 'text-[#ef8f8f]',
     },
     {
       title: 'Slot',
@@ -336,6 +349,16 @@ export default function Dashboard({ marketId }) {
             </Card>
           )
         })}
+        <ProfitWindowCard
+          title="Mese corrente"
+          totals={currentMonthStats}
+          info="Dati calcolati dalle chiusure registrate dal primo giorno del mese corrente a oggi."
+        />
+        <ProfitWindowCard
+          title="Oggi"
+          totals={todayStats}
+          info="Dati calcolati solo dalle chiusure registrate nella giornata attuale."
+        />
       </section>
 
       <section className="grid gap-5 2xl:grid-cols-[minmax(0,1fr)_24rem]">

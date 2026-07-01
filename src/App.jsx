@@ -10,6 +10,7 @@ import Explanation from './pages/Explanation'
 import Login from './pages/Login'
 import Orders from './pages/Orders'
 import Portfolio from './pages/Portfolio'
+import Profits from './pages/Profits'
 import Scanner from './pages/Scanner'
 import Settings from './pages/Settings'
 import { useAuth } from './services/useAuth'
@@ -79,6 +80,7 @@ function AppRoutes() {
         <Route path="scanner" element={<Navigate to="/azioni/scanner" replace />} />
         <Route path="portafoglio" element={<Navigate to="/azioni/portafoglio" replace />} />
         <Route path="ordini" element={<Navigate to="/azioni/ordini" replace />} />
+        <Route path="utili" element={<Navigate to="/azioni/utili" replace />} />
         <Route path="diario" element={<Navigate to="/azioni/diario" replace />} />
         <Route path="storico" element={<Navigate to="/azioni/diario" replace />} />
         <Route
@@ -96,6 +98,10 @@ function AppRoutes() {
         <Route
           path="azioni/ordini"
           element={<MarketPage marketId="equities"><Orders /></MarketPage>}
+        />
+        <Route
+          path="azioni/utili"
+          element={<MarketPage marketId="equities"><Profits /></MarketPage>}
         />
         <Route
           path="azioni/diario"
@@ -117,6 +123,10 @@ function AppRoutes() {
         <Route
           path="crypto/ordini"
           element={<MarketPage marketId="crypto"><Orders /></MarketPage>}
+        />
+        <Route
+          path="crypto/utili"
+          element={<MarketPage marketId="crypto"><Profits /></MarketPage>}
         />
         <Route
           path="crypto/diario"
