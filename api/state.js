@@ -67,15 +67,60 @@ function mergeHistory(first = [], second = []) {
   )
 }
 
+function mergePositions(incomingPositions = [], currentPositions = [], history = []) {
+  const positionsById = new Map()
+
+  ;[...currentPositions, ...incomingPositions].forEach((position) => {
+    if (!position?.id) {
+      return
+    }
+
+    positionsById.set(position.id, position)
+  })
+
+  const closedPositionIds = new Set(
+    history
+      .map((trade) => trade?.positionId)
+      .filter(Boolean),
+  )
+  const closedTickerDates = new Set(
+    history
+      .filter((trade) => trade?.ticker && trade?.openedAt)
+      .map((trade) => `${trade.ticker}-${trade.openedAt}`),
+  )
+
+  return [...positionsById.values()].filter((position) => {
+    if (closedPositionIds.has(position.id)) {
+      return false
+    }
+
+    if (position?.ticker && position?.openedAt) {
+      return !closedTickerDates.has(`${position.ticker}-${position.openedAt}`)
+    }
+
+    return true
+  })
+}
+
 function latestTimestamp(first, second) {
   return timestamp(first) >= timestamp(second) ? first : second
 }
 
 function mergeMarketState(incomingMarket = {}, currentMarket = {}) {
+  const history = mergeHistory(incomingMarket.history, currentMarket.history)
+  const orders = mergeById(incomingMarket.orders, currentMarket.orders)
+  const positions = mergePositions(
+    incomingMarket.positions,
+    currentMarket.positions,
+    history,
+  )
+
   return {
     ...currentMarket,
     ...incomingMarket,
-    history: mergeHistory(incomingMarket.history, currentMarket.history),
+    positions,
+    history,
+    orders,
     events: mergeById(incomingMarket.events, currentMarket.events),
     activityLog: mergeById(
       incomingMarket.activityLog,

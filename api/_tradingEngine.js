@@ -122,6 +122,9 @@ function pickMarketState(state) {
 }
 
 function removeClosedPositions(positions = [], history = []) {
+  const closedIds = new Set(
+    history.map((trade) => trade?.positionId).filter(Boolean),
+  )
   const closedKeys = new Set(
     history
       .filter((trade) => trade?.ticker && trade?.openedAt)
@@ -129,6 +132,10 @@ function removeClosedPositions(positions = [], history = []) {
   )
 
   return positions.filter((position) => {
+    if (position?.id && closedIds.has(position.id)) {
+      return false
+    }
+
     if (!position?.ticker || !position?.openedAt) {
       return true
     }

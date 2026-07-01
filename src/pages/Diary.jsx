@@ -35,6 +35,12 @@ function resultTextColor(result) {
   return result === 'WIN' ? 'text-[var(--market-accent)]' : 'text-[#ef8f8f]'
 }
 
+function formatCurrency(value) {
+  return Number.isFinite(Number(value))
+    ? currencyFormatter.format(Number(value))
+    : 'N/D'
+}
+
 export default function Diary({ marketId }) {
   const { activeMarket, markets } = useTrading()
   const effectiveMarket = marketId || activeMarket
@@ -120,7 +126,7 @@ export default function Diary({ marketId }) {
                     {trade.type === 'LONG' ? 'Long' : 'Short'}
                   </TableCell>
                   <TableCell className={resultTextColor(trade.result)}>
-                    {currencyFormatter.format(trade.pnlEur)}
+                    {formatCurrency(trade.pnlEur)}
                   </TableCell>
                   <TableCell>
                     <ResultBadge result={trade.result} />

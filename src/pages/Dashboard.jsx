@@ -1,6 +1,7 @@
 import {
   Activity,
   BadgeEuro,
+  BookOpen,
   ChartNoAxesCombined,
   CircleSlash,
   PiggyBank,
@@ -10,6 +11,14 @@ import {
 } from 'lucide-react'
 import { Badge } from '../components/ui/Badge'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '../components/ui/Table'
 import { useTrading } from '../context/useTrading'
 import { getMarketCopy } from '../services/marketCopy'
 import { getTradingStrategy } from '../strategies'
@@ -27,6 +36,31 @@ const percentFormatter = new Intl.NumberFormat('it-IT', {
 
 const MINIMUM_SAMPLE = 30
 const RELIABLE_SAMPLE = 100
+
+const dateTimeFormatter = new Intl.DateTimeFormat('it-IT', {
+  dateStyle: 'short',
+  timeStyle: 'short',
+})
+
+function formatCurrency(value) {
+  return Number.isFinite(Number(value))
+    ? currencyFormatter.format(Number(value))
+    : 'N/D'
+}
+
+function formatDate(value) {
+  return value ? dateTimeFormatter.format(new Date(value)) : 'N/D'
+}
+
+function exitReasonLabel(reason) {
+  const labels = {
+    MANUALE: 'Manuale',
+    STOP_LOSS: 'Stop loss',
+    TAKE_PROFIT: 'Take profit',
+  }
+
+  return labels[reason] || reason || 'N/D'
+}
 
 function calculateStrategyStats(history) {
   const closedTrades = Array.isArray(history) ? history : []
@@ -120,6 +154,8 @@ export default function Dashboard({ marketId }) {
     ? routeMarketState.orders
     : []
   const executedOrders = orders.filter((order) => order.status === 'ESEGUITO')
+  const recentClosedTrades = history.slice(0, 5)
+  const ordersById = new Map(orders.map((order) => [order.id, order]))
   const lastScanAt = routeMarketState.lastScanAt || null
   const lastScanCount = Number(routeMarketState.lastScanCount || 0)
   const lastSignalCount = Number(routeMarketState.lastSignalCount || 0)
@@ -281,6 +317,94 @@ export default function Dashboard({ marketId }) {
           )
         })}
       </section>
+
+      <Card className="overflow-hidden">
+        <CardHeader className="items-center justify-between gap-4 border-b border-slate-800">
+          <div>
+            <CardTitle>Ultime chiusure</CardTitle>
+            <p className="mt-2 text-sm text-slate-500">
+              Vendite e ricoperture chiuse automaticamente o manualmente nel
+              mercato {marketLabel}.
+            </p>
+          </div>
+          <Badge>{history.length} chiuse</Badge>
+        </CardHeader>
+        <CardContent className="p-0">
+          {recentClosedTrades.length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>Data</TableHead>
+                  <TableHead>Ticker</TableHead>
+                  <TableHead>Direzione</TableHead>
+                  <TableHead>Motivo</TableHead>
+                  <TableHead>P/L</TableHead>
+                  <TableHead>Esito</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {recentClosedTrades.map((trade, index) => {
+                  const closeOrder = ordersById.get(trade.closeOrderId)
+                  const isWin = trade.result === 'WIN'
+
+                  return (
+                    <TableRow key={`${trade.ticker}-${trade.exitDate}-${index}`}>
+                      <TableCell>{formatDate(trade.exitDate)}</TableCell>
+                      <TableCell className="font-semibold text-white">
+                        {trade.ticker}
+                      </TableCell>
+                      <TableCell>
+                        {trade.type === 'LONG' ? 'Long' : 'Short'}
+                      </TableCell>
+                      <TableCell>
+                        <div>
+                          <p>{exitReasonLabel(trade.exitReason)}</p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {closeOrder?.source === 'backend-monitor'
+                              ? 'Chiusura backend'
+                              : closeOrder?.source === 'live-monitor'
+                                ? 'Monitor live'
+                                : closeOrder?.source === 'manual'
+                                  ? 'Manuale'
+                                  : 'Motore automatico'}
+                          </p>
+                        </div>
+                      </TableCell>
+                      <TableCell
+                        className={
+                          isWin
+                            ? 'font-semibold text-[var(--market-accent)]'
+                            : 'font-semibold text-[#ef8f8f]'
+                        }
+                      >
+                        {formatCurrency(trade.pnlEur)}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={isWin ? 'positive' : 'negative'}>
+                          {isWin ? 'Utile' : 'Perdita'}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          ) : (
+            <div className="flex min-h-48 items-center justify-center p-6 text-center">
+              <div>
+                <BookOpen className="mx-auto h-6 w-6 text-slate-500" />
+                <p className="mt-3 font-medium text-white">
+                  Nessuna chiusura registrata
+                </p>
+                <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
+                  Quando Spapple chiude una posizione, comparirà qui senza dover
+                  cercare nel diario.
+                </p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <section className="rounded-lg border border-slate-800 bg-[#090b10] p-5 shadow-xl shadow-black/20">
         <div className="flex flex-col gap-4 border-b border-slate-800 pb-5 sm:flex-row sm:items-start sm:justify-between">

@@ -24,6 +24,7 @@ const MAX_POSITIONS = 5
 const STORAGE_KEY = 'spapple_state'
 const STORAGE_VERSION = 4
 const LIVE_MONITOR_INTERVAL_MS = 60_000
+const REMOTE_REFRESH_INTERVAL_MS = 30_000
 const EXECUTION_MODE = 'simulation'
 const DEFAULT_RISK_LIMITS = {
   maxDailyOrders: 20,
@@ -138,6 +139,9 @@ function pickMarketState(state) {
 }
 
 function removeClosedPositions(positions = [], history = []) {
+  const closedIds = new Set(
+    history.map((trade) => trade?.positionId).filter(Boolean),
+  )
   const closedKeys = new Set(
     history
       .filter((trade) => trade?.ticker && trade?.openedAt)
@@ -145,6 +149,10 @@ function removeClosedPositions(positions = [], history = []) {
   )
 
   return positions.filter((position) => {
+    if (position?.id && closedIds.has(position.id)) {
+      return false
+    }
+
     if (!position?.ticker || !position?.openedAt) {
       return true
     }
@@ -733,6 +741,7 @@ export function TradingProvider({ children }) {
   const [remoteStatus, setRemoteStatus] = useState('disconnesso')
   const stateRef = useRef(state)
   const remoteReadyRef = useRef(false)
+  const remoteUpdatedAtRef = useRef(null)
   const remoteSaveTimerRef = useRef(null)
   const liveCheckRunningRef = useRef(false)
 
@@ -765,6 +774,7 @@ export function TradingProvider({ children }) {
 
         if (remoteState.payload?.version === STORAGE_VERSION) {
           const hydratedState = normalizeStoredState(remoteState.payload)
+          remoteUpdatedAtRef.current = remoteState.updatedAt || null
           stateRef.current = hydratedState
           setState(hydratedState)
           localStorage.setItem(STORAGE_KEY, JSON.stringify(hydratedState))
@@ -808,6 +818,44 @@ export function TradingProvider({ children }) {
       clearTimeout(remoteSaveTimerRef.current)
     }
   }, [isAuthenticated, state])
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return undefined
+    }
+
+    const intervalId = window.setInterval(async () => {
+      if (!remoteReadyRef.current) {
+        return
+      }
+
+      try {
+        const remoteState = await loadRemoteTradingState()
+
+        if (
+          !remoteState.payload ||
+          remoteState.payload.version !== STORAGE_VERSION ||
+          !remoteState.updatedAt ||
+          remoteState.updatedAt === remoteUpdatedAtRef.current
+        ) {
+          return
+        }
+
+        const refreshedState = normalizeStoredState(remoteState.payload)
+        remoteUpdatedAtRef.current = remoteState.updatedAt
+        stateRef.current = refreshedState
+        setState(refreshedState)
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(refreshedState))
+        setRemoteStatus('sincronizzato')
+      } catch (error) {
+        setRemoteStatus(`errore: ${error.message}`)
+      }
+    }, REMOTE_REFRESH_INTERVAL_MS)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [isAuthenticated])
 
   const updateTradingState = useCallback((updater) => {
     const nextState = syncActiveMarketState(updater(stateRef.current))
