@@ -138,6 +138,14 @@ function latestTimestamp(first, second) {
   return timestamp(first) >= timestamp(second) ? first : second
 }
 
+function createResetGuardUntil() {
+  return new Date(Date.now() + 5 * 60 * 1000).toISOString()
+}
+
+function isResetGuardActive(payload = {}) {
+  return timestamp(payload.resetGuardUntil) > Date.now()
+}
+
 function mergeMarketState(incomingMarket = {}, currentMarket = {}) {
   const history = mergeHistory(incomingMarket.history, currentMarket.history)
   const orders = mergeById(incomingMarket.orders, currentMarket.orders)
@@ -205,6 +213,15 @@ function mergeMarkets(incoming, currentPayload) {
 
 async function mergeIncomingState(supabase, incomingPayload) {
   const { payload: currentPayload } = await readTradingState(supabase)
+
+  if (isResetGuardActive(currentPayload)) {
+    const error = new Error(
+      'Reset appena eseguito: sincronizzazione sospesa per riallineare il browser.',
+    )
+    error.statusCode = 409
+    throw error
+  }
+
   const incoming = normalizeTradingState(incomingPayload)
   const markets = mergeMarkets(incoming, currentPayload)
   const activeMarket = incoming.activeMarket || DEFAULT_MARKET_ID
@@ -291,12 +308,15 @@ export default async function handler(request, response) {
     try {
       const nextPayload =
         body.reset === true
-          ? normalizeTradingState(body.payload)
+          ? normalizeTradingState({
+              ...body.payload,
+              resetGuardUntil: createResetGuardUntil(),
+            })
           : await mergeIncomingState(supabase, body.payload)
 
       await writeTradingState(supabase, nextPayload)
     } catch (error) {
-      sendJson(response, 500, { error: error.message })
+      sendJson(response, error.statusCode || 500, { error: error.message })
       return
     }
 
