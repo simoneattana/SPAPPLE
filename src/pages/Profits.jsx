@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   BadgeEuro,
   CalendarDays,
@@ -17,6 +17,7 @@ import {
   calculateRealizedTotals,
   filterTradesByMonthKey,
   groupTradesByDay,
+  normalizeTradeDate,
 } from '../services/profitStats'
 import { getTradingStrategy } from '../strategies'
 
@@ -39,14 +40,30 @@ function getCurrentMonthKey() {
   return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
 }
 
-function getRecentMonthKeys(count = 3) {
-  const today = new Date()
+function getRecentMonthKeysFromDate(anchorDate, count = 3) {
+  const anchor = anchorDate || new Date()
 
   return Array.from({ length: count }, (_, index) => {
-    const date = new Date(today.getFullYear(), today.getMonth() - index, 1)
+    const date = new Date(anchor.getFullYear(), anchor.getMonth() - index, 1)
 
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
   })
+}
+
+function getLatestTradeDate(history = []) {
+  return history.reduce((latestDate, trade) => {
+    const tradeDate = normalizeTradeDate(trade.exitDate)
+
+    if (!tradeDate) {
+      return latestDate
+    }
+
+    if (!latestDate || tradeDate.getTime() > latestDate.getTime()) {
+      return tradeDate
+    }
+
+    return latestDate
+  }, null)
 }
 
 function parseMonthKey(key) {
@@ -124,9 +141,19 @@ export default function Profits({ marketId }) {
     : EMPTY_ARRAY
   const marketLabel = routeMarketState.marketLabel || strategy.label
   const marketCopy = getMarketCopy(effectiveMarket)
-  const availableMonths = useMemo(() => getRecentMonthKeys(3), [])
+  const latestTradeDate = useMemo(() => getLatestTradeDate(history), [history])
+  const availableMonths = useMemo(
+    () => getRecentMonthKeysFromDate(latestTradeDate || new Date(), 3),
+    [latestTradeDate],
+  )
   const [selectedMonth, setSelectedMonth] = useState(availableMonths[0])
   const selectedMonthIndex = availableMonths.indexOf(selectedMonth)
+
+  useEffect(() => {
+    if (!availableMonths.includes(selectedMonth)) {
+      setSelectedMonth(availableMonths[0])
+    }
+  }, [availableMonths, selectedMonth])
   const selectedMonthTrades = useMemo(
     () => filterTradesByMonthKey(history, selectedMonth),
     [history, selectedMonth],
