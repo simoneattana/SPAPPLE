@@ -10,6 +10,7 @@ export const cryptoStrategy = {
   universe: CRYPTO_TICKERS,
   initialCapital: 10000,
   maxPositions: 5,
+  reentryCooldownMs: 60 * 60 * 1000,
   enabled: true,
   positionSizing: {
     mode: 'percentuale_capitale',

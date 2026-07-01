@@ -31,6 +31,7 @@ const DEFAULT_RISK_LIMITS = {
   maxDailyCapitalPct: 1,
   maxConsecutiveLosses: 3,
 }
+const DEFAULT_REENTRY_COOLDOWN_MS = 6 * 60 * 60 * 1000
 
 const initialActivity = {
   id: 'system-ready',
@@ -464,6 +465,45 @@ function getConsecutiveLosses(history = []) {
   return losses
 }
 
+function formatCooldownDuration(remainingMs) {
+  const minutes = Math.ceil(remainingMs / 60000)
+
+  if (minutes < 60) {
+    return `${minutes} min`
+  }
+
+  return `${Math.ceil(minutes / 60)} ore`
+}
+
+function getTickerCooldownReason(marketState, ticker, strategy) {
+  const cooldownMs = Number.isFinite(Number(strategy.reentryCooldownMs))
+    ? Number(strategy.reentryCooldownMs)
+    : DEFAULT_REENTRY_COOLDOWN_MS
+
+  if (!ticker || cooldownMs <= 0) {
+    return null
+  }
+
+  const latestClosedTrade = (marketState.history || []).find(
+    (trade) => trade?.ticker === ticker && trade?.exitDate,
+  )
+
+  if (!latestClosedTrade) {
+    return null
+  }
+
+  const closedAt = new Date(latestClosedTrade.exitDate).getTime()
+  const remainingMs = closedAt + cooldownMs - Date.now()
+
+  if (!Number.isFinite(closedAt) || remainingMs <= 0) {
+    return null
+  }
+
+  return `${ticker} è in pausa operativa dopo l’ultima chiusura. Nuova apertura consentita tra circa ${formatCooldownDuration(
+    remainingMs,
+  )}.`
+}
+
 function getOpeningOrderBlockReason(marketState, notional, strategy) {
   const riskLimits = {
     ...DEFAULT_RISK_LIMITS,
@@ -476,6 +516,18 @@ function getOpeningOrderBlockReason(marketState, notional, strategy) {
 
   if (marketState.killSwitchEnabled) {
     return 'Kill switch attivo: nuove aperture bloccate.'
+  }
+
+  if (marketState.pendingTicker) {
+    const cooldownReason = getTickerCooldownReason(
+      marketState,
+      marketState.pendingTicker,
+      strategy,
+    )
+
+    if (cooldownReason) {
+      return cooldownReason
+    }
   }
 
   const todaysOrders = (marketState.orders || []).filter((order) =>
@@ -880,6 +932,7 @@ function evaluatePositions(
     const monitoredPosition = {
       ...updatedPosition,
       latestPrice: roundPrice(latestPrice),
+      latestPriceAt: new Date().toISOString(),
       unrealizedPnl: roundPrice(pnlEur),
     }
     const isWin = long
@@ -1327,7 +1380,7 @@ export function TradingProvider({ children }) {
     }
 
     const blockReason = getOpeningOrderBlockReason(
-      marketState,
+      { ...marketState, pendingTicker: ticker },
       positionSize,
       strategy,
     )
@@ -1459,7 +1512,7 @@ export function TradingProvider({ children }) {
 
       const positionSize = calculatePositionSize(capital, sizing)
       const blockReason = getOpeningOrderBlockReason(
-        { ...marketState, capital, positions, orders },
+        { ...marketState, capital, positions, orders, pendingTicker: row.ticker },
         positionSize,
         strategy,
       )

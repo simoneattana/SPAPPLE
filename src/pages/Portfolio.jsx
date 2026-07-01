@@ -70,6 +70,20 @@ function PnlMetric({ value }) {
   )
 }
 
+function formatDateTime(value) {
+  if (!value) {
+    return 'Non disponibile'
+  }
+
+  return new Intl.DateTimeFormat('it-IT', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value))
+}
+
 export default function Portfolio({ marketId }) {
   const {
     closePositionManually,
@@ -330,6 +344,10 @@ export default function Portfolio({ marketId }) {
                       : 'Non ancora aggiornato'
                   }
                 />
+                <Metric
+                  label="Prezzo aggiornato il"
+                  value={formatDateTime(position.latestPriceAt)}
+                />
                 <PnlMetric value={position.unrealizedPnl} />
                 <Metric
                   label="ATR Ingresso"
@@ -347,7 +365,7 @@ export default function Portfolio({ marketId }) {
                   {closingId === position.id ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : null}
-                  Chiudi ora e cerca nuovo {marketCopy.assetSingular}
+                  Chiudi a prezzo aggiornato
                 </Button>
               </CardContent>
             </Card>

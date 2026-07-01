@@ -15,6 +15,7 @@ export const equitiesStrategy = {
   universe: EUROPEAN_TICKERS,
   initialCapital: 30000,
   maxPositions: 5,
+  reentryCooldownMs: 24 * 60 * 60 * 1000,
   positionSizing: {
     mode: 'percentuale_capitale',
     percent: POSITION_SIZE_PERCENT,

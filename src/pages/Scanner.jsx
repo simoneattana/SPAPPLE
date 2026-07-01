@@ -122,14 +122,24 @@ function getRecoveredCapital(trade, fallbackSlotSize) {
 }
 
 function getPositionLivePrice(position, scanRow) {
-  const scanPrice = Number(scanRow?.currentPrice)
   const latestPrice = Number(position.latestPrice)
+  const scanPrice = Number(scanRow?.currentPrice)
 
-  if (Number.isFinite(scanPrice)) {
-    return scanPrice
+  if (Number.isFinite(latestPrice)) {
+    return latestPrice
   }
 
-  return Number.isFinite(latestPrice) ? latestPrice : null
+  return Number.isFinite(scanPrice) ? scanPrice : null
+}
+
+function getPositionPriceSource(position, scanRow) {
+  if (Number.isFinite(Number(position.latestPrice))) {
+    return position.latestPriceAt
+      ? `Da monitor · ${formatDateTime(position.latestPriceAt)}`
+      : 'Da monitor'
+  }
+
+  return scanRow ? 'Da ultima scansione' : 'In attesa monitor'
 }
 
 function calculatePositionPnl(position, scanRow) {
@@ -495,6 +505,33 @@ export default function Scanner({ marketId }) {
   const visibleLastScanAt = routeLastScanAt
   const visibleLastScanResults = routeLastScanResults
   const slotsFull = visiblePositions.length >= routeMaxPositions
+  const getCooldownRemainingMs = useCallback(
+    (ticker) => {
+      const cooldownMs = Number(effectiveStrategy.reentryCooldownMs || 0)
+
+      if (!ticker || cooldownMs <= 0) {
+        return 0
+      }
+
+      const latestClosedTrade = visibleHistory.find(
+        (trade) => trade?.ticker === ticker && trade?.exitDate,
+      )
+
+      if (!latestClosedTrade) {
+        return 0
+      }
+
+      const closedAt = new Date(latestClosedTrade.exitDate).getTime()
+      const remainingMs = closedAt + cooldownMs - Date.now()
+
+      return Number.isFinite(remainingMs) && remainingMs > 0 ? remainingMs : 0
+    },
+    [effectiveStrategy.reentryCooldownMs, visibleHistory],
+  )
+  const isTickerInCooldown = useCallback(
+    (ticker) => getCooldownRemainingMs(ticker) > 0,
+    [getCooldownRemainingMs],
+  )
 
   const filteredResults = useMemo(
     () => results.filter(scannerConfig.isActionable),
@@ -882,7 +919,7 @@ export default function Scanner({ marketId }) {
                         <div>
                           <p>{formatCurrency(livePrice)}</p>
                           <p className="mt-1 text-xs text-slate-500">
-                            {scanRow ? 'Da ultima scansione' : 'Da monitor'}
+                            {getPositionPriceSource(position, scanRow)}
                           </p>
                         </div>
                       </TableCell>
@@ -932,7 +969,7 @@ export default function Scanner({ marketId }) {
                           {closingId === position.id ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
                           ) : null}
-                          Chiudi ora
+                          Chiudi a prezzo aggiornato
                         </Button>
                       </TableCell>
                     </TableRow>
@@ -1077,7 +1114,8 @@ export default function Scanner({ marketId }) {
                       disabled={
                         routeKillSwitchEnabled ||
                         slotsFull ||
-                        isTickerAlreadyOpen(row.ticker)
+                        isTickerAlreadyOpen(row.ticker) ||
+                        isTickerInCooldown(row.ticker)
                       }
                       onClick={() => handleExecuteTrade(row)}
                     >
@@ -1085,6 +1123,8 @@ export default function Scanner({ marketId }) {
                         ? 'Bloccato'
                         : isTickerAlreadyOpen(row.ticker)
                         ? 'Già in portafoglio'
+                        : isTickerInCooldown(row.ticker)
+                        ? 'In pausa'
                         : 'Apri posizione'}
                     </Button>
                   </TableCell>
