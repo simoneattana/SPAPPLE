@@ -677,7 +677,7 @@ function getOpeningOrderBlockReason(marketState, notional, strategy) {
     (order) => order.action === 'OPEN' && order.status === 'ESEGUITO',
   )
 
-  if (todaysOrders.length >= riskLimits.maxDailyOrders) {
+  if (todaysOpeningOrders.length >= riskLimits.maxDailyOrders) {
     return `Limite giornaliero raggiunto: massimo ${riskLimits.maxDailyOrders} ordini al giorno.`
   }
 

@@ -662,16 +662,20 @@ function getOpeningOrderBlockReason(marketState, notional, strategy) {
   const todaysOrders = (marketState.orders || []).filter((order) =>
     isSameDay(order.createdAt),
   )
+  const todaysOpeningOrders = todaysOrders.filter(
+    (order) => order.action === 'OPEN' && order.status === 'ESEGUITO',
+  )
 
-  if (todaysOrders.length >= riskLimits.maxDailyOrders) {
+  if (todaysOpeningOrders.length >= riskLimits.maxDailyOrders) {
     return `Limite giornaliero raggiunto: massimo ${riskLimits.maxDailyOrders} ordini al giorno.`
   }
 
   const dailyCapitalLimit =
     Number(strategy.initialCapital || 0) * Number(riskLimits.maxDailyCapitalPct)
-  const dailyAllocated = todaysOrders
-    .filter((order) => order.action === 'OPEN' && order.status === 'ESEGUITO')
-    .reduce((sum, order) => sum + Number(order.notional || 0), 0)
+  const dailyAllocated = todaysOpeningOrders.reduce(
+    (sum, order) => sum + Number(order.notional || 0),
+    0,
+  )
 
   if (
     Number.isFinite(dailyCapitalLimit) &&
