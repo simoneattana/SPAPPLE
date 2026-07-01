@@ -59,6 +59,7 @@ function formatDate(value) {
 function exitReasonLabel(reason) {
   const labels = {
     MANUALE: 'Manuale',
+    BREAK_EVEN_STOP: 'Stop a pareggio',
     STOP_LOSS: 'Stop loss',
     TAKE_PROFIT: 'Take profit',
     TAKE_PROFIT_MAX: 'Target massimo',

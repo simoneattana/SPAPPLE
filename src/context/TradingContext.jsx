@@ -855,7 +855,7 @@ function buildTrade(
   const targetPct = isCrypto ? (atrPct < 4 ? 0.8 : 1.2) : atrPct < 1.5 ? 0.35 : 0.6
   const maxTargetPct = isCrypto ? targetPct : atrPct < 1.5 ? 0.8 : 1.2
   const trailingPct = isCrypto ? null : atrPct < 1.5 ? 0.2 : 0.3
-  const stopMultiplier = isCrypto ? 1.8 : 1.5
+  const stopMultiplier = isCrypto ? 1.8 : atrPct < 1.5 ? 1.2 : 1.5
   const long = type === 'LONG'
   const openedAt = new Date().toISOString()
 
@@ -879,6 +879,9 @@ function buildTrade(
         : price * (1 - maxTargetPct / 100),
     ),
     stopLoss: roundPrice(
+      long ? price - atr * stopMultiplier : price + atr * stopMultiplier,
+    ),
+    initialStopLoss: roundPrice(
       long ? price - atr * stopMultiplier : price + atr * stopMultiplier,
     ),
     profitLockArmed: false,
@@ -943,6 +946,55 @@ function evaluateProfitExit(position, latestPrice) {
   }
 }
 
+function getProtectedStopLoss(position, profitExit) {
+  const trailingPct = Number(position.trailingPct)
+  const hasDynamicStop = Number.isFinite(trailingPct) && trailingPct > 0
+  const currentStopLoss = Number(position.stopLoss)
+
+  if (!hasDynamicStop || !Number.isFinite(currentStopLoss)) {
+    return currentStopLoss
+  }
+
+  const profitLockArmed =
+    Boolean(position.profitLockArmed) ||
+    Boolean(profitExit?.monitoredFields?.profitLockArmed)
+
+  if (!profitLockArmed) {
+    return currentStopLoss
+  }
+
+  const entryPrice = Number(position.entryPrice)
+
+  if (!Number.isFinite(entryPrice)) {
+    return currentStopLoss
+  }
+
+  return position.type === 'LONG'
+    ? Math.max(currentStopLoss, entryPrice)
+    : Math.min(currentStopLoss, entryPrice)
+}
+
+function getCloseReasonText(exitReason, source = 'monitor') {
+  const prefix =
+    source === 'backend-monitor'
+      ? 'Chiusura automatica backend'
+      : 'Chiusura automatica'
+
+  if (exitReason === 'STOP_LOSS') {
+    return `${prefix}: stop loss raggiunto.`
+  }
+
+  if (exitReason === 'BREAK_EVEN_STOP') {
+    return `${prefix}: stop a pareggio raggiunto.`
+  }
+
+  if (exitReason === 'TRAILING_PROFIT') {
+    return `${prefix}: trailing profit attivato.`
+  }
+
+  return `${prefix}: target profit raggiunto.`
+}
+
 function getSignalType(row, strategy) {
   if (strategy.id === 'crypto') {
     return getCryptoSignalType(row)
@@ -998,14 +1050,24 @@ function evaluatePositions(
       unrealizedPnl: roundPrice(pnlEur),
     }
     const profitExit = evaluateProfitExit(position, latestPrice)
+    const effectiveStopLoss = getProtectedStopLoss(position, profitExit)
+    const lockProtected =
+      Number.isFinite(Number(effectiveStopLoss)) &&
+      roundPrice(effectiveStopLoss) === roundPrice(position.entryPrice) &&
+      Boolean(
+        position.profitLockArmed || profitExit.monitoredFields?.profitLockArmed,
+      )
     const isLoss = long
-      ? latestPrice <= position.stopLoss
-      : latestPrice >= position.stopLoss
+      ? latestPrice <= effectiveStopLoss
+      : latestPrice >= effectiveStopLoss
 
     if (!profitExit.isWin && !isLoss) {
       activePositions.push({
         ...monitoredPosition,
         ...profitExit.monitoredFields,
+        stopLoss: Number.isFinite(Number(effectiveStopLoss))
+          ? roundPrice(effectiveStopLoss)
+          : monitoredPosition.stopLoss,
       })
       return
     }
@@ -1013,7 +1075,13 @@ function evaluatePositions(
     const roundedPnl = roundPrice(pnlEur)
     const invested = investedAtRisk
     const recoveredCapital = Math.max(invested + roundedPnl, 0)
-    const exitReason = profitExit.isWin ? profitExit.exitReason : 'STOP_LOSS'
+    const isProfitableExit = profitExit.isWin && roundedPnl > 0
+    const exitReason = isProfitableExit
+      ? profitExit.exitReason
+      : lockProtected && roundedPnl >= 0
+        ? 'BREAK_EVEN_STOP'
+        : 'STOP_LOSS'
+    const result = isProfitableExit || roundedPnl >= 0 ? 'WIN' : 'LOSS'
     const closeOrder = createSimulationOrder({
       action: 'CLOSE',
       direction: position.type,
@@ -1024,18 +1092,13 @@ function evaluatePositions(
       positionId: position.id,
       quantity: position.quantity || quantity,
       requestedPrice: latestPrice,
-      reason:
-        exitReason === 'STOP_LOSS'
-          ? 'Chiusura automatica: stop loss raggiunto.'
-          : exitReason === 'TRAILING_PROFIT'
-            ? 'Chiusura automatica: trailing profit attivato.'
-            : 'Chiusura automatica: target profit raggiunto.',
+      reason: getCloseReasonText(exitReason, source),
       side: getCloseOrderSide(position.type),
       source,
       ticker: position.ticker,
     })
 
-    if (profitExit.isWin) {
+    if (result === 'WIN') {
       capital += invested
       vault += Math.max(roundedPnl, 0)
     } else {
@@ -1052,7 +1115,7 @@ function evaluatePositions(
       entryPrice: position.entryPrice,
       invested,
       pnlEur: roundedPnl,
-      result: profitExit.isWin ? 'WIN' : 'LOSS',
+      result,
       exitDate: new Date().toISOString(),
       exitPrice: roundPrice(latestPrice),
       exitReason,
