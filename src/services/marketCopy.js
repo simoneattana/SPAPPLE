@@ -53,7 +53,7 @@ const marketCopies = {
     provider: 'Kraken',
     scanMode: '24/7',
     budgetReason:
-      'Budget iniziale separato di 10.000€: non deriva dalle azioni e serve a misurare la strategia crypto senza contaminare il capitale azionario.',
+      'Budget iniziale separato di 20.000€: non deriva dalle azioni e serve a misurare la strategia crypto senza contaminare il capitale azionario.',
     scanDescription:
       'Analisi su coppie crypto/EUR liquide con dati Kraken, RSI e ATR. Il P/E non esiste sulle crypto.',
     diagnosticDescription:

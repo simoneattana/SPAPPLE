@@ -34,7 +34,7 @@ import {
 import { clearYahooAuth, fetchYahooJson, getYahooAuth } from './_yahoo.js'
 
 export const STATE_ID = 'default'
-export const STORAGE_VERSION = 4
+export const STORAGE_VERSION = 5
 export { DEFAULT_MARKET_ID }
 
 const MAX_POSITIONS = 5

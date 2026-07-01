@@ -9,7 +9,6 @@ import Diary from './pages/Diary'
 import Explanation from './pages/Explanation'
 import Login from './pages/Login'
 import Orders from './pages/Orders'
-import Portfolio from './pages/Portfolio'
 import Profits from './pages/Profits'
 import Scanner from './pages/Scanner'
 import Settings from './pages/Settings'
@@ -78,7 +77,7 @@ function AppRoutes() {
         <Route index element={<Navigate to="/azioni/dashboard" replace />} />
         <Route path="dashboard" element={<Navigate to="/azioni/dashboard" replace />} />
         <Route path="scanner" element={<Navigate to="/azioni/scanner" replace />} />
-        <Route path="portafoglio" element={<Navigate to="/azioni/portafoglio" replace />} />
+        <Route path="portafoglio" element={<Navigate to="/azioni/scanner" replace />} />
         <Route path="ordini" element={<Navigate to="/azioni/ordini" replace />} />
         <Route path="utili" element={<Navigate to="/azioni/utili" replace />} />
         <Route path="diario" element={<Navigate to="/azioni/diario" replace />} />
@@ -91,10 +90,7 @@ function AppRoutes() {
           path="azioni/scanner"
           element={<MarketPage marketId="equities"><Scanner /></MarketPage>}
         />
-        <Route
-          path="azioni/portafoglio"
-          element={<MarketPage marketId="equities"><Portfolio /></MarketPage>}
-        />
+        <Route path="azioni/portafoglio" element={<Navigate to="/azioni/scanner" replace />} />
         <Route
           path="azioni/ordini"
           element={<MarketPage marketId="equities"><Orders /></MarketPage>}
@@ -116,10 +112,7 @@ function AppRoutes() {
           path="crypto/scanner"
           element={<MarketPage marketId="crypto"><Scanner /></MarketPage>}
         />
-        <Route
-          path="crypto/portafoglio"
-          element={<MarketPage marketId="crypto"><Portfolio /></MarketPage>}
-        />
+        <Route path="crypto/portafoglio" element={<Navigate to="/crypto/scanner" replace />} />
         <Route
           path="crypto/ordini"
           element={<MarketPage marketId="crypto"><Orders /></MarketPage>}

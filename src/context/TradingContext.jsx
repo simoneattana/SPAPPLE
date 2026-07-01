@@ -22,7 +22,7 @@ import { TradingContext } from './tradingState'
 
 const MAX_POSITIONS = 5
 const STORAGE_KEY = 'spapple_state'
-const STORAGE_VERSION = 4
+const STORAGE_VERSION = 5
 const LIVE_MONITOR_INTERVAL_MS = 60_000
 const REMOTE_REFRESH_INTERVAL_MS = 30_000
 const EXECUTION_MODE = 'simulation'
@@ -38,7 +38,7 @@ const initialActivity = {
   type: 'system',
   status: 'done',
   title: 'Sistema azzerato',
-  detail: 'Nuova simulazione avviata con capitale operativo iniziale di 30.000€ e pilota automatico attivo.',
+  detail: 'Nuova simulazione avviata: Azioni 30.000€, Crypto 20.000€ e pilota automatico attivo.',
   createdAt: new Date().toISOString(),
 }
 

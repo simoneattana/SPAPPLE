@@ -279,8 +279,12 @@ export default async function handler(request, response) {
     }
 
     try {
-      const mergedPayload = await mergeIncomingState(supabase, body.payload)
-      await writeTradingState(supabase, mergedPayload)
+      const nextPayload =
+        body.reset === true
+          ? normalizeTradingState(body.payload)
+          : await mergeIncomingState(supabase, body.payload)
+
+      await writeTradingState(supabase, nextPayload)
     } catch (error) {
       sendJson(response, 500, { error: error.message })
       return

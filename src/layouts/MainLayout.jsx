@@ -11,7 +11,6 @@ import {
   Menu,
   Radar,
   Settings,
-  Wallet,
   X,
 } from 'lucide-react'
 import { Button } from '../components/ui/Button'
@@ -28,7 +27,6 @@ const marketNavigation = [
     items: [
       { label: 'Dashboard Azioni', to: '/azioni/dashboard', icon: LayoutDashboard },
       { label: 'Scanner Azioni', to: '/azioni/scanner', icon: Radar },
-      { label: 'Portafoglio Azioni', to: '/azioni/portafoglio', icon: Wallet },
       { label: 'Ordini Azioni', to: '/azioni/ordini', icon: ClipboardList },
       { label: 'Utili Azioni', to: '/azioni/utili', icon: BadgeEuro },
       { label: 'Storico Azioni', to: '/azioni/diario', icon: BookOpen },
@@ -41,7 +39,6 @@ const marketNavigation = [
     items: [
       { label: 'Dashboard Crypto', to: '/crypto/dashboard', icon: LayoutDashboard },
       { label: 'Scanner Crypto', to: '/crypto/scanner', icon: Radar },
-      { label: 'Portafoglio Crypto', to: '/crypto/portafoglio', icon: Wallet },
       { label: 'Ordini Crypto', to: '/crypto/ordini', icon: ClipboardList },
       { label: 'Utili Crypto', to: '/crypto/utili', icon: BadgeEuro },
       { label: 'Storico Crypto', to: '/crypto/diario', icon: BookOpen },
@@ -144,6 +141,8 @@ function NavigationContent({ routeMarket, onNavigate }) {
           )
         })}
       </div>
+
+      <SystemSidebar />
     </>
   )
 }
@@ -251,9 +250,8 @@ export default function MainLayout() {
               Menu
             </Button>
           </div>
-          <div className="grid min-w-0 flex-1 gap-7 xl:grid-cols-[minmax(0,1fr)_22rem]">
+          <div className="min-w-0 flex-1">
             <Outlet />
-            <SystemSidebar />
           </div>
         </div>
       </main>
