@@ -62,6 +62,17 @@ function exitReasonLabel(reason) {
   return labels[reason] || reason || 'N/D'
 }
 
+function closeSourceLabel(source) {
+  const labels = {
+    'backend-monitor': 'Chiusura backend',
+    'legacy-backfill': 'Storico ricostruito',
+    'live-monitor': 'Monitor live',
+    manual: 'Manuale',
+  }
+
+  return labels[source] || 'Motore automatico'
+}
+
 function calculateStrategyStats(history) {
   const closedTrades = Array.isArray(history) ? history : []
   const wins = closedTrades.filter((trade) => trade.result === 'WIN')
@@ -360,14 +371,13 @@ export default function Dashboard({ marketId }) {
                         <div>
                           <p>{exitReasonLabel(trade.exitReason)}</p>
                           <p className="mt-1 text-xs text-slate-500">
-                            {closeOrder?.source === 'backend-monitor'
-                              ? 'Chiusura backend'
-                              : closeOrder?.source === 'live-monitor'
-                                ? 'Monitor live'
-                                : closeOrder?.source === 'manual'
-                                  ? 'Manuale'
-                                  : 'Motore automatico'}
+                            {closeSourceLabel(closeOrder?.source)}
                           </p>
+                          {trade.dataQuality === 'incomplete' ? (
+                            <p className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-[#ef8f8f]">
+                              Dato incompleto
+                            </p>
+                          ) : null}
                         </div>
                       </TableCell>
                       <TableCell

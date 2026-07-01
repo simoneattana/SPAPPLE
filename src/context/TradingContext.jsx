@@ -205,11 +205,17 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
   const orders = Array.isArray(rawMarketState.orders)
     ? rawMarketState.orders
     : fallback.orders
+  const backfill = backfillLegacyCloseOrders(
+    marketId,
+    strategy.label,
+    history,
+    orders,
+  )
   const positions = removeClosedPositions(
     Array.isArray(rawMarketState.positions)
       ? rawMarketState.positions
       : fallback.positions,
-    history,
+    backfill.history,
   )
 
   return {
@@ -220,8 +226,8 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
     capital: normalizedCapital,
     vault: Number.isFinite(vault) ? vault : fallback.vault,
     positions,
-    history,
-    orders,
+    history: backfill.history,
+    orders: backfill.orders,
     activityLog: Array.isArray(rawMarketState.activityLog)
       ? rawMarketState.activityLog
       : fallback.activityLog,
@@ -441,6 +447,142 @@ function getOpenOrderSide(type) {
 
 function getCloseOrderSide(type) {
   return type === 'LONG' ? 'SELL' : 'BUY_TO_COVER'
+}
+
+function normalizeIdPart(value) {
+  return String(value || 'na')
+    .replace(/[^a-z0-9]+/gi, '-')
+    .replace(/^-|-$/g, '')
+    .toLowerCase()
+}
+
+function createLegacyCloseOrderId(marketId, trade, index) {
+  return [
+    'legacy-close',
+    marketId,
+    normalizeIdPart(trade.ticker),
+    normalizeIdPart(trade.openedAt),
+    normalizeIdPart(trade.exitDate),
+    index,
+  ].join('-')
+}
+
+function hasCompleteLegacyTradeData(trade) {
+  return (
+    Number.isFinite(Number(trade.entryPrice)) &&
+    Number(trade.entryPrice) > 0 &&
+    Number.isFinite(Number(trade.exitPrice)) &&
+    Number(trade.exitPrice) > 0 &&
+    Number.isFinite(Number(trade.pnlEur)) &&
+    Number.isFinite(Number(trade.recoveredCapital))
+  )
+}
+
+function createLegacyCloseOrder(trade, marketId, marketLabel, index) {
+  const complete = hasCompleteLegacyTradeData(trade)
+  const id = trade.closeOrderId || createLegacyCloseOrderId(marketId, trade, index)
+  const positionId =
+    trade.positionId ||
+    `legacy-position-${marketId}-${normalizeIdPart(trade.ticker)}-${normalizeIdPart(
+      trade.openedAt || trade.exitDate,
+    )}-${index}`
+  const entryPrice = Number(trade.entryPrice)
+  const exitPrice = Number(trade.exitPrice)
+  const invested = Number(trade.invested)
+  const recoveredCapital = Number(trade.recoveredCapital)
+  const quantity =
+    complete && Number.isFinite(invested) && invested > 0
+      ? invested / entryPrice
+      : null
+  const createdAt = trade.exitDate || new Date().toISOString()
+
+  return {
+    id,
+    marketId,
+    marketLabel,
+    executionMode: EXECUTION_MODE,
+    broker: 'simulationBroker',
+    action: 'CLOSE',
+    side: getCloseOrderSide(trade.type),
+    direction: trade.type,
+    status: 'ESEGUITO',
+    source: 'legacy-backfill',
+    ticker: trade.ticker,
+    positionId,
+    quantity: Number.isFinite(quantity) ? roundQuantity(quantity) : null,
+    notional: Number.isFinite(recoveredCapital)
+      ? roundPrice(recoveredCapital)
+      : Number.isFinite(invested)
+        ? roundPrice(invested)
+        : 0,
+    requestedPrice: complete ? roundPrice(exitPrice) : null,
+    executedPrice: complete ? roundPrice(exitPrice) : null,
+    fee: 0,
+    slippagePct: 0,
+    reason: complete
+      ? 'Ordine storico ricostruito da una chiusura già registrata.'
+      : 'Ordine storico ricostruito con dati incompleti: prezzi o P/L legacy non disponibili.',
+    dataQuality: complete ? 'complete' : 'incomplete',
+    createdAt,
+    submittedAt: createdAt,
+    executedAt: createdAt,
+    statusHistory: [
+      { status: 'CREATO', at: createdAt },
+      { status: 'INVIATO', at: createdAt },
+      {
+        status: 'ESEGUITO',
+        at: createdAt,
+        detail: complete ? 'Backfill storico completo' : 'Backfill storico incompleto',
+      },
+    ],
+  }
+}
+
+function backfillLegacyCloseOrders(marketId, marketLabel, history = [], orders = []) {
+  const existingOrderIds = new Set(orders.map((order) => order?.id).filter(Boolean))
+  const nextOrders = [...orders]
+  let changed = false
+  const nextHistory = history.map((trade, index) => {
+    if (!trade?.ticker || !trade?.exitDate) {
+      return trade
+    }
+
+    const order = createLegacyCloseOrder(trade, marketId, marketLabel, index)
+    const positionId = trade.positionId || order.positionId
+    const nextTrade = {
+      ...trade,
+      positionId,
+      closeOrderId: trade.closeOrderId || order.id,
+      dataQuality: hasCompleteLegacyTradeData(trade) ? 'complete' : 'incomplete',
+      legacyBackfilled: true,
+    }
+
+    if (!existingOrderIds.has(order.id)) {
+      nextOrders.push(order)
+      existingOrderIds.add(order.id)
+      changed = true
+    }
+
+    if (
+      nextTrade.positionId !== trade.positionId ||
+      nextTrade.closeOrderId !== trade.closeOrderId ||
+      nextTrade.dataQuality !== trade.dataQuality ||
+      nextTrade.legacyBackfilled !== trade.legacyBackfilled
+    ) {
+      changed = true
+      return nextTrade
+    }
+
+    return trade
+  })
+
+  return {
+    changed,
+    history: nextHistory,
+    orders: nextOrders.sort(
+      (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0),
+    ),
+  }
 }
 
 function createSimulationOrder({

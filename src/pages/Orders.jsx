@@ -74,6 +74,7 @@ function sourceLabel(source) {
     eod: 'EOD',
     'live-monitor': 'Monitor live',
     manual: 'Manuale',
+    'legacy-backfill': 'Storico ricostruito',
   }
 
   return labels[source] || source || 'Sistema'
@@ -238,7 +239,24 @@ export default function Orders({ marketId }) {
                   <TableCell>
                     <Badge variant={orderVariant(order)}>{order.status}</Badge>
                   </TableCell>
-                  <TableCell>{sourceLabel(order.source)}</TableCell>
+                  <TableCell>
+                    <div className="space-y-1">
+                      <p>{sourceLabel(order.source)}</p>
+                      {order.source === 'legacy-backfill' ? (
+                        <Badge
+                          variant={
+                            order.dataQuality === 'incomplete'
+                              ? 'negative'
+                              : 'default'
+                          }
+                        >
+                          {order.dataQuality === 'incomplete'
+                            ? 'Dato incompleto'
+                            : 'Backfill'}
+                        </Badge>
+                      ) : null}
+                    </div>
+                  </TableCell>
                   <TableCell>{formatCurrency(order.executedPrice)}</TableCell>
                   <TableCell>{formatNumber(order.quantity)}</TableCell>
                   <TableCell>{formatCurrency(order.notional)}</TableCell>
@@ -246,6 +264,11 @@ export default function Orders({ marketId }) {
                     <p className="min-w-64 text-sm leading-6 text-slate-400">
                       {order.reason || 'Nessun dettaglio disponibile'}
                     </p>
+                    {order.dataQuality === 'incomplete' ? (
+                      <p className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-[#ef8f8f]">
+                        Dato legacy incompleto: non invento prezzo o P/L.
+                      </p>
+                    ) : null}
                     <p className="mt-1 text-xs text-slate-600">
                       ID {order.id}
                     </p>

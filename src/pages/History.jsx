@@ -62,6 +62,12 @@ function monthKey(value) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
 }
 
+function formatCurrency(value) {
+  return Number.isFinite(Number(value))
+    ? currencyFormatter.format(Number(value))
+    : 'N/D'
+}
+
 function eventLabel(type, activeMarket = 'equities') {
   const labels = {
     automation: 'Automazione',
@@ -152,12 +158,23 @@ function buildClosedTradeRecord(trade) {
     title: `Trade ${trade.result === 'WIN' ? 'chiuso in profitto' : 'chiuso in perdita'}`,
     detail: `${trade.ticker} ${
       trade.type === 'LONG' ? 'Long' : 'Short'
-    } - P/L ${currencyFormatter.format(Number(trade.pnlEur) || 0)}.`,
+    } - P/L ${formatCurrency(trade.pnlEur)}.${
+      trade.dataQuality === 'incomplete'
+        ? ' Dato legacy incompleto: prezzo o P/L non disponibili.'
+        : ''
+    }`,
     createdAt: trade.exitDate,
   }
 }
 
 function buildOrderRecord(order) {
+  const sourceDetail =
+    order.source === 'legacy-backfill'
+      ? order.dataQuality === 'incomplete'
+        ? ' Storico ricostruito con dati incompleti.'
+        : ' Storico ricostruito.'
+      : ''
+
   return {
     id: `order-record-${order.id}`,
     type: 'order',
@@ -170,7 +187,7 @@ function buildOrderRecord(order) {
           : 'Ordine di apertura simulato',
     detail: `${order.ticker} - ${order.side || 'N/D'} - ${
       order.status || 'N/D'
-    }. ${order.reason || ''}`,
+    }. ${order.reason || ''}${sourceDetail}`,
     createdAt: order.createdAt,
   }
 }
