@@ -50,6 +50,8 @@ export default async function handler(request, response) {
         activeMarket: marketId,
         ...marketState,
       })
+      const processedMarketState = result.state.markets?.[marketId] || {}
+      const checkedAt = new Date().toISOString()
 
       nextPayload = {
         ...result.state,
@@ -57,6 +59,12 @@ export default async function handler(request, response) {
         markets: {
           ...(nextPayload.markets || {}),
           ...(result.state.markets || {}),
+          [marketId]: {
+            ...processedMarketState,
+            lastBackendCheckAt:
+              processedMarketState.lastBackendCheckAt || checkedAt,
+            lastSyncAt: processedMarketState.lastSyncAt || checkedAt,
+          },
         },
       }
       results.push({ marketId, ...result })
