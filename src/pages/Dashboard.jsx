@@ -180,6 +180,7 @@ export default function Dashboard({ marketId }) {
   const killSwitchEnabled = Boolean(routeMarketState.killSwitchEnabled)
   const executedOrders = orders.filter((order) => order.status === 'ESEGUITO')
   const recentClosedTrades = history.slice(0, 5)
+  const latestClosedTrade = recentClosedTrades[0] || null
   const ordersById = new Map(orders.map((order) => [order.id, order]))
   const lastScanAt = routeMarketState.lastScanAt || null
   const lastScanCount = Number(routeMarketState.lastScanCount || 0)
@@ -262,7 +263,7 @@ export default function Dashboard({ marketId }) {
           </div>
         </div>
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <MiniMetric
             label="Ultima scansione"
             value={lastScanText}
@@ -277,6 +278,24 @@ export default function Dashboard({ marketId }) {
             label="Ordini"
             value={`${executedOrders.length}/${orders.length}`}
             info="Ordini simulati eseguiti rispetto al totale degli ordini registrati."
+          />
+          <MiniMetric
+            label="Ultima chiusura"
+            value={
+              latestClosedTrade
+                ? `${latestClosedTrade.ticker} ${formatCurrency(latestClosedTrade.pnlEur)}`
+                : 'N/D'
+            }
+            info={
+              latestClosedTrade
+                ? `${exitReasonLabel(latestClosedTrade.exitReason)} del ${formatDate(latestClosedTrade.exitDate)}.`
+                : 'Nessuna operazione chiusa nel mercato selezionato.'
+            }
+            accent={
+              latestClosedTrade?.result === 'LOSS'
+                ? 'text-[#ef8f8f]'
+                : 'text-[var(--market-accent)]'
+            }
           />
         </div>
       </header>

@@ -181,6 +181,60 @@ function sanitizeScanResults(results = [], marketId) {
   return results.filter((row) => resultBelongsToMarket(row, marketId))
 }
 
+function dedupeClosedTrades(history = []) {
+  const trades = Array.isArray(history) ? history : []
+  const byPosition = new Map()
+
+  trades.forEach((trade) => {
+    if (!trade?.ticker || !trade?.exitDate) {
+      return
+    }
+
+    const key = trade.positionId
+      ? `position-${trade.positionId}`
+      : `${trade.ticker}-${trade.exitDate}`
+    const current = byPosition.get(key)
+
+    if (!current || new Date(trade.exitDate) > new Date(current.exitDate)) {
+      byPosition.set(key, trade)
+    }
+  })
+
+  return [...byPosition.values()].sort(
+    (first, second) =>
+      new Date(second.exitDate || 0) - new Date(first.exitDate || 0),
+  )
+}
+
+function dedupeOrders(orders = []) {
+  const normalizedOrders = Array.isArray(orders) ? orders : []
+  const byKey = new Map()
+
+  normalizedOrders.forEach((order) => {
+    if (!order?.id) {
+      return
+    }
+
+    const key =
+      order.action === 'CLOSE' && order.positionId
+        ? `close-${order.positionId}`
+        : `order-${order.id}`
+    const current = byKey.get(key)
+
+    if (
+      !current ||
+      new Date(order.createdAt || 0) > new Date(current.createdAt || 0)
+    ) {
+      byKey.set(key, order)
+    }
+  })
+
+  return [...byKey.values()].sort(
+    (first, second) =>
+      new Date(second.createdAt || 0) - new Date(first.createdAt || 0),
+  )
+}
+
 function calculateVaultFromHistory(history = []) {
   return history.reduce((total, trade) => {
     const pnl = Number(trade?.pnlEur)
@@ -223,16 +277,19 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
     history,
     orders,
   )
-  const vaultFromHistory = calculateVaultFromHistory(backfill.history)
-  const normalizedVault = Math.max(
-    Number.isFinite(vault) ? vault : fallback.vault,
-    vaultFromHistory,
-  )
+  const normalizedHistory = dedupeClosedTrades(backfill.history)
+  const vaultFromHistory = calculateVaultFromHistory(normalizedHistory)
+  const normalizedVault =
+    normalizedHistory.length > 0
+      ? vaultFromHistory
+      : Number.isFinite(vault)
+        ? vault
+        : fallback.vault
   const positions = removeClosedPositions(
     Array.isArray(rawMarketState.positions)
       ? rawMarketState.positions
       : fallback.positions,
-    backfill.history,
+    normalizedHistory,
   )
 
   return {
@@ -243,8 +300,8 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
     capital: normalizedCapital,
     vault: roundPrice(normalizedVault),
     positions,
-    history: backfill.history,
-    orders: backfill.orders,
+    history: normalizedHistory,
+    orders: dedupeOrders(backfill.orders),
     activityLog: Array.isArray(rawMarketState.activityLog)
       ? rawMarketState.activityLog
       : fallback.activityLog,
@@ -903,6 +960,7 @@ export function TradingProvider({ children }) {
   const remoteUpdatedAtRef = useRef(null)
   const remoteSaveTimerRef = useRef(null)
   const liveCheckRunningRef = useRef(false)
+  const closingPositionsRef = useRef(new Set())
 
   useEffect(() => {
     stateRef.current = state
@@ -1523,126 +1581,141 @@ export function TradingProvider({ children }) {
   }, [])
 
   const closePositionManually = useCallback(async (positionId, targetMarketId = null) => {
-    const snapshot = syncActiveMarketState(stateRef.current)
-    const candidateMarketIds = targetMarketId
-      ? [targetMarketId]
-      : Object.keys(snapshot.markets || {})
-    let marketId = targetMarketId
-    let marketState = null
-    let position = null
+    if (closingPositionsRef.current.has(positionId)) {
+      throw new Error('Chiusura già in corso per questa posizione')
+    }
 
-    for (const candidateMarketId of candidateMarketIds) {
-      const candidateState = normalizeMarketState(
-        candidateMarketId,
-        snapshot.markets?.[candidateMarketId],
-      )
-      const candidatePosition = candidateState.positions.find(
-        (item) => item.id === positionId,
-      )
+    closingPositionsRef.current.add(positionId)
 
-      if (candidatePosition) {
-        marketId = candidateMarketId
-        marketState = candidateState
-        position = candidatePosition
-        break
+    try {
+      const snapshot = syncActiveMarketState(stateRef.current)
+      const candidateMarketIds = targetMarketId
+        ? [targetMarketId]
+        : Object.keys(snapshot.markets || {})
+      let marketId = targetMarketId
+      let marketState = null
+      let position = null
+
+      for (const candidateMarketId of candidateMarketIds) {
+        const candidateState = normalizeMarketState(
+          candidateMarketId,
+          snapshot.markets?.[candidateMarketId],
+        )
+        const candidatePosition = candidateState.positions.find(
+          (item) => item.id === positionId,
+        )
+
+        if (candidatePosition) {
+          marketId = candidateMarketId
+          marketState = candidateState
+          position = candidatePosition
+          break
+        }
       }
-    }
 
-    if (!position) {
-      throw new Error('Posizione non trovata')
-    }
+      if (!position) {
+        throw new Error('Posizione non trovata')
+      }
 
-    if (!marketState) {
-      marketState = normalizeMarketState(marketId, snapshot.markets?.[marketId])
-    }
+      if (!marketState) {
+        marketState = normalizeMarketState(marketId, snapshot.markets?.[marketId])
+      }
 
-    const latestPrice = await fetchLatestPrice(
-      position.ticker,
-      position.marketId || marketId,
-    )
-    const invested = position.invested || LEGACY_POSITION_SIZE
-    const quantity = invested / position.entryPrice
-    const long = position.type === 'LONG'
-    const pnlEur = long
-      ? (latestPrice - position.entryPrice) * quantity
-      : (position.entryPrice - latestPrice) * quantity
-    const roundedPnl = roundPrice(pnlEur)
-    const result = roundedPnl >= 0 ? 'WIN' : 'LOSS'
-    const recoveredCapital = Math.max(invested + roundedPnl, 0)
-    const closeOrder = createSimulationOrder({
-      action: 'CLOSE',
-      direction: position.type,
-      executedPrice: latestPrice,
-      marketId,
-      marketLabel: marketState.marketLabel,
-      notional: recoveredCapital,
-      positionId: position.id,
-      quantity: position.quantity || quantity,
-      requestedPrice: latestPrice,
-      reason: 'Chiusura manuale richiesta dallo Scanner o dal Portafoglio.',
-      side: getCloseOrderSide(position.type),
-      source: 'manual',
-      ticker: position.ticker,
-    })
-    const closedTrade = {
-      ticker: position.ticker,
-      type: position.type,
-      positionId: position.id,
-      closeOrderId: closeOrder.id,
-      openedAt: position.openedAt || null,
-      entryPrice: position.entryPrice,
-      invested,
-      pnlEur: roundedPnl,
-      result,
-      exitDate: new Date().toISOString(),
-      exitPrice: roundPrice(latestPrice),
-      exitReason: 'MANUALE',
-      recoveredCapital: roundPrice(recoveredCapital),
-    }
-
-    updateTradingState((current) => {
-      const syncedCurrent = syncActiveMarketState(current)
-      const currentMarketState = normalizeMarketState(
+      const latestPrice = await fetchLatestPrice(
+        position.ticker,
+        position.marketId || marketId,
+      )
+      const invested = position.invested || LEGACY_POSITION_SIZE
+      const quantity = invested / position.entryPrice
+      const long = position.type === 'LONG'
+      const pnlEur = long
+        ? (latestPrice - position.entryPrice) * quantity
+        : (position.entryPrice - latestPrice) * quantity
+      const roundedPnl = roundPrice(pnlEur)
+      const result = roundedPnl >= 0 ? 'WIN' : 'LOSS'
+      const recoveredCapital = Math.max(invested + roundedPnl, 0)
+      const closeOrder = createSimulationOrder({
+        action: 'CLOSE',
+        direction: position.type,
+        executedPrice: latestPrice,
         marketId,
-        syncedCurrent.markets?.[marketId],
-      )
-      const remainingPositions = currentMarketState.positions.filter(
-        (item) => item.id !== positionId,
-      )
-      const capitalReturn =
-        roundedPnl >= 0
-          ? invested
-          : recoveredCapital
-      const vaultGain = roundedPnl > 0 ? roundedPnl : 0
-
-      const nextMarketState = {
-        ...currentMarketState,
-        capital: roundPrice(currentMarketState.capital + capitalReturn),
-        vault: roundPrice(currentMarketState.vault + vaultGain),
-        positions: remainingPositions,
-        orders: appendOrders(currentMarketState, closeOrder),
-        history: [closedTrade, ...currentMarketState.history],
-        engineStatus:
-          remainingPositions.length > 0
-            ? 'Posizione chiusa manualmente'
-            : 'Slot liberato, ricerca nuovi segnali',
-        ...appendLogs(
-          currentMarketState,
-          createActivity({
-            type: 'order',
-            status: result === 'WIN' ? 'attention' : 'error',
-            title: 'Ordine di chiusura simulato eseguito',
-            detail: `${position.ticker}: ordine ${closeOrder.id} eseguito. P/L realizzato ${roundedPnl.toFixed(
-              2,
-            )}€. Avvio ricerca di un nuovo asset appetibile in ${currentMarketState.marketLabel}.`,
-          }),
-        ),
+        marketLabel: marketState.marketLabel,
+        notional: recoveredCapital,
+        positionId: position.id,
+        quantity: position.quantity || quantity,
+        requestedPrice: latestPrice,
+        reason: 'Chiusura manuale richiesta dallo Scanner o dal Portafoglio.',
+        side: getCloseOrderSide(position.type),
+        source: 'manual',
+        ticker: position.ticker,
+      })
+      const closedTrade = {
+        ticker: position.ticker,
+        type: position.type,
+        positionId: position.id,
+        closeOrderId: closeOrder.id,
+        openedAt: position.openedAt || null,
+        entryPrice: position.entryPrice,
+        invested,
+        pnlEur: roundedPnl,
+        result,
+        exitDate: new Date().toISOString(),
+        exitPrice: roundPrice(latestPrice),
+        exitReason: 'MANUALE',
+        recoveredCapital: roundPrice(recoveredCapital),
       }
 
-      return activateMarketState(syncedCurrent, marketId, nextMarketState)
-    })
+      updateTradingState((current) => {
+        const syncedCurrent = syncActiveMarketState(current)
+        const currentMarketState = normalizeMarketState(
+          marketId,
+          syncedCurrent.markets?.[marketId],
+        )
+        const alreadyClosed = currentMarketState.history.some(
+          (trade) => trade.positionId === positionId,
+        )
 
-    return closedTrade
+        if (alreadyClosed) {
+          return syncedCurrent
+        }
+
+        const remainingPositions = currentMarketState.positions.filter(
+          (item) => item.id !== positionId,
+        )
+        const capitalReturn = roundedPnl >= 0 ? invested : recoveredCapital
+        const vaultGain = roundedPnl > 0 ? roundedPnl : 0
+
+        const nextMarketState = {
+          ...currentMarketState,
+          capital: roundPrice(currentMarketState.capital + capitalReturn),
+          vault: roundPrice(currentMarketState.vault + vaultGain),
+          positions: remainingPositions,
+          orders: appendOrders(currentMarketState, closeOrder),
+          history: [closedTrade, ...currentMarketState.history],
+          engineStatus:
+            remainingPositions.length > 0
+              ? 'Posizione chiusa manualmente'
+              : 'Slot liberato, ricerca nuovi segnali',
+          ...appendLogs(
+            currentMarketState,
+            createActivity({
+              type: 'order',
+              status: result === 'WIN' ? 'attention' : 'error',
+              title: 'Ordine di chiusura simulato eseguito',
+              detail: `${position.ticker}: ordine ${closeOrder.id} eseguito. P/L realizzato ${roundedPnl.toFixed(
+                2,
+              )}€. Avvio ricerca di un nuovo asset appetibile in ${currentMarketState.marketLabel}.`,
+            }),
+          ),
+        }
+
+        return activateMarketState(syncedCurrent, marketId, nextMarketState)
+      })
+
+      return closedTrade
+    } finally {
+      closingPositionsRef.current.delete(positionId)
+    }
   }, [updateTradingState])
 
   const runLiveCheck = useCallback(async ({ silent = false, targetMarketId = null } = {}) => {

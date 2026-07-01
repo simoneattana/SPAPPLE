@@ -8,6 +8,7 @@ import {
   ListChecks,
   PlayCircle,
   Radio,
+  Repeat2,
   ShieldCheck,
   ToggleLeft,
   ToggleRight,
@@ -246,16 +247,70 @@ function ActivityItem({ item }) {
   )
 }
 
+function buildImportantOperations({ history = [], orders = [] }) {
+  const closed = history.map((trade) => ({
+    id: `closed-${trade.closeOrderId || trade.ticker}-${trade.exitDate}`,
+    createdAt: trade.exitDate,
+    status: trade.result === 'LOSS' ? 'error' : 'attention',
+    title: `${trade.ticker} chiuso ${trade.exitReason === 'MANUALE' ? 'manualmente' : 'automaticamente'}`,
+    detail: `P/L ${
+      Number.isFinite(Number(trade.pnlEur))
+        ? currencyFormatter.format(Number(trade.pnlEur))
+        : 'N/D'
+    } · ${trade.type === 'LONG' ? 'Long' : 'Short'}`,
+  }))
+  const opened = orders
+    .filter((order) => order.action === 'OPEN' || order.status === 'RIFIUTATO')
+    .map((order) => ({
+      id: `order-${order.id}`,
+      createdAt: order.createdAt,
+      status: order.status === 'RIFIUTATO' ? 'error' : 'done',
+      title:
+        order.status === 'RIFIUTATO'
+          ? `${order.ticker} rifiutato`
+          : `${order.ticker} aperto`,
+      detail: `${order.side || 'N/D'} · ${currencyFormatter.format(
+        Number(order.notional || 0),
+      )}`,
+    }))
+
+  return [...closed, ...opened]
+    .sort(
+      (first, second) =>
+        new Date(second.createdAt || 0) - new Date(first.createdAt || 0),
+    )
+    .slice(0, 5)
+}
+
+function ImportantOperationItem({ item }) {
+  const styles = activityStyles(item.status)
+
+  return (
+    <li className={`rounded-lg border p-3 ${styles.border} ${styles.bg}`}>
+      <div className="flex items-start gap-3">
+        <Repeat2 className={`mt-0.5 h-4 w-4 shrink-0 ${styles.text}`} />
+        <div className="min-w-0 flex-1">
+          <p className={`text-sm font-semibold ${styles.text}`}>{item.title}</p>
+          <p className="mt-1 text-xs leading-5 text-slate-400">{item.detail}</p>
+          <p className="mt-2 text-[11px] uppercase tracking-[0.14em] text-slate-600">
+            {formatActivityDate(item.createdAt)}
+          </p>
+        </div>
+      </div>
+    </li>
+  )
+}
+
 export function SystemSidebar() {
   const {
     activeMarket,
     markets,
     remoteStatus,
     runLiveCheck,
-  setAutomationEnabled,
-  setKillSwitchEnabled,
-  setLiveMonitorEnabled,
-} = useTrading()
+    setAutomationEnabled,
+    setKillSwitchEnabled,
+    setLiveMonitorEnabled,
+  } = useTrading()
   const location = useLocation()
   const [, setNow] = useState(Date.now())
   const routeMarket = location.pathname.startsWith('/crypto')
@@ -267,6 +322,12 @@ export function SystemSidebar() {
   const routeMarketState = markets?.[routeMarket] || {}
   const activityLog = Array.isArray(routeMarketState.activityLog)
     ? routeMarketState.activityLog
+    : EMPTY_ARRAY
+  const history = Array.isArray(routeMarketState.history)
+    ? routeMarketState.history
+    : EMPTY_ARRAY
+  const orders = Array.isArray(routeMarketState.orders)
+    ? routeMarketState.orders
     : EMPTY_ARRAY
   const automationEnabled =
     typeof routeMarketState.automationEnabled === 'boolean'
@@ -344,6 +405,10 @@ export function SystemSidebar() {
       nextLiveCheckAt,
       positions,
     ],
+  )
+  const importantOperations = useMemo(
+    () => buildImportantOperations({ history, orders }),
+    [history, orders],
   )
 
   return (
@@ -620,6 +685,29 @@ export function SystemSidebar() {
               {message}
             </div>
           ))}
+        </div>
+
+        <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Repeat2 className="h-4 w-4 text-[var(--market-accent)]" />
+              <p className="text-sm font-semibold text-white">
+                Operazioni rilevanti
+              </p>
+            </div>
+            <Badge>{importantOperations.length}</Badge>
+          </div>
+          <ol className="mt-3 space-y-2">
+            {importantOperations.length > 0 ? (
+              importantOperations.map((item) => (
+                <ImportantOperationItem key={item.id} item={item} />
+              ))
+            ) : (
+              <li className="rounded-lg border border-slate-800 bg-[#090b10] p-3 text-xs leading-5 text-slate-500">
+                Nessuna operazione rilevante ancora registrata.
+              </li>
+            )}
+          </ol>
         </div>
 
         <ol className="mt-4 space-y-3 xl:max-h-[34vh] xl:overflow-y-auto xl:pr-1">

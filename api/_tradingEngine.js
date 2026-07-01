@@ -164,6 +164,60 @@ function sanitizeScanResults(results = [], marketId) {
   return results.filter((row) => resultBelongsToMarket(row, marketId))
 }
 
+function dedupeClosedTrades(history = []) {
+  const trades = Array.isArray(history) ? history : []
+  const byPosition = new Map()
+
+  trades.forEach((trade) => {
+    if (!trade?.ticker || !trade?.exitDate) {
+      return
+    }
+
+    const key = trade.positionId
+      ? `position-${trade.positionId}`
+      : `${trade.ticker}-${trade.exitDate}`
+    const current = byPosition.get(key)
+
+    if (!current || new Date(trade.exitDate) > new Date(current.exitDate)) {
+      byPosition.set(key, trade)
+    }
+  })
+
+  return [...byPosition.values()].sort(
+    (first, second) =>
+      new Date(second.exitDate || 0) - new Date(first.exitDate || 0),
+  )
+}
+
+function dedupeOrders(orders = []) {
+  const normalizedOrders = Array.isArray(orders) ? orders : []
+  const byKey = new Map()
+
+  normalizedOrders.forEach((order) => {
+    if (!order?.id) {
+      return
+    }
+
+    const key =
+      order.action === 'CLOSE' && order.positionId
+        ? `close-${order.positionId}`
+        : `order-${order.id}`
+    const current = byKey.get(key)
+
+    if (
+      !current ||
+      new Date(order.createdAt || 0) > new Date(current.createdAt || 0)
+    ) {
+      byKey.set(key, order)
+    }
+  })
+
+  return [...byKey.values()].sort(
+    (first, second) =>
+      new Date(second.createdAt || 0) - new Date(first.createdAt || 0),
+  )
+}
+
 function calculateVaultFromHistory(history = []) {
   return history.reduce((total, trade) => {
     const pnl = Number(trade?.pnlEur)
@@ -226,16 +280,19 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
     history,
     orders,
   )
-  const vaultFromHistory = calculateVaultFromHistory(backfill.history)
-  const normalizedVault = Math.max(
-    Number.isFinite(vault) ? vault : fallback.vault,
-    vaultFromHistory,
-  )
+  const normalizedHistory = dedupeClosedTrades(backfill.history)
+  const vaultFromHistory = calculateVaultFromHistory(normalizedHistory)
+  const normalizedVault =
+    normalizedHistory.length > 0
+      ? vaultFromHistory
+      : Number.isFinite(vault)
+        ? vault
+        : fallback.vault
   const positions = removeClosedPositions(
     Array.isArray(rawMarketState.positions)
       ? rawMarketState.positions
       : [],
-    backfill.history,
+    normalizedHistory,
   )
 
   return {
@@ -246,8 +303,8 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
     capital: normalizedCapital,
     vault: roundPrice(normalizedVault),
     positions,
-    history: backfill.history,
-    orders: backfill.orders,
+    history: normalizedHistory,
+    orders: dedupeOrders(backfill.orders),
     activityLog: Array.isArray(rawMarketState.activityLog)
       ? rawMarketState.activityLog
       : [],

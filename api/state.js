@@ -43,7 +43,15 @@ function mergeById(first = [], second = []) {
       return
     }
 
-    items.set(item.id, item)
+    const key =
+      item.action === 'CLOSE' && item.positionId
+        ? `close-${item.positionId}`
+        : `item-${item.id}`
+    const current = items.get(key)
+
+    if (!current || timestamp(item.createdAt) > timestamp(current.createdAt)) {
+      items.set(key, item)
+    }
   })
 
   return [...items.values()].sort(
@@ -59,7 +67,14 @@ function mergeHistory(first = [], second = []) {
       return
     }
 
-    items.set(`${item.ticker}-${item.exitDate}`, item)
+    const key = item.positionId
+      ? `position-${item.positionId}`
+      : `${item.ticker}-${item.exitDate}`
+    const current = items.get(key)
+
+    if (!current || timestamp(item.exitDate) > timestamp(current.exitDate)) {
+      items.set(key, item)
+    }
   })
 
   return [...items.values()].sort(
@@ -130,15 +145,17 @@ function mergeMarketState(incomingMarket = {}, currentMarket = {}) {
     currentMarket.positions,
     history,
   )
-  const vault = Math.max(
-    Number.isFinite(Number(incomingMarket.vault))
-      ? Number(incomingMarket.vault)
-      : 0,
-    Number.isFinite(Number(currentMarket.vault))
-      ? Number(currentMarket.vault)
-      : 0,
-    calculateVaultFromHistory(history),
-  )
+  const vault =
+    history.length > 0
+      ? calculateVaultFromHistory(history)
+      : Math.max(
+          Number.isFinite(Number(incomingMarket.vault))
+            ? Number(incomingMarket.vault)
+            : 0,
+          Number.isFinite(Number(currentMarket.vault))
+            ? Number(currentMarket.vault)
+            : 0,
+        )
 
   return {
     ...currentMarket,
