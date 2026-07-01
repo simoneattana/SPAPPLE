@@ -1,5 +1,6 @@
 import {
   DEFAULT_MARKET_ID,
+  STORAGE_VERSION,
   getSupabaseClient,
   normalizeTradingState,
   readTradingState,
@@ -275,6 +276,15 @@ export default async function handler(request, response) {
 
     if (!body?.payload || typeof body.payload !== 'object') {
       sendJson(response, 400, { error: 'Stato Spapple mancante' })
+      return
+    }
+
+    if (body.reset !== true && body.payload.version !== STORAGE_VERSION) {
+      sendJson(response, 409, {
+        error:
+          'Stato locale non aggiornato: ricarica Spapple prima di sincronizzare.',
+        expectedVersion: STORAGE_VERSION,
+      })
       return
     }
 
