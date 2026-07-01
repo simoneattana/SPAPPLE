@@ -852,7 +852,7 @@ function buildTrade(
 ) {
   const atrPct = (atr / price) * 100
   const isCrypto = strategy.id === 'crypto'
-  const targetPct = isCrypto ? (atrPct < 4 ? 0.8 : 1.2) : atrPct < 1.5 ? 0.35 : 0.6
+  const targetPct = isCrypto ? (atrPct < 4 ? 0.45 : 0.65) : atrPct < 1.5 ? 0.35 : 0.6
   const maxTargetPct = isCrypto ? targetPct : atrPct < 1.5 ? 0.8 : 1.2
   const trailingPct = isCrypto ? null : atrPct < 1.5 ? 0.2 : 0.3
   const stopMultiplier = isCrypto ? 1.8 : atrPct < 1.5 ? 1.2 : 1.5

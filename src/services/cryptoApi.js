@@ -159,6 +159,10 @@ function getDiagnostic(row) {
     return row.mappingIssue
   }
 
+  if (row.tradeEnabled === false) {
+    return 'Osservata come liquidità stabile: esclusa dagli ingressi automatici'
+  }
+
   if (Number(row.volumeEur) < CRYPTO_MIN_DAILY_VOLUME_EUR) {
     return 'Scartata: liquidità giornaliera troppo bassa'
   }
@@ -206,6 +210,8 @@ async function fetchCryptoDiagnostic(input, coingeckoMarkets) {
       profile: enrichProfileWithMarketData(buildProfile(meta), marketData),
       krakenPair: meta.krakenPair,
       coingeckoId: meta.coingeckoId,
+      tradeEnabled: meta.tradeEnabled !== false,
+      role: meta.role || 'operativo',
       mappingWarning,
       mappingIssue: marketData
         ? null
@@ -235,6 +241,8 @@ async function fetchCryptoDiagnostic(input, coingeckoMarkets) {
       profile: meta ? buildProfile(meta) : null,
       krakenPair: meta?.krakenPair || null,
       coingeckoId: meta?.coingeckoId || null,
+      tradeEnabled: meta?.tradeEnabled !== false,
+      role: meta?.role || 'operativo',
       mappingWarning,
       mappingIssue: meta?.coingeckoId && !marketData
         ? `${ticker}: CoinGecko non ha confermato l’id ${meta.coingeckoId}`

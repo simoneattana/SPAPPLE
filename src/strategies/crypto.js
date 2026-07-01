@@ -20,8 +20,8 @@ export const cryptoStrategy = {
   },
   rules: {
     profitabilityFilter: 'Non applicabile: il P/E non esiste sulle crypto',
-    liquidityFilter: 'Liquidità giornaliera minima obbligatoria',
-    signalFilter: 'RSI estremo adattato a mercato 24/7',
-    volatilityFilter: 'ATR massimo più largo ma controllato',
+    liquidityFilter: 'Solo crypto liquide con volume e capitalizzazione elevati',
+    signalFilter: 'RSI adattato a una watchlist ristretta e mercato 24/7',
+    volatilityFilter: 'ATR massimo controllato per cercare piccoli target ricorrenti',
   },
 }

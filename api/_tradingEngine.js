@@ -1147,6 +1147,10 @@ function getCryptoDiagnostic(row) {
     return row.mappingIssue
   }
 
+  if (row.tradeEnabled === false) {
+    return 'Osservata come liquidità stabile: esclusa dagli ingressi automatici'
+  }
+
   if (Number(row.volumeEur) < CRYPTO_MIN_DAILY_VOLUME_EUR) {
     return 'Scartata: liquidità giornaliera troppo bassa'
   }
@@ -1182,6 +1186,8 @@ async function fetchCryptoTickerDiagnostic(meta, coingeckoMarkets = new Map()) {
       profile: enrichCryptoProfile(buildCryptoProfile(meta), marketData),
       krakenPair: meta.krakenPair,
       coingeckoId: meta.coingeckoId,
+      tradeEnabled: meta.tradeEnabled !== false,
+      role: meta.role || 'operativo',
       mappingWarning,
       mappingIssue: marketData
         ? null
@@ -1211,6 +1217,8 @@ async function fetchCryptoTickerDiagnostic(meta, coingeckoMarkets = new Map()) {
       profile: buildCryptoProfile(meta),
       krakenPair: meta.krakenPair,
       coingeckoId: meta.coingeckoId,
+      tradeEnabled: meta.tradeEnabled !== false,
+      role: meta.role || 'operativo',
       mappingWarning,
       mappingIssue: meta.coingeckoId && !marketData
         ? `${meta.ticker}: CoinGecko non ha confermato l’id ${meta.coingeckoId}`
@@ -1279,7 +1287,7 @@ function getSignalType(row, strategy) {
 function buildTrade(row, invested, strategy = getTradingStrategy(), order = null) {
   const atrPct = (row.atr / row.currentPrice) * 100
   const isCrypto = strategy.id === 'crypto'
-  const targetPct = isCrypto ? (atrPct < 4 ? 0.8 : 1.2) : atrPct < 1.5 ? 0.35 : 0.6
+  const targetPct = isCrypto ? (atrPct < 4 ? 0.45 : 0.65) : atrPct < 1.5 ? 0.35 : 0.6
   const maxTargetPct = isCrypto ? targetPct : atrPct < 1.5 ? 0.8 : 1.2
   const trailingPct = isCrypto ? null : atrPct < 1.5 ? 0.2 : 0.3
   const stopMultiplier = isCrypto ? 1.8 : atrPct < 1.5 ? 1.2 : 1.5

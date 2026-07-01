@@ -1,10 +1,10 @@
-export const CRYPTO_LONG_RSI_LIMIT = 35
-export const CRYPTO_SHORT_RSI_LIMIT = 65
-export const CRYPTO_AUTO_LONG_RSI_LIMIT = 28
-export const CRYPTO_AUTO_SHORT_RSI_LIMIT = 72
-export const CRYPTO_MAX_AUTO_ATR_PCT = 12
-export const CRYPTO_MIN_DAILY_VOLUME_EUR = 100000
-export const CRYPTO_MIN_MARKET_CAP_EUR = 100000000
+export const CRYPTO_LONG_RSI_LIMIT = 36
+export const CRYPTO_SHORT_RSI_LIMIT = 64
+export const CRYPTO_AUTO_LONG_RSI_LIMIT = 32
+export const CRYPTO_AUTO_SHORT_RSI_LIMIT = 68
+export const CRYPTO_MAX_AUTO_ATR_PCT = 9
+export const CRYPTO_MIN_DAILY_VOLUME_EUR = 5000000
+export const CRYPTO_MIN_MARKET_CAP_EUR = 1000000000
 
 export function getCryptoAtrPct(row) {
   if (!Number.isFinite(Number(row.atr)) || !Number.isFinite(Number(row.currentPrice))) {
@@ -17,6 +17,7 @@ export function getCryptoAtrPct(row) {
 export function isCryptoActionableResult(row) {
   return (
     row.status === 'ok' &&
+    row.tradeEnabled !== false &&
     Number(row.volumeEur) >= CRYPTO_MIN_DAILY_VOLUME_EUR &&
     Number(row.marketCapEur || 0) >= CRYPTO_MIN_MARKET_CAP_EUR &&
     (row.rsi < CRYPTO_LONG_RSI_LIMIT || row.rsi > CRYPTO_SHORT_RSI_LIMIT)
