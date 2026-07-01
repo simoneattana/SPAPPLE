@@ -347,7 +347,7 @@ export function SystemSidebar() {
   )
 
   return (
-    <aside className="flex flex-col gap-4 xl:sticky xl:top-8 xl:max-h-[calc(100vh-4rem)]">
+    <aside className="flex min-h-0 flex-col gap-4 xl:sticky xl:top-8 xl:max-h-[calc(100vh-4rem)] xl:overflow-y-auto xl:pr-1">
       <section className="rounded-lg border border-slate-800 bg-[#090b10] p-4 shadow-xl shadow-black/20">
         <div className="flex items-start justify-between gap-3">
           <div>
