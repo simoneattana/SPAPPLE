@@ -272,9 +272,6 @@ export default function Diary({ marketId }) {
   const events = Array.isArray(routeMarketState.events)
     ? routeMarketState.events
     : EMPTY_ARRAY
-  const vault = Number.isFinite(Number(routeMarketState.vault))
-    ? Number(routeMarketState.vault)
-    : 0
   const marketLabel = routeMarketState.marketLabel || strategy.label
   const marketCopy = getMarketCopy(effectiveMarket)
   const monthOptions = useMemo(
@@ -329,14 +326,14 @@ export default function Diary({ marketId }) {
             <div>
               <CardTitle>Salvadanaio utili</CardTitle>
               <p className="mt-2 text-sm text-slate-500">
-                Solo profitti realizzati da operazioni vincenti.
+                Calcolato direttamente dalle chiusure vincenti nello storico.
               </p>
             </div>
             <PiggyBank className="h-6 w-6 text-[var(--market-accent)]" />
           </CardHeader>
           <CardContent>
             <p className="text-3xl font-semibold text-[var(--market-accent)]">
-              {currencyFormatter.format(vault)}
+              {currencyFormatter.format(realizedTotals.grossWins)}
             </p>
           </CardContent>
         </Card>

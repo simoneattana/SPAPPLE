@@ -173,9 +173,6 @@ export default function Dashboard({ marketId }) {
   const capital = Number.isFinite(Number(routeMarketState.capital))
     ? Number(routeMarketState.capital)
     : currentStrategy.initialCapital
-  const vault = Number.isFinite(Number(routeMarketState.vault))
-    ? Number(routeMarketState.vault)
-    : 0
   const positions = Array.isArray(routeMarketState.positions)
     ? routeMarketState.positions
     : []
@@ -216,8 +213,8 @@ export default function Dashboard({ marketId }) {
     },
     {
       title: 'Salvadanaio utili',
-      value: currencyFormatter.format(vault),
-      info: 'Somma dei soli profitti realizzati. È blindato: le perdite non lo riducono, ma riducono il capitale operativo.',
+      value: currencyFormatter.format(strategyStats.grossWins),
+      info: 'Calcolato direttamente dallo storico: somma dei soli profitti realizzati. Le perdite non lo riducono, ma riducono il P/L netto e il capitale operativo.',
       icon: PiggyBank,
       accent: 'text-[var(--market-accent)]',
     },
