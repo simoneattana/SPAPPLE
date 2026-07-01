@@ -102,6 +102,22 @@ function mergePositions(incomingPositions = [], currentPositions = [], history =
   })
 }
 
+function roundPrice(value) {
+  return Number(value.toFixed(4))
+}
+
+function calculateVaultFromHistory(history = []) {
+  return history.reduce((total, trade) => {
+    const pnl = Number(trade?.pnlEur)
+
+    if (trade?.result !== 'WIN' || !Number.isFinite(pnl) || pnl <= 0) {
+      return total
+    }
+
+    return total + pnl
+  }, 0)
+}
+
 function latestTimestamp(first, second) {
   return timestamp(first) >= timestamp(second) ? first : second
 }
@@ -114,10 +130,20 @@ function mergeMarketState(incomingMarket = {}, currentMarket = {}) {
     currentMarket.positions,
     history,
   )
+  const vault = Math.max(
+    Number.isFinite(Number(incomingMarket.vault))
+      ? Number(incomingMarket.vault)
+      : 0,
+    Number.isFinite(Number(currentMarket.vault))
+      ? Number(currentMarket.vault)
+      : 0,
+    calculateVaultFromHistory(history),
+  )
 
   return {
     ...currentMarket,
     ...incomingMarket,
+    vault: roundPrice(vault),
     positions,
     history,
     orders,

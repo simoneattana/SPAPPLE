@@ -181,6 +181,18 @@ function sanitizeScanResults(results = [], marketId) {
   return results.filter((row) => resultBelongsToMarket(row, marketId))
 }
 
+function calculateVaultFromHistory(history = []) {
+  return history.reduce((total, trade) => {
+    const pnl = Number(trade?.pnlEur)
+
+    if (trade?.result !== 'WIN' || !Number.isFinite(pnl) || pnl <= 0) {
+      return total
+    }
+
+    return total + pnl
+  }, 0)
+}
+
 function normalizeMarketState(marketId, rawMarketState = {}) {
   const strategy = getTradingStrategy(marketId)
   const fallback = createInitialMarketState(strategy)
@@ -211,6 +223,11 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
     history,
     orders,
   )
+  const vaultFromHistory = calculateVaultFromHistory(backfill.history)
+  const normalizedVault = Math.max(
+    Number.isFinite(vault) ? vault : fallback.vault,
+    vaultFromHistory,
+  )
   const positions = removeClosedPositions(
     Array.isArray(rawMarketState.positions)
       ? rawMarketState.positions
@@ -224,7 +241,7 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
     marketId,
     marketLabel: strategy.label,
     capital: normalizedCapital,
-    vault: Number.isFinite(vault) ? vault : fallback.vault,
+    vault: roundPrice(normalizedVault),
     positions,
     history: backfill.history,
     orders: backfill.orders,
