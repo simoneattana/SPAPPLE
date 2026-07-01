@@ -77,6 +77,20 @@ function formatDate(value) {
   return date ? dateFormatter.format(date) : 'N/D'
 }
 
+function exitReasonLabel(reason) {
+  const labels = {
+    BREAK_EVEN_STOP: 'Stop a pareggio',
+    MANUALE: 'Manuale',
+    SESSION_PROTECTION: 'Protezione 16:25',
+    STOP_LOSS: 'Stop loss',
+    TAKE_PROFIT: 'Take profit',
+    TAKE_PROFIT_MAX: 'Target massimo',
+    TRAILING_PROFIT: 'Trailing profit',
+  }
+
+  return labels[reason] || reason || 'N/D'
+}
+
 function formatMonth(value) {
   const date = normalizeDate(value)
 
@@ -522,7 +536,7 @@ export default function Diary({ marketId }) {
                     {trade.type === 'LONG' ? 'Long' : 'Short'}
                   </TableCell>
                   <TableCell className="text-slate-400">
-                    {trade.exitReason || 'N/D'}
+                    {exitReasonLabel(trade.exitReason)}
                   </TableCell>
                   <TableCell className={resultTextColor(trade.result)}>
                     {formatCurrency(trade.pnlEur)}

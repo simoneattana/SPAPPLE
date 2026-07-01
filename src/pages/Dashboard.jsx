@@ -60,6 +60,7 @@ function exitReasonLabel(reason) {
   const labels = {
     MANUALE: 'Manuale',
     BREAK_EVEN_STOP: 'Stop a pareggio',
+    SESSION_PROTECTION: 'Protezione 16:25',
     STOP_LOSS: 'Stop loss',
     TAKE_PROFIT: 'Take profit',
     TAKE_PROFIT_MAX: 'Target massimo',
