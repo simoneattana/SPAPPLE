@@ -43,6 +43,8 @@ const RSI_PERIOD = 14
 const ATR_PERIOD = 14
 const REQUEST_CONCURRENCY = 8
 const EXECUTION_MODE = 'simulation'
+const EQUITIES_SCAN_INTERVAL_MS = 15 * 60_000
+const CRYPTO_SCAN_INTERVAL_MS = 5 * 60_000
 const EQUITIES_MARKET_CLOSE_GUARD = {
   marketId: 'equities',
   timezone: 'Europe/Rome',
@@ -60,13 +62,15 @@ function getTimeInTimezone(date = new Date(), timezone = 'Europe/Rome') {
   const parts = new Intl.DateTimeFormat('it-IT', {
     hour: '2-digit',
     minute: '2-digit',
+    second: '2-digit',
     hour12: false,
     timeZone: timezone,
   }).formatToParts(date)
   const hour = Number(parts.find((part) => part.type === 'hour')?.value)
   const minute = Number(parts.find((part) => part.type === 'minute')?.value)
+  const second = Number(parts.find((part) => part.type === 'second')?.value)
 
-  return { hour, minute }
+  return { hour, minute, second }
 }
 
 function isEquitiesCloseGuardActive(strategy, date = new Date()) {
@@ -96,6 +100,43 @@ function getEquitiesCloseGuardLabel() {
   ).padStart(2, '0')}`
 }
 
+function getMarketScanIntervalMs(marketId) {
+  return marketId === 'crypto' ? CRYPTO_SCAN_INTERVAL_MS : EQUITIES_SCAN_INTERVAL_MS
+}
+
+function getNextEquitiesOpenAt(now = new Date()) {
+  const currentRomeTime = getTimeInTimezone(
+    now,
+    EQUITIES_MARKET_CLOSE_GUARD.timezone,
+  )
+  const currentSeconds =
+    currentRomeTime.hour * 3600 +
+    currentRomeTime.minute * 60 +
+    currentRomeTime.second
+  const openSeconds = 6 * 3600
+
+  if (!Number.isFinite(currentSeconds)) {
+    return new Date(now.getTime() + EQUITIES_SCAN_INTERVAL_MS)
+  }
+
+  const secondsUntilOpen =
+    currentSeconds < openSeconds
+      ? openSeconds - currentSeconds
+      : 24 * 3600 - currentSeconds + openSeconds
+
+  return new Date(now.getTime() + secondsUntilOpen * 1000)
+}
+
+function getNextScanAt(marketId, from = new Date()) {
+  const strategy = getTradingStrategy(marketId)
+
+  if (isEquitiesCloseGuardActive(strategy, from)) {
+    return getNextEquitiesOpenAt(from).toISOString()
+  }
+
+  return new Date(from.getTime() + getMarketScanIntervalMs(marketId)).toISOString()
+}
+
 function getStrategyMaxPositions(strategy) {
   return Number.isFinite(Number(strategy.maxPositions))
     ? Number(strategy.maxPositions)
@@ -118,8 +159,14 @@ const marketStateFields = [
   'lastScanCount',
   'lastSignalCount',
   'lastScanResults',
+  'isChecking',
+  'isScanning',
+  'lastAutomationMessage',
+  'lastDataProvider',
+  'lastSyncAt',
   'lastLiveCheckAt',
   'lastBackendCheckAt',
+  'nextScanAt',
   'nextLiveCheckAt',
   'engineStatus',
   'liveMonitorEnabled',
@@ -148,8 +195,14 @@ const initialState = {
   lastScanCount: 0,
   lastSignalCount: 0,
   lastScanResults: [],
+  isChecking: false,
+  isScanning: false,
+  lastAutomationMessage: 'Pilota automatico pronto.',
+  lastDataProvider: null,
+  lastSyncAt: null,
   lastLiveCheckAt: null,
   lastBackendCheckAt: null,
+  nextScanAt: getNextScanAt(DEFAULT_MARKET_ID),
   nextLiveCheckAt: null,
   engineStatus: 'In attesa',
 }
@@ -299,8 +352,14 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
     lastScanCount: 0,
     lastSignalCount: 0,
     lastScanResults: [],
+    isChecking: false,
+    isScanning: false,
+    lastAutomationMessage: 'Pilota automatico pronto.',
+    lastDataProvider: null,
+    lastSyncAt: null,
     lastLiveCheckAt: null,
     lastBackendCheckAt: null,
+    nextScanAt: getNextScanAt(strategy.id),
     nextLiveCheckAt: null,
     engineStatus: 'In attesa',
   }
@@ -357,26 +416,36 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
       : [],
     events: Array.isArray(rawMarketState.events) ? rawMarketState.events : [],
     executionMode: rawMarketState.executionMode || fallback.executionMode,
-    killSwitchEnabled:
-      typeof rawMarketState.killSwitchEnabled === 'boolean'
-        ? rawMarketState.killSwitchEnabled
-        : fallback.killSwitchEnabled,
+    killSwitchEnabled: false,
     riskLimits: {
       ...DEFAULT_RISK_LIMITS,
       ...(rawMarketState.riskLimits || {}),
     },
-    automationEnabled:
-      typeof rawMarketState.automationEnabled === 'boolean'
-        ? rawMarketState.automationEnabled
-        : fallback.automationEnabled,
-    liveMonitorEnabled:
-      typeof rawMarketState.liveMonitorEnabled === 'boolean'
-        ? rawMarketState.liveMonitorEnabled
-        : fallback.liveMonitorEnabled,
+    automationEnabled: true,
+    liveMonitorEnabled: true,
     backendMonitorEnabled:
       typeof rawMarketState.backendMonitorEnabled === 'boolean'
         ? rawMarketState.backendMonitorEnabled
         : fallback.backendMonitorEnabled,
+    isChecking: Boolean(rawMarketState.isChecking),
+    isScanning: Boolean(rawMarketState.isScanning),
+    lastAutomationMessage:
+      rawMarketState.lastAutomationMessage || fallback.lastAutomationMessage,
+    lastDataProvider: rawMarketState.lastDataProvider || fallback.lastDataProvider,
+    lastSyncAt: rawMarketState.lastSyncAt || fallback.lastSyncAt,
+    lastScanAt: rawMarketState.lastScanAt || fallback.lastScanAt,
+    lastScanCount: Number.isFinite(Number(rawMarketState.lastScanCount))
+      ? Number(rawMarketState.lastScanCount)
+      : fallback.lastScanCount,
+    lastSignalCount: Number.isFinite(Number(rawMarketState.lastSignalCount))
+      ? Number(rawMarketState.lastSignalCount)
+      : fallback.lastSignalCount,
+    lastLiveCheckAt: rawMarketState.lastLiveCheckAt || fallback.lastLiveCheckAt,
+    lastBackendCheckAt:
+      rawMarketState.lastBackendCheckAt || fallback.lastBackendCheckAt,
+    nextScanAt:
+      rawMarketState.nextScanAt || fallback.nextScanAt || getNextScanAt(marketId),
+    nextLiveCheckAt: rawMarketState.nextLiveCheckAt || fallback.nextLiveCheckAt,
     lastScanResults: sanitizeScanResults(rawMarketState.lastScanResults, marketId),
   }
 }
@@ -1668,6 +1737,9 @@ export async function runBackendMonitor(state) {
   const sizing = strategy.positionSizing
   const maxPositions = getStrategyMaxPositions(strategy)
   const closeGuardActive = isEquitiesCloseGuardActive(strategy)
+  const now = new Date()
+  const nextScanTime = current.nextScanAt ? new Date(current.nextScanAt).getTime() : 0
+  const scanDue = !nextScanTime || nextScanTime <= now.getTime()
 
   if (!current.backendMonitorEnabled || !current.automationEnabled) {
     const activity = createActivity({
@@ -1680,7 +1752,11 @@ export async function runBackendMonitor(state) {
     return {
       state: syncActiveMarketState({
         ...current,
+        isChecking: false,
+        isScanning: false,
         lastBackendCheckAt: new Date().toISOString(),
+        lastAutomationMessage:
+          'Monitor backend in pausa: pilota automatico o backend non attivi.',
         ...appendLogs(current, activity),
       }),
       closedTrades: [],
@@ -1700,8 +1776,38 @@ export async function runBackendMonitor(state) {
       return {
         state: syncActiveMarketState({
           ...current,
+          isChecking: false,
+          isScanning: false,
           engineStatus: `Protezione azioni ${getEquitiesCloseGuardLabel()} attiva`,
+          nextScanAt: getNextScanAt(current.activeMarket, now),
           lastBackendCheckAt: new Date().toISOString(),
+          lastAutomationMessage:
+            'Mondo azionario fermo: nessuna scansione o apertura prima delle 06:00.',
+          ...appendLogs(current, activity),
+        }),
+        closedTrades: [],
+        openedTrades: [],
+        checkedCount: 0,
+        errors: [],
+      }
+    }
+
+    if (!scanDue) {
+      const activity = createActivity({
+        type: 'backend-monitor',
+        status: 'waiting',
+        title: 'Backend in attesa dati',
+        detail: `Nessuna posizione aperta. Prossima scansione automatica gia programmata.`,
+      })
+
+      return {
+        state: syncActiveMarketState({
+          ...current,
+          isChecking: false,
+          isScanning: false,
+          lastBackendCheckAt: new Date().toISOString(),
+          lastAutomationMessage:
+            'Sono in attesa della prossima finestra di scansione automatica.',
           ...appendLogs(current, activity),
         }),
         closedTrades: [],
@@ -1755,6 +1861,20 @@ export async function runBackendMonitor(state) {
         capital: refill ? refill.capital : current.capital,
         positions: refill ? refill.positions : current.positions,
         orders: refill ? refill.orders : current.orders,
+        isChecking: false,
+        isScanning: false,
+        lastSyncAt: new Date().toISOString(),
+        nextScanAt: getNextScanAt(current.activeMarket, now),
+        lastDataProvider:
+          current.activeMarket === 'crypto'
+            ? 'Kraken + CoinGecko'
+            : 'Yahoo Finance',
+        lastAutomationMessage:
+          openedTrades.length > 0
+            ? `Ho aperto ${openedTrades.length} nuovi slot dal backend.`
+            : refillErrors.length > 0
+              ? `Ricerca automatica non riuscita: ${refillErrors[0]}.`
+              : 'Scansione backend completata: nessun segnale apribile ora.',
         ...(refill
           ? {
               lastScanAt: new Date().toISOString(),
@@ -1823,7 +1943,7 @@ export async function runBackendMonitor(state) {
   let scanPatch = {}
 
   if (
-    closedTrades.length > 0 &&
+    (closedTrades.length > 0 || scanDue) &&
     !closeGuardActive &&
     activePositions.length < maxPositions &&
     canOpenPosition(capital, sizing)
@@ -1847,6 +1967,12 @@ export async function runBackendMonitor(state) {
         lastScanCount: refill.scannedCount,
         lastSignalCount: refill.signalCount,
         lastScanResults: refill.marketData,
+        lastSyncAt: new Date().toISOString(),
+        nextScanAt: getNextScanAt(current.activeMarket, now),
+        lastDataProvider:
+          current.activeMarket === 'crypto'
+            ? 'Kraken + CoinGecko'
+            : 'Yahoo Finance',
       }
     } catch (error) {
       refillErrors.push(error.message || 'Ricerca nuovi titoli non riuscita')
@@ -1892,6 +2018,22 @@ export async function runBackendMonitor(state) {
       positions: activePositions,
       orders,
       history: [...closedTrades, ...current.history],
+      isChecking: false,
+      isScanning: false,
+      lastSyncAt: new Date().toISOString(),
+      nextScanAt:
+        scanPatch.nextScanAt ||
+        (scanDue || closeGuardActive
+          ? getNextScanAt(current.activeMarket, now)
+          : current.nextScanAt || getNextScanAt(current.activeMarket, now)),
+      lastAutomationMessage:
+        openedTrades.length > 0
+          ? `${closedTrades.length} chiusure e ${openedTrades.length} nuove aperture automatiche.`
+          : closedTrades.length > 0
+            ? `${closedTrades.length} posizioni chiuse automaticamente.`
+            : scanDue
+              ? 'Controllo backend completato: nessun nuovo slot apribile ora.'
+              : 'Controllo backend completato: posizioni monitorate, prossima scansione gia programmata.',
       ...scanPatch,
       lastBackendCheckAt: new Date().toISOString(),
       lastLiveCheckAt: new Date().toISOString(),

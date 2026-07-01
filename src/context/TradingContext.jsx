@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { fetchLatestPrice } from '../services/api'
+import { fetchLatestPrice, fetchMarketData } from '../services/api'
+import { fetchCryptoMarketData } from '../services/cryptoApi'
+import { CRYPTO_TICKERS } from '../services/cryptoUniverse'
+import { EUROPEAN_TICKERS } from '../services/marketUniverse'
 import {
   LEGACY_POSITION_SIZE,
   MIN_POSITION_SIZE,
@@ -7,7 +10,17 @@ import {
   canOpenPosition,
 } from '../services/positionSizing'
 import { getMarketCopy } from '../services/marketCopy'
-import { getCryptoSignalType } from '../services/cryptoRules'
+import {
+  getCryptoSignalType,
+  isCryptoActionableResult,
+  isCryptoAutoEligibleResult,
+  sortByCryptoAutoScore,
+} from '../services/cryptoRules'
+import {
+  isActionableResult,
+  isAutoEligibleResult,
+  sortByAutoScore,
+} from '../services/tradingRules'
 import {
   loadRemoteTradingState,
   saveRemoteTradingState,
@@ -24,7 +37,9 @@ const MAX_POSITIONS = 5
 const STORAGE_KEY = 'spapple_state'
 const STORAGE_VERSION = 5
 const LIVE_MONITOR_INTERVAL_MS = 60_000
-const REMOTE_REFRESH_INTERVAL_MS = 30_000
+const REMOTE_REFRESH_INTERVAL_MS = 20_000
+const EQUITIES_SCAN_INTERVAL_MS = 15 * 60_000
+const CRYPTO_SCAN_INTERVAL_MS = 5 * 60_000
 const EXECUTION_MODE = 'simulation'
 const EQUITIES_MARKET_CLOSE_GUARD = {
   marketId: 'equities',
@@ -43,13 +58,15 @@ function getTimeInTimezone(date = new Date(), timezone = 'Europe/Rome') {
   const parts = new Intl.DateTimeFormat('it-IT', {
     hour: '2-digit',
     minute: '2-digit',
+    second: '2-digit',
     hour12: false,
     timeZone: timezone,
   }).formatToParts(date)
   const hour = Number(parts.find((part) => part.type === 'hour')?.value)
   const minute = Number(parts.find((part) => part.type === 'minute')?.value)
+  const second = Number(parts.find((part) => part.type === 'second')?.value)
 
-  return { hour, minute }
+  return { hour, minute, second }
 }
 
 function isEquitiesCloseGuardActive(strategy, date = new Date()) {
@@ -79,6 +96,67 @@ function getEquitiesCloseGuardLabel() {
   ).padStart(2, '0')}`
 }
 
+function getMarketScanIntervalMs(marketId) {
+  return marketId === 'crypto' ? CRYPTO_SCAN_INTERVAL_MS : EQUITIES_SCAN_INTERVAL_MS
+}
+
+function getNextEquitiesOpenAt(now = new Date()) {
+  const currentRomeTime = getTimeInTimezone(
+    now,
+    EQUITIES_MARKET_CLOSE_GUARD.timezone,
+  )
+  const currentSeconds =
+    currentRomeTime.hour * 3600 +
+    currentRomeTime.minute * 60 +
+    currentRomeTime.second
+  const openSeconds = 6 * 3600
+
+  if (!Number.isFinite(currentSeconds)) {
+    return new Date(now.getTime() + EQUITIES_SCAN_INTERVAL_MS)
+  }
+
+  const secondsUntilOpen =
+    currentSeconds < openSeconds
+      ? openSeconds - currentSeconds
+      : 24 * 3600 - currentSeconds + openSeconds
+
+  return new Date(now.getTime() + secondsUntilOpen * 1000)
+}
+
+function getNextScanAt(marketId, from = new Date()) {
+  const strategy = getTradingStrategy(marketId)
+
+  if (isEquitiesCloseGuardActive(strategy, from)) {
+    return getNextEquitiesOpenAt(from).toISOString()
+  }
+
+  return new Date(from.getTime() + getMarketScanIntervalMs(marketId)).toISOString()
+}
+
+function getMarketScannerConfig(marketId) {
+  if (marketId === 'crypto') {
+    return {
+      errorLabel: 'Kraken',
+      fetcher: fetchCryptoMarketData,
+      isActionable: isCryptoActionableResult,
+      isAutoEligible: isCryptoAutoEligibleResult,
+      provider: 'Kraken + CoinGecko',
+      sortByScore: sortByCryptoAutoScore,
+      universe: CRYPTO_TICKERS,
+    }
+  }
+
+  return {
+    errorLabel: 'Yahoo Finance',
+    fetcher: fetchMarketData,
+    isActionable: isActionableResult,
+    isAutoEligible: isAutoEligibleResult,
+    provider: 'Yahoo Finance',
+    sortByScore: sortByAutoScore,
+    universe: EUROPEAN_TICKERS,
+  }
+}
+
 const initialActivity = {
   id: 'system-ready',
   type: 'system',
@@ -105,10 +183,16 @@ const marketStateFields = [
   'lastSignalCount',
   'lastScanResults',
   'engineStatus',
+  'isChecking',
+  'isScanning',
+  'lastAutomationMessage',
+  'lastDataProvider',
+  'lastSyncAt',
   'liveMonitorEnabled',
   'backendMonitorEnabled',
   'lastLiveCheckAt',
   'lastBackendCheckAt',
+  'nextScanAt',
   'nextLiveCheckAt',
 ]
 
@@ -132,10 +216,16 @@ function createInitialMarketState(strategy = getTradingStrategy()) {
     lastSignalCount: 0,
     lastScanResults: [],
     engineStatus: 'In attesa',
+    isChecking: false,
+    isScanning: false,
+    lastAutomationMessage: 'Pilota automatico pronto.',
+    lastDataProvider: null,
+    lastSyncAt: null,
     liveMonitorEnabled: true,
     backendMonitorEnabled: true,
     lastLiveCheckAt: null,
     lastBackendCheckAt: null,
+    nextScanAt: getNextScanAt(strategy.id),
     nextLiveCheckAt: null,
   }
 }
@@ -175,6 +265,7 @@ const initialState = {
   backendMonitorEnabled: true,
   lastLiveCheckAt: null,
   lastBackendCheckAt: null,
+  nextScanAt: getNextScanAt(DEFAULT_MARKET_ID),
   nextLiveCheckAt: null,
 }
 
@@ -358,18 +449,12 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
         ? rawMarketState.activityLog
         : fallback.events,
     executionMode: rawMarketState.executionMode || fallback.executionMode,
-    killSwitchEnabled:
-      typeof rawMarketState.killSwitchEnabled === 'boolean'
-        ? rawMarketState.killSwitchEnabled
-        : fallback.killSwitchEnabled,
+    killSwitchEnabled: false,
     riskLimits: {
       ...DEFAULT_RISK_LIMITS,
       ...(rawMarketState.riskLimits || {}),
     },
-    automationEnabled:
-      typeof rawMarketState.automationEnabled === 'boolean'
-        ? rawMarketState.automationEnabled
-        : fallback.automationEnabled,
+    automationEnabled: true,
     lastScanAt: rawMarketState.lastScanAt || fallback.lastScanAt,
     lastScanCount: Number.isFinite(Number(rawMarketState.lastScanCount))
       ? Number(rawMarketState.lastScanCount)
@@ -379,10 +464,13 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
       : fallback.lastSignalCount,
     lastScanResults: sanitizeScanResults(rawMarketState.lastScanResults, marketId),
     engineStatus: rawMarketState.engineStatus || fallback.engineStatus,
-    liveMonitorEnabled:
-      typeof rawMarketState.liveMonitorEnabled === 'boolean'
-        ? rawMarketState.liveMonitorEnabled
-        : fallback.liveMonitorEnabled,
+    isChecking: Boolean(rawMarketState.isChecking),
+    isScanning: Boolean(rawMarketState.isScanning),
+    lastAutomationMessage:
+      rawMarketState.lastAutomationMessage || fallback.lastAutomationMessage,
+    lastDataProvider: rawMarketState.lastDataProvider || fallback.lastDataProvider,
+    lastSyncAt: rawMarketState.lastSyncAt || fallback.lastSyncAt,
+    liveMonitorEnabled: true,
     backendMonitorEnabled:
       typeof rawMarketState.backendMonitorEnabled === 'boolean'
         ? rawMarketState.backendMonitorEnabled
@@ -390,6 +478,8 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
     lastLiveCheckAt: rawMarketState.lastLiveCheckAt || fallback.lastLiveCheckAt,
     lastBackendCheckAt:
       rawMarketState.lastBackendCheckAt || fallback.lastBackendCheckAt,
+    nextScanAt:
+      rawMarketState.nextScanAt || fallback.nextScanAt || getNextScanAt(marketId),
     nextLiveCheckAt: rawMarketState.nextLiveCheckAt || fallback.nextLiveCheckAt,
   }
 }
@@ -1198,6 +1288,7 @@ export function TradingProvider({ children }) {
   const remoteUpdatedAtRef = useRef(null)
   const remoteSaveTimerRef = useRef(null)
   const liveCheckRunningRef = useRef(false)
+  const scanRunningRef = useRef(new Set())
   const closingPositionsRef = useRef(new Set())
 
   useEffect(() => {
@@ -1447,6 +1538,7 @@ export function TradingProvider({ children }) {
     updateTradingState((current) => {
       const marketId = targetMarketId || current.activeMarket
       const marketCopy = getMarketCopy(marketId)
+      const scannerConfig = getMarketScannerConfig(marketId)
       const syncedCurrent = syncActiveMarketState(current)
       const marketState = normalizeMarketState(
         marketId,
@@ -1454,6 +1546,9 @@ export function TradingProvider({ children }) {
       )
       const nextMarketState = {
         ...marketState,
+        isScanning: true,
+        lastDataProvider: scannerConfig.provider,
+        lastAutomationMessage: `Sto leggendo dati reali da ${scannerConfig.provider}.`,
         engineStatus: 'Scansione mercato in corso',
         ...appendLogs(
           marketState,
@@ -1474,6 +1569,8 @@ export function TradingProvider({ children }) {
     updateTradingState((current) => {
       const marketId = targetMarketId || current.activeMarket
       const marketCopy = getMarketCopy(marketId)
+      const scannerConfig = getMarketScannerConfig(marketId)
+      const completedAt = new Date()
       const syncedCurrent = syncActiveMarketState(current)
       const marketState = normalizeMarketState(
         marketId,
@@ -1481,9 +1578,13 @@ export function TradingProvider({ children }) {
       )
       const nextMarketState = {
         ...marketState,
-        lastScanAt: new Date().toISOString(),
+        isScanning: false,
+        lastDataProvider: scannerConfig.provider,
+        lastSyncAt: completedAt.toISOString(),
+        lastScanAt: completedAt.toISOString(),
         lastScanCount: scannedCount,
         lastSignalCount: signalCount,
+        nextScanAt: getNextScanAt(marketId, completedAt),
         lastScanResults: Array.isArray(results)
           ? results
           : marketState.lastScanResults,
@@ -1491,6 +1592,10 @@ export function TradingProvider({ children }) {
           signalCount > 0
             ? 'Segnali disponibili'
             : 'Nessun segnale operativo',
+        lastAutomationMessage:
+          signalCount > 0
+            ? `${signalCount} segnali validi trovati. Valuto aperture automatiche se gli slot e i limiti rischio lo consentono.`
+            : `Dati aggiornati da ${scannerConfig.provider}. Nessun segnale operativo ora.`,
         ...appendLogs(
           marketState,
           createActivity({
@@ -1513,6 +1618,7 @@ export function TradingProvider({ children }) {
     updateTradingState((current) => {
       const marketId = targetMarketId || current.activeMarket
       const marketCopy = getMarketCopy(marketId)
+      const failedAt = new Date()
       const syncedCurrent = syncActiveMarketState(current)
       const marketState = normalizeMarketState(
         marketId,
@@ -1520,6 +1626,12 @@ export function TradingProvider({ children }) {
       )
       const nextMarketState = {
         ...marketState,
+        isScanning: false,
+        lastSyncAt: failedAt.toISOString(),
+        nextScanAt: getNextScanAt(marketId, failedAt),
+        lastAutomationMessage:
+          message ||
+          `${marketCopy.provider} non ha restituito dati utilizzabili.`,
         engineStatus: 'Errore dati mercato',
         ...appendLogs(
           marketState,
@@ -1832,6 +1944,93 @@ export function TradingProvider({ children }) {
     return { openedTrades, skippedTickers }
   }, [])
 
+  const runAutomatedScan = useCallback(async (targetMarketId) => {
+    const marketId = targetMarketId || stateRef.current.activeMarket
+
+    if (scanRunningRef.current.has(marketId)) {
+      return { openedTrades: [], skipped: true }
+    }
+
+    const strategy = getTradingStrategy(marketId)
+    const scannerConfig = getMarketScannerConfig(marketId)
+
+    if (isEquitiesCloseGuardActive(strategy)) {
+      updateTradingState((current) => {
+        const syncedCurrent = syncActiveMarketState(current)
+        const marketState = normalizeMarketState(
+          marketId,
+          syncedCurrent.markets?.[marketId],
+        )
+
+        return updateMarketState(syncedCurrent, marketId, {
+          ...marketState,
+          isScanning: false,
+          nextScanAt: getNextScanAt(marketId),
+          engineStatus: `Protezione azioni ${getEquitiesCloseGuardLabel()} attiva`,
+          lastAutomationMessage:
+            'Mondo azionario fermo: nessuna scansione o apertura prima delle 06:00.',
+        })
+      })
+
+      return { openedTrades: [], skipped: true }
+    }
+
+    scanRunningRef.current.add(marketId)
+    recordScanStart(scannerConfig.universe.length, marketId)
+
+    try {
+      const marketData = await scannerConfig.fetcher(scannerConfig.universe)
+      const actionableRows = marketData.filter(scannerConfig.isActionable)
+      const automaticRows = scannerConfig.sortByScore(
+        marketData.filter(scannerConfig.isAutoEligible),
+      )
+
+      recordScanComplete(
+        {
+          scannedCount: marketData.length,
+          signalCount: actionableRows.length,
+          results: marketData,
+        },
+        marketId,
+      )
+
+      const { openedTrades } = executeAutomatedTrades(automaticRows, marketId)
+
+      updateTradingState((current) => {
+        const syncedCurrent = syncActiveMarketState(current)
+        const marketState = normalizeMarketState(
+          marketId,
+          syncedCurrent.markets?.[marketId],
+        )
+        const message =
+          openedTrades.length > 0
+            ? `Ho aperto ${openedTrades.length} posizioni automatiche dopo dati ${scannerConfig.provider}.`
+            : actionableRows.length > 0
+              ? 'Ho trovato segnali, ma nessuno abbastanza forte o apribile secondo i limiti rischio.'
+              : `Dati aggiornati da ${scannerConfig.provider}. Resto in attesa del prossimo ciclo.`
+
+        return updateMarketState(syncedCurrent, marketId, {
+          ...marketState,
+          isScanning: false,
+          lastAutomationMessage: message,
+        })
+      })
+
+      return { openedTrades, skipped: false }
+    } catch (error) {
+      recordScanError(error.message, marketId)
+      return { openedTrades: [], skipped: false, error }
+    } finally {
+      scanRunningRef.current.delete(marketId)
+    }
+  }, [
+    executeAutomatedTrades,
+    recordScanComplete,
+    recordScanError,
+    recordScanStart,
+    updateTradingState,
+  ])
+
   const fetchPositionPrices = useCallback(async (positions, targetMarketId = null) => {
     const marketId = targetMarketId || stateRef.current.activeMarket
     return Promise.all(
@@ -2011,6 +2210,23 @@ export function TradingProvider({ children }) {
           })
         })
       }
+      updateTradingState((current) => {
+        const syncedCurrent = syncActiveMarketState(current)
+        const currentMarketState = normalizeMarketState(
+          marketId,
+          syncedCurrent.markets?.[marketId],
+        )
+
+        return updateMarketState(syncedCurrent, marketId, {
+          ...currentMarketState,
+          nextLiveCheckAt: new Date(
+            Date.now() + LIVE_MONITOR_INTERVAL_MS,
+          ).toISOString(),
+          lastAutomationMessage:
+            currentMarketState.lastAutomationMessage ||
+            'Nessuna posizione aperta: aspetto la prossima scansione automatica.',
+        })
+      })
       return
     }
 
@@ -2023,7 +2239,9 @@ export function TradingProvider({ children }) {
 
       return updateMarketState(syncedCurrent, marketId, {
         ...currentMarketState,
+        isChecking: true,
         engineStatus: 'Monitor live in corso',
+        lastAutomationMessage: `Sto controllando ${currentMarketState.positions.length} posizioni aperte con prezzi reali.`,
         nextLiveCheckAt: null,
         ...appendLogs(
           currentMarketState,
@@ -2051,8 +2269,11 @@ export function TradingProvider({ children }) {
 
         return updateMarketState(syncedCurrent, marketId, {
           ...currentMarketState,
+          isChecking: false,
           engineStatus: 'Errore monitor live',
           nextLiveCheckAt: new Date(Date.now() + LIVE_MONITOR_INTERVAL_MS).toISOString(),
+          lastAutomationMessage:
+            error.message || 'Prezzi aggiornati non disponibili.',
           ...appendLogs(
             currentMarketState,
             createActivity({
@@ -2091,6 +2312,8 @@ export function TradingProvider({ children }) {
         positions: activePositions,
         orders: appendOrders(currentMarketState, closeOrders),
         history: [...closedTrades, ...currentMarketState.history],
+        isChecking: false,
+        lastSyncAt: new Date().toISOString(),
         lastLiveCheckAt: new Date().toISOString(),
         nextLiveCheckAt:
           activePositions.length > 0 && currentMarketState.liveMonitorEnabled
@@ -2102,6 +2325,12 @@ export function TradingProvider({ children }) {
             : closeGuardActive
               ? `Protezione azioni ${getEquitiesCloseGuardLabel()} completata`
               : 'In attesa di nuova scansione',
+        lastAutomationMessage:
+          closedTrades.length > 0
+            ? closeGuardActive
+              ? `${closedTrades.length} posizioni azionarie chiuse dalla protezione ${getEquitiesCloseGuardLabel()}.`
+              : `${closedTrades.length} posizioni chiuse automaticamente.`
+            : `${evaluatedCount} posizioni controllate. Nessun target o stop raggiunto.`,
         ...appendLogs(
           currentMarketState,
           createActivity({
@@ -2330,6 +2559,71 @@ export function TradingProvider({ children }) {
   }, [
     isAuthenticated,
     runLiveCheck,
+    state.markets,
+    updateTradingState,
+  ])
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return undefined
+    }
+
+    const marketIds = Object.values(TRADING_STRATEGIES).map((strategy) => strategy.id)
+
+    const missingNextScanIds = marketIds.filter((marketId) => {
+      const marketState = normalizeMarketState(marketId, state.markets?.[marketId])
+      return !marketState.nextScanAt
+    })
+
+    if (missingNextScanIds.length > 0) {
+      updateTradingState((current) => {
+        let nextState = syncActiveMarketState(current)
+
+        missingNextScanIds.forEach((marketId) => {
+          const marketState = normalizeMarketState(
+            marketId,
+            nextState.markets?.[marketId],
+          )
+
+          nextState = updateMarketState(nextState, marketId, {
+            ...marketState,
+            nextScanAt: getNextScanAt(marketId),
+          })
+        })
+
+        return nextState
+      })
+    }
+
+    const intervalId = window.setInterval(() => {
+      const snapshot = syncActiveMarketState(stateRef.current)
+
+      marketIds.forEach((marketId) => {
+        const marketState = normalizeMarketState(
+          marketId,
+          snapshot.markets?.[marketId],
+        )
+        const dueAt = marketState.nextScanAt
+          ? new Date(marketState.nextScanAt).getTime()
+          : 0
+
+        if (
+          marketState.automationEnabled &&
+          !marketState.isScanning &&
+          Number.isFinite(dueAt) &&
+          dueAt <= Date.now()
+        ) {
+          runAutomatedScan(marketId)
+        }
+      })
+    }, 5_000)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [
+    isAuthenticated,
+    runAutomatedScan,
     state.markets,
     updateTradingState,
   ])
