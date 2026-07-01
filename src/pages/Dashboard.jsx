@@ -191,7 +191,6 @@ export default function Dashboard({ marketId }) {
   const executedOrders = orders.filter((order) => order.status === 'ESEGUITO')
   const recentClosedTrades = history.slice(0, 5)
   const todayClosedTrades = history.filter((trade) => isToday(trade.exitDate))
-  const visibleTodayClosedTrades = todayClosedTrades.slice(0, 5)
   const latestClosedTrade = recentClosedTrades[0] || null
   const ordersById = new Map(orders.map((order) => [order.id, order]))
   const lastScanAt = routeMarketState.lastScanAt || null
@@ -355,7 +354,7 @@ export default function Dashboard({ marketId }) {
             <Badge>{todayClosedTrades.length} oggi</Badge>
           </CardHeader>
           <CardContent className="p-0">
-            {visibleTodayClosedTrades.length > 0 ? (
+            {todayClosedTrades.length > 0 ? (
               <Table>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
@@ -368,7 +367,7 @@ export default function Dashboard({ marketId }) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {visibleTodayClosedTrades.map((trade, index) => {
+                  {todayClosedTrades.map((trade, index) => {
                     const closeOrder = ordersById.get(trade.closeOrderId)
                     const isWin = trade.result === 'WIN'
 
