@@ -57,6 +57,36 @@ export const CRYPTO_TICKERS = [
   cryptoAsset('LTC', 'litecoin', 'Litecoin', 'Pagamenti', 'Criptovaluta storica focalizzata su pagamenti rapidi e costi contenuti.'),
 ]
 
+export const CRYPTO_LEGACY_TICKERS = [
+  cryptoAsset('DOGE', 'dogecoin', 'Dogecoin', 'Legacy monitoraggio', 'Asset rimosso dalla watchlist operativa ma ancora monitorabile per chiudere vecchie posizioni.', 'XDGEUR', {
+    tradeEnabled: false,
+    role: 'legacy',
+  }),
+  cryptoAsset('PEPE', 'pepe', 'Pepe', 'Legacy monitoraggio', 'Asset rimosso dalla watchlist operativa ma ancora monitorabile per storico o vecchie posizioni.', 'PEPEEUR', {
+    tradeEnabled: false,
+    role: 'legacy',
+  }),
+  cryptoAsset('MATIC', 'matic-network', 'MATIC', 'Legacy monitoraggio', 'Ticker storico di Polygon, mantenuto solo per eventuali vecchie posizioni e letto tramite la coppia POL/EUR.', 'POLEUR', {
+    tradeEnabled: false,
+    role: 'legacy',
+  }),
+]
+
+export const CRYPTO_PRICE_TICKERS = [
+  ...CRYPTO_TICKERS,
+  ...CRYPTO_LEGACY_TICKERS,
+]
+
+export function getCryptoMeta(input) {
+  if (typeof input === 'object' && input !== null) {
+    return input
+  }
+
+  return CRYPTO_PRICE_TICKERS.find(
+    (item) => item.ticker === input || item.krakenPair === input,
+  )
+}
+
 export const CRYPTO_UNIVERSE_STATS = {
   total: CRYPTO_TICKERS.length,
   mappedWithKrakenAlias: CRYPTO_TICKERS.filter(getCryptoMappingWarning).length,

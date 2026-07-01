@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import { ATR, RSI } from 'technicalindicators'
 import {
   CRYPTO_TICKERS,
+  getCryptoMeta,
   getCryptoMappingWarning,
 } from '../src/services/cryptoUniverse.js'
 import {
@@ -959,12 +960,6 @@ async function fetchChartPrice(ticker) {
   }
 
   return number
-}
-
-function getCryptoMeta(ticker) {
-  return CRYPTO_TICKERS.find(
-    (item) => item.ticker === ticker || item.krakenPair === ticker,
-  )
 }
 
 function getCoinGeckoApiKey() {

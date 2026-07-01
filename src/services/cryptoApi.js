@@ -1,6 +1,7 @@
 import { ATR, RSI } from 'technicalindicators'
 import {
   CRYPTO_TICKERS,
+  getCryptoMeta,
   getCryptoMappingWarning,
 } from './cryptoUniverse'
 import {
@@ -55,14 +56,6 @@ function assertNumber(value, label) {
   }
 
   return number
-}
-
-function getCryptoMeta(input) {
-  if (typeof input === 'object' && input !== null) {
-    return input
-  }
-
-  return CRYPTO_TICKERS.find((item) => item.ticker === input || item.krakenPair === input)
 }
 
 async function fetchCoinGeckoMarkets(items) {
