@@ -11,6 +11,7 @@ import { Button } from '../components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card'
 import { Skeleton } from '../components/ui/Skeleton'
 import { TickerInfo } from '../components/TickerInfo'
+import { MarketCountdownPanel } from '../components/MarketCountdownPanel'
 import {
   Table,
   TableBody,
@@ -833,6 +834,8 @@ export default function Scanner({ marketId }) {
           Aggiorna Scansione {scannerConfig.copy.scanMode}
         </Button>
       </header>
+
+      <MarketCountdownPanel marketId={effectiveMarket} />
 
       {loading ? (
         <Card>

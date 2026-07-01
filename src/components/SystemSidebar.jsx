@@ -9,11 +9,6 @@ import { useLocation } from 'react-router-dom'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { useTrading } from '../context/useTrading'
-import {
-  CRYPTO_AUTO_LONG_RSI_LIMIT,
-  CRYPTO_AUTO_SHORT_RSI_LIMIT,
-  CRYPTO_MAX_AUTO_ATR_PCT,
-} from '../services/cryptoRules'
 import { getMarketCopy } from '../services/marketCopy'
 import { getTradingStrategy } from '../strategies'
 
@@ -35,36 +30,6 @@ function formatActivityDate(value) {
   }
 
   return dateTimeFormatter.format(new Date(value))
-}
-
-function formatCountdown(target) {
-  if (!target) {
-    return 'In attesa'
-  }
-
-  const remainingMs = new Date(target).getTime() - Date.now()
-
-  if (!Number.isFinite(remainingMs) || remainingMs <= 0) {
-    return 'Ora'
-  }
-
-  return formatDuration(Math.ceil(remainingMs / 1000))
-}
-
-function getScanSummary({ lastScanAt, lastScanCount, lastSignalCount, routeMarket }) {
-  if (!lastScanAt) {
-    return 'Non ho ancora una scansione salvata per questo mercato.'
-  }
-
-  if (lastSignalCount <= 0) {
-    return `${lastScanCount} asset analizzati nell’ultima scansione. Nessun segnale apribile ora.`
-  }
-
-  if (routeMarket === 'crypto') {
-    return `${lastSignalCount} segnali visibili. Il pilota apre solo se il segnale crypto è abbastanza forte: RSI <= ${CRYPTO_AUTO_LONG_RSI_LIMIT} o >= ${CRYPTO_AUTO_SHORT_RSI_LIMIT}, ATR entro ${CRYPTO_MAX_AUTO_ATR_PCT}% e liquidità ok.`
-  }
-
-  return `${lastSignalCount} segnali visibili. Il pilota apre solo se rischio, slot, cooldown e qualità del segnale lo consentono.`
 }
 
 function getRomeClockParts(date = new Date()) {
@@ -236,16 +201,11 @@ export function SystemSidebar() {
   const engineStatus = marketState.engineStatus || 'In attesa'
   const isChecking = Boolean(marketState.isChecking)
   const isScanning = Boolean(marketState.isScanning)
-  const lastAutomationMessage = marketState.lastAutomationMessage || null
-  const lastDataProvider = marketState.lastDataProvider || marketCopy.provider
   const lastSyncAt = marketState.lastSyncAt || null
   const lastScanAt = marketState.lastScanAt || null
   const lastSignalCount = Number(marketState.lastSignalCount || 0)
-  const lastScanCount = Number(marketState.lastScanCount || 0)
   const lastLiveCheckAt = marketState.lastLiveCheckAt || null
   const lastBackendCheckAt = marketState.lastBackendCheckAt || null
-  const nextScanAt = marketState.nextScanAt || null
-  const nextLiveCheckAt = marketState.nextLiveCheckAt || null
   const marketLabel = marketState.marketLabel || strategy.label
   const operatingState = getOperatingState({
     engineStatus,
@@ -262,12 +222,6 @@ export function SystemSidebar() {
   })
   const equitiesSessionStatus =
     routeMarket === 'equities' ? getEquitiesSessionStatus(new Date()) : null
-  const scanSummary = getScanSummary({
-    lastScanAt,
-    lastScanCount,
-    lastSignalCount,
-    routeMarket,
-  })
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
@@ -298,65 +252,6 @@ export function SystemSidebar() {
           </p>
         </div>
         <p className="mt-2 text-xs leading-5 text-slate-200">{nextAction}</p>
-      </div>
-
-      <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950 p-3">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <RefreshCw className="h-4 w-4 text-[var(--market-accent)]" />
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-              Ciclo automatico
-            </p>
-          </div>
-          <Badge variant={isScanning || isChecking ? 'default' : 'positive'}>
-            {isScanning || isChecking ? 'In corso' : 'Auto'}
-          </Badge>
-        </div>
-        <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-slate-500">
-          <div className="rounded-lg border border-slate-800 bg-[#090b10] p-2">
-            <p>Nuova scansione</p>
-            <p className="mt-1 font-semibold text-[var(--market-accent)]">
-              {formatCountdown(nextScanAt)}
-            </p>
-            <p className="mt-1 leading-4 text-slate-600">
-              Aggiorna RSI, ATR e segnali.
-            </p>
-          </div>
-          <div className="rounded-lg border border-slate-800 bg-[#090b10] p-2">
-            <p>Prezzi posizioni</p>
-            <p className="mt-1 font-semibold text-[var(--market-accent)]">
-              {positions.length > 0 ? formatCountdown(nextLiveCheckAt) : 'Sospeso'}
-            </p>
-            <p className="mt-1 leading-4 text-slate-600">
-              Parte solo con posizioni aperte.
-            </p>
-          </div>
-          <div className="rounded-lg border border-slate-800 bg-[#090b10] p-2">
-            <p>Ultima scansione</p>
-            <p className="mt-1 font-semibold text-white">
-              {formatActivityDate(lastScanAt)}
-            </p>
-            <p className="mt-1 leading-4 text-slate-600">
-              {lastScanCount} analizzati · {lastSignalCount} segnali
-            </p>
-          </div>
-          <div className="rounded-lg border border-slate-800 bg-[#090b10] p-2">
-            <p>Backend remoto</p>
-            <p className="mt-1 font-semibold text-white">
-              {formatActivityDate(lastBackendCheckAt)}
-            </p>
-            <p className="mt-1 leading-4 text-slate-600">
-              Lavora anche ad app chiusa.
-            </p>
-          </div>
-        </div>
-        <p className="mt-2 text-xs leading-5 text-slate-400">
-          {scanSummary}
-        </p>
-        <p className="mt-2 text-xs leading-5 text-slate-500">
-          {lastAutomationMessage ||
-            `Aspetto il prossimo aggiornamento da ${lastDataProvider}.`}
-        </p>
       </div>
 
       {equitiesSessionStatus ? (
