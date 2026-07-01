@@ -51,6 +51,14 @@ function formatDate(value) {
   return value ? dateTimeFormatter.format(new Date(value)) : 'N/D'
 }
 
+function isToday(value) {
+  if (!value) {
+    return false
+  }
+
+  return new Date(value).toDateString() === new Date().toDateString()
+}
+
 function exitReasonLabel(reason) {
   const labels = {
     MANUALE: 'Manuale',
@@ -182,6 +190,8 @@ export default function Dashboard({ marketId }) {
   const killSwitchEnabled = Boolean(routeMarketState.killSwitchEnabled)
   const executedOrders = orders.filter((order) => order.status === 'ESEGUITO')
   const recentClosedTrades = history.slice(0, 5)
+  const todayClosedTrades = history.filter((trade) => isToday(trade.exitDate))
+  const visibleTodayClosedTrades = todayClosedTrades.slice(0, 5)
   const latestClosedTrade = recentClosedTrades[0] || null
   const ordersById = new Map(orders.map((order) => [order.id, order]))
   const lastScanAt = routeMarketState.lastScanAt || null
@@ -336,16 +346,16 @@ export default function Dashboard({ marketId }) {
         <Card className="overflow-hidden">
           <CardHeader className="items-center justify-between gap-4 border-b border-slate-800 p-4">
             <div className="flex items-center gap-2">
-              <CardTitle className="text-white">Ultime chiusure</CardTitle>
+              <CardTitle className="text-white">Chiusure di oggi</CardTitle>
               <InfoTip>
-                Mostra le ultime operazioni chiuse dal monitor live, dal backend
-                o manualmente. Per il dettaglio completo usa Diario o Storico.
+                Mostra solo le operazioni chiuse oggi dal monitor live, dal
+                backend o manualmente. Per il dettaglio completo usa lo Storico.
               </InfoTip>
             </div>
-            <Badge>{history.length} chiuse</Badge>
+            <Badge>{todayClosedTrades.length} oggi</Badge>
           </CardHeader>
           <CardContent className="p-0">
-            {recentClosedTrades.length > 0 ? (
+            {visibleTodayClosedTrades.length > 0 ? (
               <Table>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
@@ -358,7 +368,7 @@ export default function Dashboard({ marketId }) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {recentClosedTrades.map((trade, index) => {
+                  {visibleTodayClosedTrades.map((trade, index) => {
                     const closeOrder = ordersById.get(trade.closeOrderId)
                     const isWin = trade.result === 'WIN'
 
@@ -406,9 +416,10 @@ export default function Dashboard({ marketId }) {
             ) : (
               <div className="flex min-h-36 items-center justify-center p-5 text-center">
                 <div>
-                  <p className="font-medium text-white">Nessuna chiusura</p>
+                  <p className="font-medium text-white">Nessuna chiusura oggi</p>
                   <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
-                    Le chiusure automatiche o manuali appariranno qui.
+                    Le chiusure automatiche o manuali della giornata appariranno
+                    qui.
                   </p>
                 </div>
               </div>

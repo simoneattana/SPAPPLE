@@ -85,7 +85,7 @@ const cryptoAutomationRules = [
 const cryptoRoutineSteps = [
   {
     title: 'Selezioni Crypto',
-    text: 'Nel pannello operativo scegli Crypto. Da quel momento Dashboard, Scanner, Portafoglio, Diario e Storico mostrano solo il mondo crypto.',
+    text: 'Nel pannello operativo scegli Crypto. Da quel momento Dashboard, Scanner, Portafoglio e Storico mostrano solo il mondo crypto.',
   },
   {
     title: 'Scansioni Kraken',
@@ -97,7 +97,7 @@ const cryptoRoutineSteps = [
   },
   {
     title: 'Controlli Portafoglio e Storico',
-    text: 'Nel Portafoglio vedi solo posizioni crypto. Nel Diario e nello Storico vedi solo attività e risultati del mercato crypto attivo.',
+    text: 'Nel Portafoglio vedi solo posizioni crypto. Nello Storico vedi solo attività, ordini e risultati del mercato crypto attivo.',
   },
 ]
 

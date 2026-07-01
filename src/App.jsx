@@ -7,7 +7,6 @@ import MainLayout from './layouts/MainLayout'
 import Dashboard from './pages/Dashboard'
 import Diary from './pages/Diary'
 import Explanation from './pages/Explanation'
-import History from './pages/History'
 import Login from './pages/Login'
 import Orders from './pages/Orders'
 import Portfolio from './pages/Portfolio'
@@ -81,7 +80,7 @@ function AppRoutes() {
         <Route path="portafoglio" element={<Navigate to="/azioni/portafoglio" replace />} />
         <Route path="ordini" element={<Navigate to="/azioni/ordini" replace />} />
         <Route path="diario" element={<Navigate to="/azioni/diario" replace />} />
-        <Route path="storico" element={<Navigate to="/azioni/storico" replace />} />
+        <Route path="storico" element={<Navigate to="/azioni/diario" replace />} />
         <Route
           path="azioni/dashboard"
           element={<MarketPage marketId="equities"><Dashboard /></MarketPage>}
@@ -102,10 +101,7 @@ function AppRoutes() {
           path="azioni/diario"
           element={<MarketPage marketId="equities"><Diary /></MarketPage>}
         />
-        <Route
-          path="azioni/storico"
-          element={<MarketPage marketId="equities"><History /></MarketPage>}
-        />
+        <Route path="azioni/storico" element={<Navigate to="/azioni/diario" replace />} />
         <Route
           path="crypto/dashboard"
           element={<MarketPage marketId="crypto"><Dashboard /></MarketPage>}
@@ -126,10 +122,7 @@ function AppRoutes() {
           path="crypto/diario"
           element={<MarketPage marketId="crypto"><Diary /></MarketPage>}
         />
-        <Route
-          path="crypto/storico"
-          element={<MarketPage marketId="crypto"><History /></MarketPage>}
-        />
+        <Route path="crypto/storico" element={<Navigate to="/crypto/diario" replace />} />
         <Route path="spiegazione" element={<Explanation />} />
         <Route path="impostazioni" element={<Settings />} />
       </Route>
