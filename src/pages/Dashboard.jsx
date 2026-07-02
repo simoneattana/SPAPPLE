@@ -223,6 +223,12 @@ export default function Dashboard({ marketId }) {
   const positions = Array.isArray(routeMarketState.positions)
     ? routeMarketState.positions
     : []
+  const investedInOpenPositions = positions.reduce((total, position) => {
+    const invested = Number(position?.invested)
+
+    return Number.isFinite(invested) ? total + invested : total
+  }, 0)
+  const totalCapital = capital + investedInOpenPositions
   const history = Array.isArray(routeMarketState.history)
     ? routeMarketState.history
     : []
@@ -256,8 +262,8 @@ export default function Dashboard({ marketId }) {
   const kpis = [
     {
       title: 'Capitale',
-      value: currencyFormatter.format(capital),
-      info: 'Liquidità ancora disponibile per aprire nuove posizioni nel mercato selezionato.',
+      value: currencyFormatter.format(totalCapital),
+      info: `Capitale totale simulato: include ${currencyFormatter.format(capital)} di liquidità disponibile e ${currencyFormatter.format(investedInOpenPositions)} già investiti in posizioni aperte.`,
       icon: BadgeEuro,
       accent: 'text-[var(--market-accent)]',
     },

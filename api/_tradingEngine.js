@@ -35,8 +35,7 @@ import {
 import { clearYahooAuth, fetchYahooJson, getYahooAuth } from './_yahoo.js'
 
 export const STATE_ID = 'default'
-export const STORAGE_VERSION = 6
-const REINVESTED_PROFITS_STATE_VERSION = 6
+export const STORAGE_VERSION = 7
 export { DEFAULT_MARKET_ID }
 
 const MAX_POSITIONS = 5
@@ -340,30 +339,31 @@ function calculateVaultFromHistory(history = []) {
   }, 0)
 }
 
-function shouldMigrateReinvestedProfits(version) {
-  const parsedVersion = Number(version)
+function calculateNetPnlFromHistory(history = []) {
+  return history.reduce((total, trade) => {
+    const pnl = Number(trade?.pnlEur)
 
-  return (
-    !Number.isFinite(parsedVersion) ||
-    parsedVersion < REINVESTED_PROFITS_STATE_VERSION
-  )
+    return Number.isFinite(pnl) ? total + pnl : total
+  }, 0)
 }
 
-function migrateMarketForReinvestedProfits(marketState, sourceVersion) {
-  if (!shouldMigrateReinvestedProfits(sourceVersion)) {
-    return marketState
+function calculateInvestedInPositions(positions = []) {
+  return positions.reduce((total, position) => {
+    const invested = Number(position?.invested)
+
+    return Number.isFinite(invested) ? total + invested : total
+  }, 0)
+}
+
+function reconcileAvailableCapital(strategy, fallbackCapital, history, positions) {
+  if (!history.length && !positions.length) {
+    return fallbackCapital
   }
 
-  const historicalProfit = calculateVaultFromHistory(marketState.history)
+  const netPnl = calculateNetPnlFromHistory(history)
+  const invested = calculateInvestedInPositions(positions)
 
-  if (historicalProfit <= 0) {
-    return marketState
-  }
-
-  return {
-    ...marketState,
-    capital: roundPrice(Number(marketState.capital || 0) + historicalProfit),
-  }
+  return roundPrice(Math.max(strategy.initialCapital + netPnl - invested, 0))
 }
 
 function normalizeMarketState(marketId, rawMarketState = {}) {
@@ -436,13 +436,19 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
       : [],
     normalizedHistory,
   )
+  const reconciledCapital = reconcileAvailableCapital(
+    strategy,
+    normalizedCapital,
+    normalizedHistory,
+    positions,
+  )
 
   return {
     ...fallback,
     ...rawMarketState,
     marketId,
     marketLabel: strategy.label,
-    capital: normalizedCapital,
+    capital: reconciledCapital,
     vault: roundPrice(normalizedVault),
     positions,
     history: normalizedHistory,
@@ -503,6 +509,7 @@ function syncActiveMarketState(state) {
     activeMarket,
     markets,
     ...currentMarketState,
+    version: STORAGE_VERSION,
   }
 }
 
@@ -539,14 +546,10 @@ export function normalizeTradingState(payload) {
     ...createInitialMarkets(),
     ...rawMarkets,
     ...Object.values(TRADING_STRATEGIES).reduce((normalizedMarkets, strategy) => {
-      const normalizedMarket = normalizeMarketState(
+      normalizedMarkets[strategy.id] = normalizeMarketState(
         strategy.id,
         rawMarkets[strategy.id] ||
           (strategy.id === DEFAULT_MARKET_ID ? legacyMarketState : {}),
-      )
-      normalizedMarkets[strategy.id] = migrateMarketForReinvestedProfits(
-        normalizedMarket,
-        state.version,
       )
       return normalizedMarkets
     }, {}),
@@ -2127,7 +2130,7 @@ export async function readTradingState(supabase) {
 export async function writeTradingState(supabase, payload) {
   const { error } = await supabase.from('spapple_state').upsert({
     id: STATE_ID,
-    payload,
+    payload: normalizeTradingState(payload),
     updated_at: new Date().toISOString(),
   })
 
