@@ -24,8 +24,8 @@ const automationRules = [
     text: 'Usa al massimo 5 posizioni attive alla volta. Ogni nuova posizione investe il 10% del capitale operativo disponibile, con un minimo di 1.000€ e un massimo di 5.000€.',
   },
   {
-    title: 'Il Salvadanaio Blindato',
-    text: 'Quando chiudi un’operazione in profitto, rimette il capitale investito nel capitale operativo per il prossimo trade, ma il guadagno reale lo sposta nel Salvadanaio. Quei soldi sono intoccabili e non verranno mai re-investiti.',
+    title: 'Utili reinvestiti',
+    text: 'Quando chiudi un’operazione in profitto, il ricavato completo rientra nel capitale operativo: capitale investito più utile. Gli utili restano tracciati nello storico e nei KPI, ma possono essere riutilizzati per aumentare progressivamente la capacità operativa.',
   },
   {
     title: 'Il Blocco di 3 Giorni (Time Lock)',

@@ -338,9 +338,9 @@ export default function Diary({ marketId }) {
         <Card>
           <CardHeader className="flex-row items-start justify-between gap-4">
             <div>
-              <CardTitle>Salvadanaio utili</CardTitle>
+              <CardTitle>Utili realizzati</CardTitle>
               <p className="mt-2 text-sm text-slate-500">
-                Calcolato direttamente dalle chiusure vincenti nello storico.
+                Calcolati dalle chiusure vincenti. Gli utili rientrano anche nel capitale operativo.
               </p>
             </div>
             <PiggyBank className="h-6 w-6 text-[var(--market-accent)]" />

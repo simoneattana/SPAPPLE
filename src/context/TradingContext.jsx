@@ -35,7 +35,8 @@ import { TradingContext } from './tradingState'
 
 const MAX_POSITIONS = 5
 const STORAGE_KEY = 'spapple_state'
-const STORAGE_VERSION = 5
+const STORAGE_VERSION = 6
+const REINVESTED_PROFITS_STATE_VERSION = 6
 const LIVE_MONITOR_INTERVAL_MS = 60_000
 const REMOTE_REFRESH_INTERVAL_MS = 20_000
 const EQUITIES_SCAN_INTERVAL_MS = 15 * 60_000
@@ -391,6 +392,32 @@ function calculateVaultFromHistory(history = []) {
 
     return total + pnl
   }, 0)
+}
+
+function shouldMigrateReinvestedProfits(version) {
+  const parsedVersion = Number(version)
+
+  return (
+    !Number.isFinite(parsedVersion) ||
+    parsedVersion < REINVESTED_PROFITS_STATE_VERSION
+  )
+}
+
+function migrateMarketForReinvestedProfits(marketState, sourceVersion) {
+  if (!shouldMigrateReinvestedProfits(sourceVersion)) {
+    return marketState
+  }
+
+  const historicalProfit = calculateVaultFromHistory(marketState.history)
+
+  if (historicalProfit <= 0) {
+    return marketState
+  }
+
+  return {
+    ...marketState,
+    capital: roundPrice(Number(marketState.capital || 0) + historicalProfit),
+  }
 }
 
 function normalizeMarketState(marketId, rawMarketState = {}) {
@@ -958,10 +985,14 @@ function normalizeStoredState(parsedState) {
   const legacyMarketState = normalizeMarketState(DEFAULT_MARKET_ID, parsedState)
   const markets = Object.values(TRADING_STRATEGIES).reduce(
     (normalizedMarkets, strategy) => {
-      normalizedMarkets[strategy.id] = normalizeMarketState(
+      const normalizedMarket = normalizeMarketState(
         strategy.id,
         rawMarkets[strategy.id] ||
           (strategy.id === DEFAULT_MARKET_ID ? legacyMarketState : {}),
+      )
+      normalizedMarkets[strategy.id] = migrateMarketForReinvestedProfits(
+        normalizedMarket,
+        parsedState.version,
       )
       return normalizedMarkets
     },
@@ -989,11 +1020,6 @@ function loadInitialState() {
     }
 
     const parsedState = JSON.parse(storedState)
-
-    if (parsedState.version !== STORAGE_VERSION) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(initialState))
-      return initialState
-    }
 
     return normalizeStoredState(parsedState)
   } catch {
@@ -1272,12 +1298,8 @@ function evaluatePositions(
       ticker: position.ticker,
     })
 
-    if (result === 'WIN') {
-      capital += invested
-      vault += Math.max(roundedPnl, 0)
-    } else {
-      capital += recoveredCapital
-    }
+    capital += recoveredCapital
+    vault += Math.max(roundedPnl, 0)
 
     closeOrders.push(closeOrder)
     closedTrades.push({
@@ -1345,12 +1367,16 @@ export function TradingProvider({ children }) {
           return
         }
 
-        if (remoteState.payload?.version === STORAGE_VERSION) {
+        if (remoteState.payload) {
           const hydratedState = normalizeStoredState(remoteState.payload)
           remoteUpdatedAtRef.current = remoteState.updatedAt || null
           stateRef.current = hydratedState
           setState(hydratedState)
           localStorage.setItem(STORAGE_KEY, JSON.stringify(hydratedState))
+
+          if (remoteState.payload.version !== STORAGE_VERSION) {
+            await saveRemoteTradingState(hydratedState)
+          }
         } else {
           await saveRemoteTradingState(stateRef.current)
         }
@@ -1407,7 +1433,6 @@ export function TradingProvider({ children }) {
 
         if (
           !remoteState.payload ||
-          remoteState.payload.version !== STORAGE_VERSION ||
           !remoteState.updatedAt ||
           remoteState.updatedAt === remoteUpdatedAtRef.current
         ) {
@@ -2173,7 +2198,7 @@ export function TradingProvider({ children }) {
         const remainingPositions = currentMarketState.positions.filter(
           (item) => item.id !== positionId,
         )
-        const capitalReturn = roundedPnl >= 0 ? invested : recoveredCapital
+        const capitalReturn = recoveredCapital
         const vaultGain = roundedPnl > 0 ? roundedPnl : 0
 
         const nextMarketState = {

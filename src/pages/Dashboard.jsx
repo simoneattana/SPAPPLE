@@ -168,7 +168,7 @@ function ProfitWindowCard({ info, title, totals }) {
       <CardContent className="grid gap-3 p-4 pt-2">
         <div>
           <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">
-            Salvadanaio utili
+            Utili realizzati
           </p>
           <p className="mt-1 text-xl font-semibold text-[var(--market-accent)]">
             {currencyFormatter.format(totals.grossWins)}
@@ -584,7 +584,7 @@ export default function Dashboard({ marketId }) {
             <MiniMetric
               label="Perdite"
               value={currencyFormatter.format(strategyStats.grossLosses)}
-              info="Somma delle perdite realizzate. Non viene sottratta dal salvadanaio, ma dal capitale operativo."
+              info="Somma delle perdite realizzate. Il capitale operativo riflette sia utili reinvestiti sia perdite."
               accent={
                 strategyStats.grossLosses > 0 ? 'text-[#ef8f8f]' : 'text-white'
               }
@@ -609,7 +609,7 @@ export default function Dashboard({ marketId }) {
                 <p className="font-semibold text-white">Andamento capitale</p>
                 <InfoTip>
                   Il grafico storico sarà utile quando avremo più punti dati
-                  consolidati. Per ora il dato principale resta il salvadanaio.
+                  consolidati. Per ora il dato principale resta il capitale operativo.
                 </InfoTip>
               </div>
               <p className="mt-1 text-sm text-slate-500">

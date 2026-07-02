@@ -35,7 +35,8 @@ import {
 import { clearYahooAuth, fetchYahooJson, getYahooAuth } from './_yahoo.js'
 
 export const STATE_ID = 'default'
-export const STORAGE_VERSION = 5
+export const STORAGE_VERSION = 6
+const REINVESTED_PROFITS_STATE_VERSION = 6
 export { DEFAULT_MARKET_ID }
 
 const MAX_POSITIONS = 5
@@ -339,6 +340,32 @@ function calculateVaultFromHistory(history = []) {
   }, 0)
 }
 
+function shouldMigrateReinvestedProfits(version) {
+  const parsedVersion = Number(version)
+
+  return (
+    !Number.isFinite(parsedVersion) ||
+    parsedVersion < REINVESTED_PROFITS_STATE_VERSION
+  )
+}
+
+function migrateMarketForReinvestedProfits(marketState, sourceVersion) {
+  if (!shouldMigrateReinvestedProfits(sourceVersion)) {
+    return marketState
+  }
+
+  const historicalProfit = calculateVaultFromHistory(marketState.history)
+
+  if (historicalProfit <= 0) {
+    return marketState
+  }
+
+  return {
+    ...marketState,
+    capital: roundPrice(Number(marketState.capital || 0) + historicalProfit),
+  }
+}
+
 function normalizeMarketState(marketId, rawMarketState = {}) {
   const strategy = getTradingStrategy(marketId)
   const fallback = {
@@ -512,10 +539,14 @@ export function normalizeTradingState(payload) {
     ...createInitialMarkets(),
     ...rawMarkets,
     ...Object.values(TRADING_STRATEGIES).reduce((normalizedMarkets, strategy) => {
-      normalizedMarkets[strategy.id] = normalizeMarketState(
+      const normalizedMarket = normalizeMarketState(
         strategy.id,
         rawMarkets[strategy.id] ||
           (strategy.id === DEFAULT_MARKET_ID ? legacyMarketState : {}),
+      )
+      normalizedMarkets[strategy.id] = migrateMarketForReinvestedProfits(
+        normalizedMarket,
+        state.version,
       )
       return normalizedMarkets
     }, {}),
@@ -1950,12 +1981,8 @@ export async function runBackendMonitor(state) {
       }
 
       orders = appendOrders({ orders }, closeOrder)
-      if (closedTrade.result === 'WIN') {
-        capital += closedTrade.invested || LEGACY_POSITION_SIZE
-        vault += Math.max(closedTrade.pnlEur, 0)
-      } else {
-        capital += closedTrade.recoveredCapital || 0
-      }
+      capital += closedTrade.recoveredCapital || 0
+      vault += Math.max(closedTrade.pnlEur, 0)
 
       closedTrades.push(closedTrade)
     } catch (error) {
