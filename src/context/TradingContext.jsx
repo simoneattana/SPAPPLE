@@ -29,6 +29,10 @@ import {
   loadRemoteTradingState,
   saveRemoteTradingState,
 } from '../services/remoteState'
+import {
+  isRealtimeConfigured,
+  subscribeToStateEvents,
+} from '../services/realtimeState'
 import { useAuth } from '../services/useAuth'
 import {
   DEFAULT_MARKET_ID,
@@ -39,9 +43,10 @@ import { TradingContext } from './tradingState'
 
 const MAX_POSITIONS = 5
 const STORAGE_KEY = 'spapple_state'
-const STORAGE_VERSION = 8
+const STORAGE_VERSION = 9
 const LIVE_MONITOR_INTERVAL_MS = 60_000
-const REMOTE_REFRESH_INTERVAL_MS = 20_000
+const REMOTE_REFRESH_INTERVAL_MS = 3_000
+const STALE_SYNC_THRESHOLD_MS = 10_000
 const EQUITIES_SCAN_INTERVAL_MS = 15 * 60_000
 const CRYPTO_SCAN_INTERVAL_MS = 5 * 60_000
 const EXECUTION_MODE = 'simulation'
@@ -315,6 +320,10 @@ function createInitialMarkets() {
 
 const initialState = {
   version: STORAGE_VERSION,
+  stateRevision: 0,
+  lastStateMutationAt: null,
+  lastStateMutationSource: 'iniziale',
+  lastStateMutationSummary: 'Stato iniziale Spapple.',
   activeMarket: DEFAULT_MARKET_ID,
   markets: createInitialMarkets(),
   marketId: initialEquitiesState.marketId,
@@ -621,6 +630,13 @@ function syncActiveMarketState(state) {
     markets,
     ...currentMarketState,
     version: STORAGE_VERSION,
+    stateRevision: Number.isFinite(Number(state.stateRevision))
+      ? Number(state.stateRevision)
+      : 0,
+    lastStateMutationAt: state.lastStateMutationAt || null,
+    lastStateMutationSource: state.lastStateMutationSource || 'iniziale',
+    lastStateMutationSummary:
+      state.lastStateMutationSummary || 'Stato iniziale Spapple.',
   }
 }
 
@@ -1087,6 +1103,13 @@ function normalizeStoredState(parsedState) {
 
   return syncActiveMarketState({
     version: STORAGE_VERSION,
+    stateRevision: Number.isFinite(Number(parsedState.stateRevision))
+      ? Number(parsedState.stateRevision)
+      : 0,
+    lastStateMutationAt: parsedState.lastStateMutationAt || null,
+    lastStateMutationSource: parsedState.lastStateMutationSource || 'iniziale',
+    lastStateMutationSummary:
+      parsedState.lastStateMutationSummary || 'Stato iniziale Spapple.',
     activeMarket,
     markets,
     ...activeMarketState,
@@ -1414,10 +1437,23 @@ export function TradingProvider({ children }) {
   const { isAuthenticated } = useAuth()
   const [state, setState] = useState(loadInitialState)
   const [remoteStatus, setRemoteStatus] = useState('disconnesso')
+  const [syncMeta, setSyncMeta] = useState({
+    mode: isRealtimeConfigured() ? 'realtime' : 'polling',
+    status: 'disconnesso',
+    lastSyncedAt: null,
+    lastRemoteUpdatedAt: null,
+    lastEventAt: null,
+    stateRevision: state.stateRevision || 0,
+    isStale: false,
+    message: 'Sincronizzazione non ancora avviata.',
+  })
   const stateRef = useRef(state)
   const remoteReadyRef = useRef(false)
   const remoteUpdatedAtRef = useRef(null)
   const remoteSaveTimerRef = useRef(null)
+  const skipNextRemoteSaveRef = useRef(false)
+  const applyingRemoteStateRef = useRef(false)
+  const syncTickRef = useRef(null)
   const liveCheckRunningRef = useRef(false)
   const scanRunningRef = useRef(new Set())
   const closingPositionsRef = useRef(new Set())
@@ -1430,10 +1466,82 @@ export function TradingProvider({ children }) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
   }, [state])
 
+  const applyRemoteSnapshot = useCallback((remoteState, message = 'Dati sincronizzati.') => {
+    if (!remoteState?.payload) {
+      return null
+    }
+
+    const hydratedState = normalizeStoredState(remoteState.payload)
+
+    applyingRemoteStateRef.current = true
+    skipNextRemoteSaveRef.current = true
+    remoteUpdatedAtRef.current = remoteState.updatedAt || null
+    stateRef.current = hydratedState
+    setState(hydratedState)
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(hydratedState))
+    setSyncMeta((current) => ({
+      ...current,
+      status: 'live',
+      lastSyncedAt: new Date().toISOString(),
+      lastRemoteUpdatedAt: remoteState.updatedAt || current.lastRemoteUpdatedAt,
+      stateRevision: hydratedState.stateRevision || remoteState.stateRevision || 0,
+      isStale: false,
+      message,
+    }))
+
+    queueMicrotask(() => {
+      applyingRemoteStateRef.current = false
+    })
+
+    return hydratedState
+  }, [])
+
+  const refreshRemoteState = useCallback(async ({
+    force = false,
+    reason = 'refresh',
+  } = {}) => {
+    setSyncMeta((current) => ({
+      ...current,
+      status: current.status === 'disconnesso' ? 'caricamento' : 'sync',
+      message:
+        reason === 'azione-critica'
+          ? 'Controllo lo stato remoto prima di procedere.'
+          : 'Sto verificando gli aggiornamenti remoti.',
+    }))
+
+    const remoteState = await loadRemoteTradingState()
+    const hasChanged =
+      force ||
+      !remoteState.updatedAt ||
+      remoteState.updatedAt !== remoteUpdatedAtRef.current ||
+      Number(remoteState.stateRevision || remoteState.payload?.stateRevision || 0) >
+        Number(stateRef.current.stateRevision || 0)
+
+    if (hasChanged) {
+      return applyRemoteSnapshot(remoteState, 'Dati aggiornati da Supabase.')
+    }
+
+    setSyncMeta((current) => ({
+      ...current,
+      status: 'live',
+      lastSyncedAt: new Date().toISOString(),
+      isStale: false,
+      message: 'Dati già allineati.',
+    }))
+
+    return syncActiveMarketState(stateRef.current)
+  }, [applyRemoteSnapshot])
+
   useEffect(() => {
     if (!isAuthenticated) {
       remoteReadyRef.current = false
       setRemoteStatus('disconnesso')
+      setSyncMeta((current) => ({
+        ...current,
+        status: 'disconnesso',
+        isStale: true,
+        message: 'Accesso richiesto per sincronizzare i dati.',
+      }))
       return
     }
 
@@ -1441,6 +1549,11 @@ export function TradingProvider({ children }) {
 
     async function hydrateRemoteState() {
       setRemoteStatus('caricamento')
+      setSyncMeta((current) => ({
+        ...current,
+        status: 'caricamento',
+        message: 'Carico lo stato autorevole da Supabase.',
+      }))
 
       try {
         const remoteState = await loadRemoteTradingState()
@@ -1450,17 +1563,24 @@ export function TradingProvider({ children }) {
         }
 
         if (remoteState.payload) {
-          const hydratedState = normalizeStoredState(remoteState.payload)
-          remoteUpdatedAtRef.current = remoteState.updatedAt || null
-          stateRef.current = hydratedState
-          setState(hydratedState)
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(hydratedState))
+          const hydratedState = applyRemoteSnapshot(
+            remoteState,
+            'Stato autorevole caricato da Supabase.',
+          )
 
           if (remoteState.payload.version !== STORAGE_VERSION) {
-            await saveRemoteTradingState(hydratedState)
+            const result = await saveRemoteTradingState(hydratedState, {
+              source: 'migrazione-browser',
+              summary: 'Stato aggiornato alla versione corrente dell’app.',
+            })
+            applyRemoteSnapshot(result, 'Stato migrato e riallineato.')
           }
         } else {
-          await saveRemoteTradingState(stateRef.current)
+          const result = await saveRemoteTradingState(stateRef.current, {
+            source: 'inizializzazione-browser',
+            summary: 'Stato iniziale creato dal browser.',
+          })
+          applyRemoteSnapshot(result, 'Stato iniziale salvato su Supabase.')
         }
 
         remoteReadyRef.current = true
@@ -1469,6 +1589,12 @@ export function TradingProvider({ children }) {
         if (!cancelled) {
           remoteReadyRef.current = false
           setRemoteStatus(`errore: ${error.message}`)
+          setSyncMeta((current) => ({
+            ...current,
+            status: 'errore',
+            isStale: true,
+            message: error.message || 'Sincronizzazione remota non disponibile.',
+          }))
         }
       }
     }
@@ -1478,27 +1604,42 @@ export function TradingProvider({ children }) {
     return () => {
       cancelled = true
     }
-  }, [isAuthenticated])
+  }, [applyRemoteSnapshot, isAuthenticated])
 
   useEffect(() => {
     if (!isAuthenticated || !remoteReadyRef.current) {
       return undefined
     }
 
+    if (applyingRemoteStateRef.current || skipNextRemoteSaveRef.current) {
+      skipNextRemoteSaveRef.current = false
+      return undefined
+    }
+
     clearTimeout(remoteSaveTimerRef.current)
     remoteSaveTimerRef.current = setTimeout(async () => {
       try {
-        await saveRemoteTradingState(stateRef.current)
+        const result = await saveRemoteTradingState(stateRef.current, {
+          source: 'frontend',
+          summary: stateRef.current.lastStateMutationSummary || 'Stato aggiornato dal browser.',
+        })
+        applyRemoteSnapshot(result, 'Modifica salvata e confermata da Supabase.')
         setRemoteStatus('sincronizzato')
       } catch (error) {
         setRemoteStatus(`errore: ${error.message}`)
+        setSyncMeta((current) => ({
+          ...current,
+          status: 'errore',
+          isStale: true,
+          message: error.message || 'Salvataggio remoto non riuscito.',
+        }))
       }
     }, 600)
 
     return () => {
       clearTimeout(remoteSaveTimerRef.current)
     }
-  }, [isAuthenticated, state])
+  }, [applyRemoteSnapshot, isAuthenticated, state])
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -1511,36 +1652,122 @@ export function TradingProvider({ children }) {
       }
 
       try {
-        const remoteState = await loadRemoteTradingState()
-
-        if (
-          !remoteState.payload ||
-          !remoteState.updatedAt ||
-          remoteState.updatedAt === remoteUpdatedAtRef.current
-        ) {
-          return
-        }
-
-        const refreshedState = normalizeStoredState(remoteState.payload)
-        remoteUpdatedAtRef.current = remoteState.updatedAt
-        stateRef.current = refreshedState
-        setState(refreshedState)
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(refreshedState))
+        await refreshRemoteState({ reason: 'polling' })
         setRemoteStatus('sincronizzato')
       } catch (error) {
         setRemoteStatus(`errore: ${error.message}`)
+        setSyncMeta((current) => ({
+          ...current,
+          status: 'errore',
+          isStale: true,
+          message: error.message || 'Refresh remoto non riuscito.',
+        }))
       }
     }, REMOTE_REFRESH_INTERVAL_MS)
 
     return () => {
       window.clearInterval(intervalId)
     }
-  }, [isAuthenticated])
+  }, [isAuthenticated, refreshRemoteState])
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return undefined
+    }
+
+    return subscribeToStateEvents(
+      async (event) => {
+        if (!remoteReadyRef.current) {
+          return
+        }
+
+        setSyncMeta((current) => ({
+          ...current,
+          status: 'sync',
+          lastEventAt: event?.created_at || new Date().toISOString(),
+          message: event?.summary || 'Aggiornamento remoto ricevuto.',
+        }))
+
+        try {
+          await refreshRemoteState({ force: true, reason: 'realtime' })
+        } catch (error) {
+          setSyncMeta((current) => ({
+            ...current,
+            status: 'errore',
+            isStale: true,
+            message: error.message || 'Evento realtime non riallineato.',
+          }))
+        }
+      },
+      (status) => {
+        setSyncMeta((current) => ({
+          ...current,
+          mode: isRealtimeConfigured() ? 'realtime' : 'polling',
+          status:
+            status === 'SUBSCRIBED'
+              ? 'live'
+              : status === 'non_configurato'
+                ? current.status
+                : current.status === 'disconnesso'
+                  ? 'caricamento'
+                  : current.status,
+          message:
+            status === 'SUBSCRIBED'
+              ? 'Realtime attivo: gli aggiornamenti arrivano senza refresh.'
+              : status === 'non_configurato'
+                ? 'Realtime non configurato: uso polling ogni 3 secondi.'
+                : current.message,
+        }))
+      },
+    )
+  }, [isAuthenticated, refreshRemoteState])
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      syncTickRef.current = Date.now()
+      setSyncMeta((current) => {
+        const lastSyncedAt = current.lastSyncedAt
+          ? new Date(current.lastSyncedAt).getTime()
+          : 0
+        const isStale =
+          !lastSyncedAt || Date.now() - lastSyncedAt > STALE_SYNC_THRESHOLD_MS
+
+        if (current.isStale === isStale) {
+          return current
+        }
+
+        return {
+          ...current,
+          isStale,
+          status: isStale ? 'stale' : current.status,
+          message: isStale
+            ? 'Dati non aggiornati da oltre 10 secondi.'
+            : current.message,
+        }
+      })
+    }, 1_000)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [])
 
   const updateTradingState = useCallback((updater) => {
-    const nextState = syncActiveMarketState(updater(stateRef.current))
+    const now = new Date().toISOString()
+    const nextState = syncActiveMarketState({
+      ...updater(stateRef.current),
+      lastStateMutationAt: now,
+      lastStateMutationSource: 'browser',
+      lastStateMutationSummary: 'Modifica locale in attesa di conferma Supabase.',
+    })
     stateRef.current = nextState
     setState(nextState)
+    setSyncMeta((current) => ({
+      ...current,
+      status: 'sync',
+      isStale: false,
+      message: 'Modifica locale salvata, attendo conferma Supabase.',
+    }))
   }, [])
 
   const recordActivity = useCallback((activity) => {
@@ -2230,7 +2457,11 @@ export function TradingProvider({ children }) {
     closingPositionsRef.current.add(positionId)
 
     try {
-      const snapshot = syncActiveMarketState(stateRef.current)
+      const refreshedState = await refreshRemoteState({
+        force: true,
+        reason: 'azione-critica',
+      })
+      const snapshot = syncActiveMarketState(refreshedState || stateRef.current)
       const candidateMarketIds = targetMarketId
         ? [targetMarketId]
         : Object.keys(snapshot.markets || {})
@@ -2256,7 +2487,7 @@ export function TradingProvider({ children }) {
       }
 
       if (!position) {
-        throw new Error('Posizione non trovata')
+        throw new Error('Posizione non trovata o già chiusa da un altro utente')
       }
 
       if (!marketState) {
@@ -2358,7 +2589,7 @@ export function TradingProvider({ children }) {
     } finally {
       closingPositionsRef.current.delete(positionId)
     }
-  }, [updateTradingState])
+  }, [refreshRemoteState, updateTradingState])
 
   const runLiveCheck = useCallback(async ({ silent = false, targetMarketId = null } = {}) => {
     const snapshot = syncActiveMarketState(stateRef.current)
@@ -2810,6 +3041,9 @@ export function TradingProvider({ children }) {
     () => ({
       ...state,
       remoteStatus,
+      syncMeta,
+      isDataStale: Boolean(syncMeta.isStale),
+      refreshRemoteState,
       closePositionManually,
       executeTrade,
       executeAutomatedTrades,
@@ -2851,6 +3085,8 @@ export function TradingProvider({ children }) {
       setActiveMarket,
       state,
       remoteStatus,
+      syncMeta,
+      refreshRemoteState,
     ],
   )
 

@@ -77,7 +77,10 @@ export default async function handler(request, response) {
       ...activeMarketState,
     }
 
-    await writeTradingState(supabase, nextPayload)
+    const writeResult = await writeTradingState(supabase, nextPayload, {
+      source: 'backend-monitor',
+      summary: 'Monitor backend eseguito su azioni e crypto.',
+    })
 
     sendJson(response, 200, {
       ok: true,
@@ -101,7 +104,8 @@ export default async function handler(request, response) {
         errors: result.errors || [],
       })),
       errors: results.flatMap((result) => result.errors || []),
-      updatedAt: new Date().toISOString(),
+      updatedAt: writeResult.updatedAt,
+      stateRevision: writeResult.stateRevision,
     })
   } catch (error) {
     sendJson(response, 500, {

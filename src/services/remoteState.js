@@ -22,14 +22,17 @@ export async function loadRemoteTradingState() {
   return parseResponse(response)
 }
 
-export async function saveRemoteTradingState(payload) {
+export async function saveRemoteTradingState(
+  payload,
+  { reset = false, source = 'frontend', summary = 'Stato aggiornato dal browser.' } = {},
+) {
   const response = await fetch(STATE_ENDPOINT, {
     method: 'PUT',
     headers: {
       'content-type': 'application/json',
       'x-spapple-password': APP_PASSWORD,
     },
-    body: JSON.stringify({ payload }),
+    body: JSON.stringify({ payload, reset, source, summary }),
   })
 
   return parseResponse(response)

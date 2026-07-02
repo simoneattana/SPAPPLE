@@ -19,6 +19,10 @@ import { useAuth } from '../services/useAuth'
 import { useTrading } from '../context/useTrading'
 import { getMarketTheme } from '../services/marketTheme'
 
+const relativeTimeFormatter = new Intl.RelativeTimeFormat('it-IT', {
+  numeric: 'auto',
+})
+
 const marketNavigation = [
   {
     id: 'equities',
@@ -147,6 +151,63 @@ function NavigationContent({ routeMarket, onNavigate }) {
   )
 }
 
+function formatRelativeSync(value) {
+  if (!value) {
+    return 'mai'
+  }
+
+  const seconds = Math.round((new Date(value).getTime() - Date.now()) / 1000)
+
+  if (!Number.isFinite(seconds)) {
+    return 'mai'
+  }
+
+  if (Math.abs(seconds) < 60) {
+    return relativeTimeFormatter.format(seconds, 'second')
+  }
+
+  return relativeTimeFormatter.format(Math.round(seconds / 60), 'minute')
+}
+
+function SyncStatusBar() {
+  const { syncMeta } = useTrading()
+  const live = syncMeta?.status === 'live' && !syncMeta?.isStale
+  const stale = syncMeta?.isStale || syncMeta?.status === 'stale'
+  const error = syncMeta?.status === 'errore'
+  const label = error
+    ? 'Errore sync'
+    : stale
+      ? 'Dati da aggiornare'
+      : live
+        ? 'Dati live'
+        : 'Sincronizzazione'
+  const dotClass = error
+    ? 'bg-red-300'
+    : stale
+      ? 'bg-amber-300'
+      : live
+        ? 'bg-[var(--market-accent)]'
+        : 'bg-slate-400'
+
+  return (
+    <div className="mb-5 rounded-lg border border-slate-800 bg-slate-950/70 px-4 py-3 text-xs text-slate-400">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-2">
+          <span className={`h-2.5 w-2.5 rounded-full ${dotClass}`} />
+          <span className="font-semibold text-slate-200">{label}</span>
+          <span className="hidden text-slate-600 sm:inline">·</span>
+          <span>{syncMeta?.mode === 'realtime' ? 'Realtime' : 'Polling 3s'}</span>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span>Rev. #{syncMeta?.stateRevision || 0}</span>
+          <span>Ultimo sync: {formatRelativeSync(syncMeta?.lastSyncedAt)}</span>
+          <span className="text-slate-500">{syncMeta?.message}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function MainLayout() {
   const { logout } = useAuth()
   const { activeMarket } = useTrading()
@@ -250,6 +311,7 @@ export default function MainLayout() {
               Menu
             </Button>
           </div>
+          <SyncStatusBar />
           <div className="min-w-0 flex-1">
             <Outlet />
           </div>

@@ -105,7 +105,7 @@ function mergePositions(incomingPositions = [], currentPositions = [], history =
       .map((trade) => `${trade.ticker}-${trade.openedAt}`),
   )
 
-  return [...positionsById.values()].filter((position) => {
+  const activePositions = [...positionsById.values()].filter((position) => {
     if (closedPositionIds.has(position.id)) {
       return false
     }
@@ -116,6 +116,18 @@ function mergePositions(incomingPositions = [], currentPositions = [], history =
 
     return true
   })
+  const positionsByTicker = new Map()
+
+  activePositions.forEach((position) => {
+    const key = position?.ticker || position?.id
+    const current = positionsByTicker.get(key)
+
+    if (!current || timestamp(position.openedAt) < timestamp(current.openedAt)) {
+      positionsByTicker.set(key, position)
+    }
+  })
+
+  return [...positionsByTicker.values()]
 }
 
 function roundPrice(value) {
@@ -273,6 +285,7 @@ export default async function handler(request, response) {
       sendJson(response, 200, {
         payload,
         updatedAt,
+        stateRevision: payload.stateRevision || 0,
       })
     } catch (error) {
       sendJson(response, 500, { error: error.message })
@@ -314,14 +327,26 @@ export default async function handler(request, response) {
             })
           : await mergeIncomingState(supabase, body.payload)
 
-      await writeTradingState(supabase, nextPayload)
+      const result = await writeTradingState(supabase, nextPayload, {
+        source: body.source || (body.reset === true ? 'reset' : 'frontend'),
+        summary:
+          body.summary ||
+          (body.reset === true
+            ? 'Reset operativo eseguito.'
+            : 'Stato aggiornato dal frontend.'),
+      })
+
+      sendJson(response, 200, {
+        ok: true,
+        payload: result.payload,
+        updatedAt: result.updatedAt,
+        stateRevision: result.stateRevision,
+      })
+      return
     } catch (error) {
       sendJson(response, error.statusCode || 500, { error: error.message })
       return
     }
-
-    sendJson(response, 200, { ok: true })
-    return
   }
 
   sendJson(response, 405, { error: 'Metodo non supportato' })

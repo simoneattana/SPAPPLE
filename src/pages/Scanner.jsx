@@ -450,6 +450,8 @@ export default function Scanner({ marketId }) {
     recordScanComplete,
     recordScanError,
     recordScanStart,
+    refreshRemoteState,
+    syncMeta,
   } = useTrading()
   const effectiveMarket = marketId || activeMarket
   const effectiveStrategy = getTradingStrategy(effectiveMarket)
@@ -726,7 +728,7 @@ export default function Scanner({ marketId }) {
     handleScan({ automatic: true })
   }, [handleScan, visibleLastScanResults?.length, scanIsFromToday])
 
-  const handleExecuteTrade = (row) => {
+  const handleExecuteTrade = async (row) => {
     const type = getRowTradeType(row)
 
     if (!type) {
@@ -738,6 +740,7 @@ export default function Scanner({ marketId }) {
     }
 
     try {
+      await refreshRemoteState({ force: true, reason: 'azione-critica' })
       const trade = executeTrade(
         row.ticker,
         row.currentPrice,
@@ -1048,13 +1051,15 @@ export default function Scanner({ marketId }) {
                         <Button
                           size="sm"
                           variant="ghost"
-                          disabled={closingId === position.id}
+                          disabled={syncMeta?.isStale || closingId === position.id}
                           onClick={() => handleManualClose(position)}
                         >
                           {closingId === position.id ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
                           ) : null}
-                          Chiudi a prezzo aggiornato
+                          {syncMeta?.isStale
+                            ? 'Sync richiesta'
+                            : 'Chiudi a prezzo aggiornato'}
                         </Button>
                       </TableCell>
                     </TableRow>
@@ -1136,6 +1141,7 @@ export default function Scanner({ marketId }) {
                           size="sm"
                           variant="ghost"
                           disabled={
+                            syncMeta?.isStale ||
                             routeKillSwitchEnabled ||
                             slotsFull ||
                             isTickerAlreadyOpen(row.ticker) ||
@@ -1143,7 +1149,9 @@ export default function Scanner({ marketId }) {
                           }
                           onClick={() => handleExecuteTrade(row)}
                         >
-                          {routeKillSwitchEnabled
+                          {syncMeta?.isStale
+                            ? 'Sync richiesta'
+                            : routeKillSwitchEnabled
                             ? 'Bloccato'
                             : isTickerAlreadyOpen(row.ticker)
                             ? 'Già in portafoglio'

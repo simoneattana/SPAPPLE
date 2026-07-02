@@ -42,7 +42,7 @@ import {
 import { clearYahooAuth, fetchYahooJson, getYahooAuth } from './_yahoo.js'
 
 export const STATE_ID = 'default'
-export const STORAGE_VERSION = 8
+export const STORAGE_VERSION = 9
 export { DEFAULT_MARKET_ID }
 
 const MAX_POSITIONS = 5
@@ -250,6 +250,10 @@ const marketStateFields = [
 
 const initialState = {
   version: STORAGE_VERSION,
+  stateRevision: 0,
+  lastStateMutationAt: null,
+  lastStateMutationSource: 'iniziale',
+  lastStateMutationSummary: 'Stato iniziale Spapple.',
   activeMarket: DEFAULT_MARKET_ID,
   marketId: DEFAULT_MARKET_ID,
   marketLabel: getTradingStrategy(DEFAULT_MARKET_ID).label,
@@ -634,6 +638,13 @@ export function normalizeTradingState(payload) {
     ...initialState,
     ...state,
     version: STORAGE_VERSION,
+    stateRevision: Number.isFinite(Number(state.stateRevision))
+      ? Number(state.stateRevision)
+      : 0,
+    lastStateMutationAt: state.lastStateMutationAt || null,
+    lastStateMutationSource: state.lastStateMutationSource || 'iniziale',
+    lastStateMutationSummary:
+      state.lastStateMutationSummary || 'Stato iniziale Spapple.',
     activeMarket,
     markets,
     ...activeMarketState,
@@ -2261,14 +2272,48 @@ export async function readTradingState(supabase) {
   }
 }
 
-export async function writeTradingState(supabase, payload) {
+async function writeStateEvent(supabase, payload) {
+  const { error } = await supabase.from('spapple_state_events').insert({
+    state_id: STATE_ID,
+    revision: payload.stateRevision,
+    source: payload.lastStateMutationSource || 'server',
+    summary: payload.lastStateMutationSummary || 'Stato Spapple aggiornato',
+  })
+
+  if (error && error.code !== '42P01' && error.code !== '42501') {
+    throw error
+  }
+}
+
+export async function writeTradingState(
+  supabase,
+  payload,
+  { source = 'server', summary = 'Stato Spapple aggiornato' } = {},
+) {
+  const { payload: currentPayload } = await readTradingState(supabase)
+  const updatedAt = new Date().toISOString()
+  const nextPayload = normalizeTradingState({
+    ...payload,
+    stateRevision: Number(currentPayload.stateRevision || 0) + 1,
+    lastStateMutationAt: updatedAt,
+    lastStateMutationSource: source,
+    lastStateMutationSummary: summary,
+  })
   const { error } = await supabase.from('spapple_state').upsert({
     id: STATE_ID,
-    payload: normalizeTradingState(payload),
-    updated_at: new Date().toISOString(),
+    payload: nextPayload,
+    updated_at: updatedAt,
   })
 
   if (error) {
     throw error
+  }
+
+  await writeStateEvent(supabase, nextPayload)
+
+  return {
+    payload: nextPayload,
+    updatedAt,
+    stateRevision: nextPayload.stateRevision,
   }
 }
