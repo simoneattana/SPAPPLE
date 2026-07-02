@@ -22,6 +22,13 @@ import {
   sortByAutoScore,
 } from '../src/services/tradingRules.js'
 import {
+  buildUsMarketContextFromHistory,
+  createUnavailableUsMarketContext,
+  filterEquityRowsByUsMarketContext,
+  getUsMarketContextSummary,
+  US_MARKET_CONTEXT_SYMBOL,
+} from '../src/services/usMarketContext.js'
+import {
   LEGACY_POSITION_SIZE,
   MIN_POSITION_SIZE,
   calculatePositionSize,
@@ -35,7 +42,7 @@ import {
 import { clearYahooAuth, fetchYahooJson, getYahooAuth } from './_yahoo.js'
 
 export const STATE_ID = 'default'
-export const STORAGE_VERSION = 7
+export const STORAGE_VERSION = 8
 export { DEFAULT_MARKET_ID }
 
 const MAX_POSITIONS = 5
@@ -51,6 +58,10 @@ const EQUITIES_MARKET_CLOSE_GUARD = {
   timezone: 'Europe/Rome',
   hour: 16,
   minute: 25,
+}
+const EQUITIES_MARKET_SCAN_START = {
+  hour: 9,
+  minute: 5,
 }
 const DEFAULT_RISK_LIMITS = {
   maxDailyOrders: 20,
@@ -101,6 +112,12 @@ function getEquitiesCloseGuardLabel() {
   ).padStart(2, '0')}`
 }
 
+function getEquitiesScanStartLabel() {
+  return `${String(EQUITIES_MARKET_SCAN_START.hour).padStart(2, '0')}:${String(
+    EQUITIES_MARKET_SCAN_START.minute,
+  ).padStart(2, '0')}`
+}
+
 function getMarketScanIntervalMs(marketId) {
   return marketId === 'crypto' ? CRYPTO_SCAN_INTERVAL_MS : EQUITIES_SCAN_INTERVAL_MS
 }
@@ -113,7 +130,7 @@ function getRiskLimits(strategy, riskLimits = {}) {
   }
 }
 
-function getNextEquitiesOpenAt(now = new Date()) {
+function getNextEquitiesScanAt(now = new Date()) {
   const currentRomeTime = getTimeInTimezone(
     now,
     EQUITIES_MARKET_CLOSE_GUARD.timezone,
@@ -122,28 +139,76 @@ function getNextEquitiesOpenAt(now = new Date()) {
     currentRomeTime.hour * 3600 +
     currentRomeTime.minute * 60 +
     currentRomeTime.second
-  const openSeconds = 6 * 3600
+  const scanStartSeconds =
+    EQUITIES_MARKET_SCAN_START.hour * 3600 +
+    EQUITIES_MARKET_SCAN_START.minute * 60
 
   if (!Number.isFinite(currentSeconds)) {
     return new Date(now.getTime() + EQUITIES_SCAN_INTERVAL_MS)
   }
 
   const secondsUntilOpen =
-    currentSeconds < openSeconds
-      ? openSeconds - currentSeconds
-      : 24 * 3600 - currentSeconds + openSeconds
+    currentSeconds < scanStartSeconds
+      ? scanStartSeconds - currentSeconds
+      : 24 * 3600 - currentSeconds + scanStartSeconds
 
   return new Date(now.getTime() + secondsUntilOpen * 1000)
+}
+
+function isEquitiesScanBlocked(strategy, date = new Date()) {
+  if (strategy?.id !== EQUITIES_MARKET_CLOSE_GUARD.marketId) {
+    return false
+  }
+
+  const { hour, minute } = getTimeInTimezone(
+    date,
+    EQUITIES_MARKET_CLOSE_GUARD.timezone,
+  )
+
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) {
+    return false
+  }
+
+  const currentMinutes = hour * 60 + minute
+  const scanStartMinutes =
+    EQUITIES_MARKET_SCAN_START.hour * 60 + EQUITIES_MARKET_SCAN_START.minute
+  const closeMinutes =
+    EQUITIES_MARKET_CLOSE_GUARD.hour * 60 + EQUITIES_MARKET_CLOSE_GUARD.minute
+
+  return currentMinutes < scanStartMinutes || currentMinutes >= closeMinutes
 }
 
 function getNextScanAt(marketId, from = new Date()) {
   const strategy = getTradingStrategy(marketId)
 
   if (isEquitiesCloseGuardActive(strategy, from)) {
-    return getNextEquitiesOpenAt(from).toISOString()
+    return getNextEquitiesScanAt(from).toISOString()
+  }
+
+  if (isEquitiesScanBlocked(strategy, from)) {
+    return getNextEquitiesScanAt(from).toISOString()
   }
 
   return new Date(from.getTime() + getMarketScanIntervalMs(marketId)).toISOString()
+}
+
+function normalizeNextScanAt(marketId, value, fallbackValue = null) {
+  const candidate = value || fallbackValue
+
+  if (!candidate) {
+    return getNextScanAt(marketId)
+  }
+
+  const candidateDate = new Date(candidate)
+
+  if (
+    Number.isFinite(candidateDate.getTime()) &&
+    isEquitiesScanBlocked(getTradingStrategy(marketId), candidateDate)
+  ) {
+    return getNextScanAt(marketId, candidateDate)
+  }
+
+  return candidate
 }
 
 function getStrategyMaxPositions(strategy) {
@@ -180,6 +245,7 @@ const marketStateFields = [
   'engineStatus',
   'liveMonitorEnabled',
   'backendMonitorEnabled',
+  'usMarketContext',
 ]
 
 const initialState = {
@@ -214,6 +280,7 @@ const initialState = {
   nextScanAt: getNextScanAt(DEFAULT_MARKET_ID),
   nextLiveCheckAt: null,
   engineStatus: 'In attesa',
+  usMarketContext: null,
 }
 
 function createInitialMarkets() {
@@ -482,10 +549,14 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
     lastLiveCheckAt: rawMarketState.lastLiveCheckAt || fallback.lastLiveCheckAt,
     lastBackendCheckAt:
       rawMarketState.lastBackendCheckAt || fallback.lastBackendCheckAt,
-    nextScanAt:
-      rawMarketState.nextScanAt || fallback.nextScanAt || getNextScanAt(marketId),
+    nextScanAt: normalizeNextScanAt(
+      marketId,
+      rawMarketState.nextScanAt,
+      fallback.nextScanAt,
+    ),
     nextLiveCheckAt: rawMarketState.nextLiveCheckAt || fallback.nextLiveCheckAt,
     lastScanResults: sanitizeScanResults(rawMarketState.lastScanResults, marketId),
+    usMarketContext: rawMarketState.usMarketContext || fallback.usMarketContext,
   }
 }
 
@@ -1182,6 +1253,18 @@ async function fetchChartHistory(ticker) {
   return history
 }
 
+async function fetchBackendUsMarketContext() {
+  try {
+    const history = await fetchChartHistory(US_MARKET_CONTEXT_SYMBOL)
+
+    return buildUsMarketContextFromHistory(history)
+  } catch (error) {
+    return createUnavailableUsMarketContext(
+      error.message || 'Contesto USA non disponibile',
+    )
+  }
+}
+
 async function fetchSummaryData(ticker) {
   const { cookie, crumb } = await getYahooAuth()
   const yahooUrl = new URL(
@@ -1621,6 +1704,10 @@ function getCloseReasonText(exitReason) {
 
 async function refillOpenSlots(state, excludedTickers = []) {
   const strategy = getTradingStrategy(state.activeMarket)
+  const usMarketContext =
+    strategy.id === 'equities'
+      ? await fetchBackendUsMarketContext()
+      : state.usMarketContext || null
   const marketData = await fetchBackendMarketData(strategy.id)
   const actionableRows = marketData.filter(
     strategy.id === 'crypto' ? isCryptoActionableResult : isActionableResult,
@@ -1634,9 +1721,13 @@ async function refillOpenSlots(state, excludedTickers = []) {
     ...state.positions.map((position) => position.ticker),
   ])
   const automaticRows = sortRows(
-    marketData.filter(
-      (row) => isAutoEligible(row) && !excluded.has(row.ticker),
-    ),
+    (strategy.id === 'equities'
+      ? filterEquityRowsByUsMarketContext(
+          marketData.filter((row) => isAutoEligible(row)),
+          usMarketContext,
+        )
+      : marketData.filter((row) => isAutoEligible(row))
+    ).filter((row) => !excluded.has(row.ticker)),
   )
   const positions = [...state.positions]
   let orders = state.orders || []
@@ -1705,6 +1796,7 @@ async function refillOpenSlots(state, excludedTickers = []) {
     orders,
     openedTrades,
     rejectedOrders,
+    usMarketContext,
     marketData,
     scannedCount: marketData.length,
     signalCount: actionableRows.length,
@@ -1798,6 +1890,7 @@ export async function runBackendMonitor(state) {
   const maxPositions = getStrategyMaxPositions(strategy)
   const closeGuardActive = isEquitiesCloseGuardActive(strategy)
   const now = new Date()
+  const scanBlocked = isEquitiesScanBlocked(strategy, now)
   const nextScanTime = current.nextScanAt ? new Date(current.nextScanAt).getTime() : 0
   const scanDue = !nextScanTime || nextScanTime <= now.getTime()
 
@@ -1825,12 +1918,16 @@ export async function runBackendMonitor(state) {
   }
 
   if (current.positions.length === 0) {
-    if (closeGuardActive) {
+    if (scanBlocked) {
       const activity = createActivity({
         type: 'backend-monitor',
         status: 'waiting',
-        title: `Protezione azioni ${getEquitiesCloseGuardLabel()} attiva`,
-        detail: 'Nessuna posizione azionaria aperta. Nuove aperture bloccate fino alla prossima seduta.',
+        title: closeGuardActive
+          ? `Protezione azioni ${getEquitiesCloseGuardLabel()} attiva`
+          : `Azioni in attesa delle ${getEquitiesScanStartLabel()}`,
+        detail: closeGuardActive
+          ? 'Nessuna posizione azionaria aperta. Nuove aperture bloccate fino alla prossima seduta.'
+          : `Nessuna posizione azionaria aperta. La prima scansione partirà alle ${getEquitiesScanStartLabel()}, dopo la lettura della chiusura USA.`,
       })
 
       return {
@@ -1838,11 +1935,14 @@ export async function runBackendMonitor(state) {
           ...current,
           isChecking: false,
           isScanning: false,
-          engineStatus: `Protezione azioni ${getEquitiesCloseGuardLabel()} attiva`,
+          engineStatus: closeGuardActive
+            ? `Protezione azioni ${getEquitiesCloseGuardLabel()} attiva`
+            : `In attesa delle ${getEquitiesScanStartLabel()}`,
           nextScanAt: getNextScanAt(current.activeMarket, now),
           lastBackendCheckAt: new Date().toISOString(),
-          lastAutomationMessage:
-            'Mondo azionario fermo: nessuna scansione o apertura prima delle 06:00.',
+          lastAutomationMessage: closeGuardActive
+            ? `Mondo azionario fermo: nessuna scansione o apertura prima delle ${getEquitiesScanStartLabel()}.`
+            : `Mondo azionario in attesa: prima scansione automatica alle ${getEquitiesScanStartLabel()}, con contesto USA.`,
           ...appendLogs(current, activity),
         }),
         closedTrades: [],
@@ -1905,10 +2005,18 @@ export async function runBackendMonitor(state) {
         refillErrors.length > 0
           ? `Nessuna posizione aperta. Ricerca nuovi titoli non riuscita: ${refillErrors[0]}.`
           : openedTrades.length > 0
-            ? `Nessuna posizione era aperta: ho trovato ${openedTrades.length} segnali e ho riaperto nuovi slot.`
+            ? `Nessuna posizione era aperta: ho trovato ${openedTrades.length} segnali e ho riaperto nuovi slot.${
+                refill?.usMarketContext
+                  ? ` ${getUsMarketContextSummary(refill.usMarketContext)}`
+                  : ''
+              }`
             : `Nessuna posizione aperta. ${
                 refill
-                  ? `${refill.scannedCount} titoli scansionati, ${refill.signalCount} segnali trovati, nessuno abbastanza forte per il pilota.`
+                  ? `${refill.scannedCount} titoli scansionati, ${refill.signalCount} segnali trovati, nessuno abbastanza forte per il pilota.${
+                      refill.usMarketContext
+                        ? ` ${getUsMarketContextSummary(refill.usMarketContext)}`
+                        : ''
+                    }`
                   : `Capitale operativo sotto il minimo di ${
                       sizing.min || MIN_POSITION_SIZE
                     }€ per aprire nuovi slot.`
@@ -1931,16 +2039,25 @@ export async function runBackendMonitor(state) {
             : 'Yahoo Finance',
         lastAutomationMessage:
           openedTrades.length > 0
-            ? `Ho aperto ${openedTrades.length} nuovi slot dal backend.`
+            ? `Ho aperto ${openedTrades.length} nuovi slot dal backend.${
+                refill?.usMarketContext
+                  ? ` ${getUsMarketContextSummary(refill.usMarketContext)}`
+                  : ''
+              }`
             : refillErrors.length > 0
               ? `Ricerca automatica non riuscita: ${refillErrors[0]}.`
-              : 'Scansione backend completata: nessun segnale apribile ora.',
+              : `Scansione backend completata: nessun segnale apribile ora.${
+                  refill?.usMarketContext
+                    ? ` ${getUsMarketContextSummary(refill.usMarketContext)}`
+                    : ''
+                }`,
         ...(refill
           ? {
               lastScanAt: new Date().toISOString(),
               lastScanCount: refill.scannedCount,
               lastSignalCount: refill.signalCount,
               lastScanResults: refill.marketData,
+              usMarketContext: refill.usMarketContext || current.usMarketContext,
             }
           : {}),
         engineStatus:
@@ -2000,7 +2117,7 @@ export async function runBackendMonitor(state) {
 
   if (
     (closedTrades.length > 0 || scanDue) &&
-    !closeGuardActive &&
+    !scanBlocked &&
     activePositions.length < maxPositions &&
     canOpenPosition(capital, sizing)
   ) {
@@ -2023,6 +2140,7 @@ export async function runBackendMonitor(state) {
         lastScanCount: refill.scannedCount,
         lastSignalCount: refill.signalCount,
         lastScanResults: refill.marketData,
+        usMarketContext: refill.usMarketContext || current.usMarketContext,
         lastSyncAt: new Date().toISOString(),
         nextScanAt: getNextScanAt(current.activeMarket, now),
         lastDataProvider:
@@ -2058,11 +2176,19 @@ export async function runBackendMonitor(state) {
             errors.length + refillErrors.length
           } errori dati.`
         : openedTrades.length > 0
-          ? `${closedTrades.length} posizioni chiuse e ${openedTrades.length} nuovi slot aperti automaticamente.`
+          ? `${closedTrades.length} posizioni chiuse e ${openedTrades.length} nuovi slot aperti automaticamente.${
+              scanPatch.usMarketContext
+                ? ` ${getUsMarketContextSummary(scanPatch.usMarketContext)}`
+                : ''
+            }`
           : closedTrades.length > 0
             ? closeGuardActive
               ? `${closedTrades.length} posizioni azionarie chiuse dalla protezione ${getEquitiesCloseGuardLabel()}. Nessuna nuova apertura azionaria consentita.`
-              : `${closedTrades.length} posizioni chiuse automaticamente. Nessun nuovo titolo abbastanza forte.`
+              : `${closedTrades.length} posizioni chiuse automaticamente. Nessun nuovo titolo abbastanza forte.${
+                  scanPatch.usMarketContext
+                    ? ` ${getUsMarketContextSummary(scanPatch.usMarketContext)}`
+                    : ''
+                }`
           : `${current.positions.length} posizioni controllate. Nessun target o stop raggiunto.`,
   })
 
@@ -2084,11 +2210,19 @@ export async function runBackendMonitor(state) {
           : current.nextScanAt || getNextScanAt(current.activeMarket, now)),
       lastAutomationMessage:
         openedTrades.length > 0
-          ? `${closedTrades.length} chiusure e ${openedTrades.length} nuove aperture automatiche.`
+          ? `${closedTrades.length} chiusure e ${openedTrades.length} nuove aperture automatiche.${
+              scanPatch.usMarketContext
+                ? ` ${getUsMarketContextSummary(scanPatch.usMarketContext)}`
+                : ''
+            }`
           : closedTrades.length > 0
             ? `${closedTrades.length} posizioni chiuse automaticamente.`
             : scanDue
-              ? 'Controllo backend completato: nessun nuovo slot apribile ora.'
+              ? `Controllo backend completato: nessun nuovo slot apribile ora.${
+                  scanPatch.usMarketContext
+                    ? ` ${getUsMarketContextSummary(scanPatch.usMarketContext)}`
+                    : ''
+                }`
               : 'Controllo backend completato: posizioni monitorate, prossima scansione gia programmata.',
       ...scanPatch,
       lastBackendCheckAt: new Date().toISOString(),

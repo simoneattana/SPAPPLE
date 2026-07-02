@@ -22,7 +22,7 @@ const dateTimeFormatter = new Intl.DateTimeFormat('it-IT', {
 const EMPTY_ARRAY = []
 const EQUITIES_GUARD_TIMEZONE = 'Europe/Rome'
 const EQUITIES_STOP_MINUTES = 16 * 60 + 25
-const EQUITIES_REOPEN_MINUTES = 6 * 60
+const EQUITIES_REOPEN_MINUTES = 9 * 60 + 5
 
 function formatActivityDate(value) {
   if (!value) {
@@ -79,8 +79,8 @@ function getEquitiesSessionStatus(now = new Date()) {
   if (currentSeconds < reopenSeconds) {
     return {
       isStopped: true,
-      title: 'Azioni ferme fino alle 06:00',
-      detail: 'Il mondo azionario resta in protezione: nessuna nuova apertura prima della prossima finestra operativa.',
+      title: 'Azioni ferme fino alle 09:05',
+      detail: 'Il mondo azionario resta in protezione: nessuna nuova apertura prima della lettura del contesto USA e della finestra operativa.',
       countdownLabel: 'Ripartenza',
       countdown: formatDuration(reopenSeconds - currentSeconds),
       badge: 'Fermo',
@@ -92,7 +92,7 @@ function getEquitiesSessionStatus(now = new Date()) {
 
     return {
       isStopped: true,
-      title: 'Azioni ferme fino alle 06:00',
+      title: 'Azioni ferme fino alle 09:05',
       detail: 'Protezione 16:25 attiva: Spapple non apre nuove posizioni azionarie e chiude quelle ancora aperte al primo controllo utile.',
       countdownLabel: 'Ripartenza',
       countdown: formatDuration(secondsUntilReopen),

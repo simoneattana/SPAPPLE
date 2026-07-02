@@ -1,6 +1,11 @@
 import { ATR, RSI } from 'technicalindicators'
 import { fetchLatestCryptoPrice } from './cryptoApi'
 import { mergeTickerProfile } from './tickerMetadata'
+import {
+  US_MARKET_CONTEXT_SYMBOL,
+  buildUsMarketContextFromHistory,
+  createUnavailableUsMarketContext,
+} from './usMarketContext'
 
 const MIN_HISTORY_LENGTH = 30
 const RSI_PERIOD = 14
@@ -61,6 +66,27 @@ function extractChartHistory(chartData, ticker) {
   }
 
   return history
+}
+
+function extractUsContextHistory(chartData) {
+  const result = chartData?.chart?.result?.[0]
+  const timestamps = result?.timestamp
+  const quote = result?.indicators?.quote?.[0]
+
+  if (!Array.isArray(timestamps) || !quote) {
+    return []
+  }
+
+  return timestamps
+    .map((timestamp, index) => ({
+      date: new Date(timestamp * 1000).toISOString().slice(0, 10),
+      close: quote.close?.[index],
+    }))
+    .filter((bar) => bar.close !== null && bar.close !== undefined)
+    .map((bar) => ({
+      date: bar.date,
+      close: assertNumber(bar.close, 'S&P 500: chiusura'),
+    }))
 }
 
 function extractPeRatio(summaryData, ticker) {
@@ -250,4 +276,20 @@ export async function fetchMarketData(tickers) {
   }
 
   return results
+}
+
+export async function fetchUsMarketContext() {
+  try {
+    const chartData = await fetchJson(
+      `/api/yahoo/chart?symbol=${encodeURIComponent(US_MARKET_CONTEXT_SYMBOL)}`,
+      'Contesto USA',
+    )
+    const history = extractUsContextHistory(chartData)
+
+    return buildUsMarketContextFromHistory(history)
+  } catch (error) {
+    return createUnavailableUsMarketContext(
+      error.message || 'Contesto USA non disponibile',
+    )
+  }
 }

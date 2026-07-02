@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { fetchLatestPrice, fetchMarketData } from '../services/api'
+import { fetchLatestPrice, fetchMarketData, fetchUsMarketContext } from '../services/api'
 import { fetchCryptoMarketData } from '../services/cryptoApi'
 import { CRYPTO_TICKERS } from '../services/cryptoUniverse'
 import { EUROPEAN_TICKERS } from '../services/marketUniverse'
@@ -22,6 +22,10 @@ import {
   sortByAutoScore,
 } from '../services/tradingRules'
 import {
+  filterEquityRowsByUsMarketContext,
+  getUsMarketContextSummary,
+} from '../services/usMarketContext'
+import {
   loadRemoteTradingState,
   saveRemoteTradingState,
 } from '../services/remoteState'
@@ -35,7 +39,7 @@ import { TradingContext } from './tradingState'
 
 const MAX_POSITIONS = 5
 const STORAGE_KEY = 'spapple_state'
-const STORAGE_VERSION = 7
+const STORAGE_VERSION = 8
 const LIVE_MONITOR_INTERVAL_MS = 60_000
 const REMOTE_REFRESH_INTERVAL_MS = 20_000
 const EQUITIES_SCAN_INTERVAL_MS = 15 * 60_000
@@ -46,6 +50,10 @@ const EQUITIES_MARKET_CLOSE_GUARD = {
   timezone: 'Europe/Rome',
   hour: 16,
   minute: 25,
+}
+const EQUITIES_MARKET_SCAN_START = {
+  hour: 9,
+  minute: 5,
 }
 const DEFAULT_RISK_LIMITS = {
   maxDailyOrders: 20,
@@ -96,6 +104,12 @@ function getEquitiesCloseGuardLabel() {
   ).padStart(2, '0')}`
 }
 
+function getEquitiesScanStartLabel() {
+  return `${String(EQUITIES_MARKET_SCAN_START.hour).padStart(2, '0')}:${String(
+    EQUITIES_MARKET_SCAN_START.minute,
+  ).padStart(2, '0')}`
+}
+
 function getMarketScanIntervalMs(marketId) {
   return marketId === 'crypto' ? CRYPTO_SCAN_INTERVAL_MS : EQUITIES_SCAN_INTERVAL_MS
 }
@@ -108,7 +122,7 @@ function getRiskLimits(strategy, riskLimits = {}) {
   }
 }
 
-function getNextEquitiesOpenAt(now = new Date()) {
+function getNextEquitiesScanAt(now = new Date()) {
   const currentRomeTime = getTimeInTimezone(
     now,
     EQUITIES_MARKET_CLOSE_GUARD.timezone,
@@ -117,28 +131,76 @@ function getNextEquitiesOpenAt(now = new Date()) {
     currentRomeTime.hour * 3600 +
     currentRomeTime.minute * 60 +
     currentRomeTime.second
-  const openSeconds = 6 * 3600
+  const scanStartSeconds =
+    EQUITIES_MARKET_SCAN_START.hour * 3600 +
+    EQUITIES_MARKET_SCAN_START.minute * 60
 
   if (!Number.isFinite(currentSeconds)) {
     return new Date(now.getTime() + EQUITIES_SCAN_INTERVAL_MS)
   }
 
   const secondsUntilOpen =
-    currentSeconds < openSeconds
-      ? openSeconds - currentSeconds
-      : 24 * 3600 - currentSeconds + openSeconds
+    currentSeconds < scanStartSeconds
+      ? scanStartSeconds - currentSeconds
+      : 24 * 3600 - currentSeconds + scanStartSeconds
 
   return new Date(now.getTime() + secondsUntilOpen * 1000)
+}
+
+function isEquitiesScanBlocked(strategy, date = new Date()) {
+  if (strategy?.id !== EQUITIES_MARKET_CLOSE_GUARD.marketId) {
+    return false
+  }
+
+  const { hour, minute } = getTimeInTimezone(
+    date,
+    EQUITIES_MARKET_CLOSE_GUARD.timezone,
+  )
+
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) {
+    return false
+  }
+
+  const currentMinutes = hour * 60 + minute
+  const scanStartMinutes =
+    EQUITIES_MARKET_SCAN_START.hour * 60 + EQUITIES_MARKET_SCAN_START.minute
+  const closeMinutes =
+    EQUITIES_MARKET_CLOSE_GUARD.hour * 60 + EQUITIES_MARKET_CLOSE_GUARD.minute
+
+  return currentMinutes < scanStartMinutes || currentMinutes >= closeMinutes
 }
 
 function getNextScanAt(marketId, from = new Date()) {
   const strategy = getTradingStrategy(marketId)
 
   if (isEquitiesCloseGuardActive(strategy, from)) {
-    return getNextEquitiesOpenAt(from).toISOString()
+    return getNextEquitiesScanAt(from).toISOString()
+  }
+
+  if (isEquitiesScanBlocked(strategy, from)) {
+    return getNextEquitiesScanAt(from).toISOString()
   }
 
   return new Date(from.getTime() + getMarketScanIntervalMs(marketId)).toISOString()
+}
+
+function normalizeNextScanAt(marketId, value, fallbackValue = null) {
+  const candidate = value || fallbackValue
+
+  if (!candidate) {
+    return getNextScanAt(marketId)
+  }
+
+  const candidateDate = new Date(candidate)
+
+  if (
+    Number.isFinite(candidateDate.getTime()) &&
+    isEquitiesScanBlocked(getTradingStrategy(marketId), candidateDate)
+  ) {
+    return getNextScanAt(marketId, candidateDate)
+  }
+
+  return candidate
 }
 
 function getMarketScannerConfig(marketId) {
@@ -151,6 +213,7 @@ function getMarketScannerConfig(marketId) {
       provider: 'Kraken + CoinGecko',
       sortByScore: sortByCryptoAutoScore,
       universe: CRYPTO_TICKERS,
+      contextFetcher: null,
     }
   }
 
@@ -162,6 +225,7 @@ function getMarketScannerConfig(marketId) {
     provider: 'Yahoo Finance',
     sortByScore: sortByAutoScore,
     universe: EUROPEAN_TICKERS,
+    contextFetcher: fetchUsMarketContext,
   }
 }
 
@@ -202,6 +266,7 @@ const marketStateFields = [
   'lastBackendCheckAt',
   'nextScanAt',
   'nextLiveCheckAt',
+  'usMarketContext',
 ]
 
 function createInitialMarketState(strategy = getTradingStrategy()) {
@@ -235,6 +300,7 @@ function createInitialMarketState(strategy = getTradingStrategy()) {
     lastBackendCheckAt: null,
     nextScanAt: getNextScanAt(strategy.id),
     nextLiveCheckAt: null,
+    usMarketContext: null,
   }
 }
 
@@ -516,10 +582,22 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
     lastLiveCheckAt: rawMarketState.lastLiveCheckAt || fallback.lastLiveCheckAt,
     lastBackendCheckAt:
       rawMarketState.lastBackendCheckAt || fallback.lastBackendCheckAt,
-    nextScanAt:
-      rawMarketState.nextScanAt || fallback.nextScanAt || getNextScanAt(marketId),
+    nextScanAt: normalizeNextScanAt(
+      marketId,
+      rawMarketState.nextScanAt,
+      fallback.nextScanAt,
+    ),
     nextLiveCheckAt: rawMarketState.nextLiveCheckAt || fallback.nextLiveCheckAt,
+    usMarketContext: rawMarketState.usMarketContext || fallback.usMarketContext,
   }
+}
+
+function filterAutomaticRowsByMarketContext(rows, marketId, usMarketContext) {
+  if (marketId !== 'equities') {
+    return rows
+  }
+
+  return filterEquityRowsByUsMarketContext(rows, usMarketContext)
 }
 
 function syncActiveMarketState(state) {
@@ -1621,7 +1699,7 @@ export function TradingProvider({ children }) {
     })
   }, [updateTradingState])
 
-  const recordScanComplete = useCallback(({ scannedCount, signalCount, results }, targetMarketId = null) => {
+  const recordScanComplete = useCallback(({ scannedCount, signalCount, results, usMarketContext }, targetMarketId = null) => {
     updateTradingState((current) => {
       const marketId = targetMarketId || current.activeMarket
       const marketCopy = getMarketCopy(marketId)
@@ -1644,14 +1722,21 @@ export function TradingProvider({ children }) {
         lastScanResults: Array.isArray(results)
           ? results
           : marketState.lastScanResults,
+        usMarketContext: usMarketContext || marketState.usMarketContext,
         engineStatus:
           signalCount > 0
             ? 'Segnali disponibili'
             : 'Nessun segnale operativo',
         lastAutomationMessage:
           signalCount > 0
-            ? `${signalCount} segnali validi trovati. Valuto aperture automatiche se gli slot e i limiti rischio lo consentono.`
-            : `Dati aggiornati da ${scannerConfig.provider}. Nessun segnale operativo ora.`,
+            ? `${signalCount} segnali validi trovati. ${
+                usMarketContext
+                  ? `${getUsMarketContextSummary(usMarketContext)} `
+                  : ''
+              }Valuto aperture automatiche se gli slot e i limiti rischio lo consentono.`
+            : `Dati aggiornati da ${scannerConfig.provider}. ${
+                usMarketContext ? `${getUsMarketContextSummary(usMarketContext)} ` : ''
+              }Nessun segnale operativo ora.`,
         ...appendLogs(
           marketState,
           createActivity({
@@ -1660,8 +1745,16 @@ export function TradingProvider({ children }) {
             title: `Scansione ${marketCopy.label} completata`,
             detail:
               signalCount > 0
-                ? `${signalCount} segnali validi trovati su ${scannedCount} ${marketCopy.assetPlural}.`
-                : `${scannedCount} ${marketCopy.assetPlural} controllati. Nessun asset rispetta le regole operative.`,
+                ? `${signalCount} segnali validi trovati su ${scannedCount} ${marketCopy.assetPlural}.${
+                    usMarketContext
+                      ? ` ${getUsMarketContextSummary(usMarketContext)}`
+                      : ''
+                  }`
+                : `${scannedCount} ${marketCopy.assetPlural} controllati. Nessun asset rispetta le regole operative.${
+                    usMarketContext
+                      ? ` ${getUsMarketContextSummary(usMarketContext)}`
+                      : ''
+                  }`,
           }),
         ),
       }
@@ -1851,18 +1944,26 @@ export function TradingProvider({ children }) {
       events = [activity, ...events]
     }
 
-    if (isEquitiesCloseGuardActive(strategy)) {
+    if (isEquitiesScanBlocked(strategy)) {
+      const closeGuardActive = isEquitiesCloseGuardActive(strategy)
       const activity = createActivity({
         type: 'automation',
         status: 'waiting',
-        title: `Protezione azioni ${getEquitiesCloseGuardLabel()} attiva`,
-        detail: 'Pilota automatico azionario fermo: nuove aperture bloccate fino alla prossima seduta.',
+        title: closeGuardActive
+          ? `Protezione azioni ${getEquitiesCloseGuardLabel()} attiva`
+          : `Azioni in attesa delle ${getEquitiesScanStartLabel()}`,
+        detail: closeGuardActive
+          ? 'Pilota automatico azionario fermo: nuove aperture bloccate fino alla prossima seduta.'
+          : `Pilota automatico azionario fermo: prima scansione consentita alle ${getEquitiesScanStartLabel()}, dopo la lettura del contesto USA.`,
       })
       appendLocalLog(activity)
 
       const nextMarketState = {
         ...marketState,
-        engineStatus: `Protezione azioni ${getEquitiesCloseGuardLabel()} attiva`,
+        engineStatus: closeGuardActive
+          ? `Protezione azioni ${getEquitiesCloseGuardLabel()} attiva`
+          : `In attesa delle ${getEquitiesScanStartLabel()}`,
+        nextScanAt: getNextScanAt(marketId),
         activityLog,
         events,
       }
@@ -1874,7 +1975,16 @@ export function TradingProvider({ children }) {
       return { openedTrades, skippedTickers: rows.map((row) => row.ticker) }
     }
 
-    rows.forEach((row) => {
+    const rowsAllowedByContext = filterAutomaticRowsByMarketContext(
+      rows,
+      marketId,
+      marketState.usMarketContext,
+    )
+    rows
+      .filter((row) => !rowsAllowedByContext.includes(row))
+      .forEach((row) => skippedTickers.push(row.ticker))
+
+    rowsAllowedByContext.forEach((row) => {
       const type = getSignalType(row, strategy)
       const alreadyOpen = positions.some(
         (position) => position.ticker === row.ticker,
@@ -2010,7 +2120,8 @@ export function TradingProvider({ children }) {
     const strategy = getTradingStrategy(marketId)
     const scannerConfig = getMarketScannerConfig(marketId)
 
-    if (isEquitiesCloseGuardActive(strategy)) {
+    if (isEquitiesScanBlocked(strategy)) {
+      const closeGuardActive = isEquitiesCloseGuardActive(strategy)
       updateTradingState((current) => {
         const syncedCurrent = syncActiveMarketState(current)
         const marketState = normalizeMarketState(
@@ -2022,9 +2133,12 @@ export function TradingProvider({ children }) {
           ...marketState,
           isScanning: false,
           nextScanAt: getNextScanAt(marketId),
-          engineStatus: `Protezione azioni ${getEquitiesCloseGuardLabel()} attiva`,
-          lastAutomationMessage:
-            'Mondo azionario fermo: nessuna scansione o apertura prima delle 06:00.',
+          engineStatus: closeGuardActive
+            ? `Protezione azioni ${getEquitiesCloseGuardLabel()} attiva`
+            : `Azioni in attesa delle ${getEquitiesScanStartLabel()}`,
+          lastAutomationMessage: closeGuardActive
+            ? `Mondo azionario fermo: nessuna scansione o apertura prima delle ${getEquitiesScanStartLabel()}.`
+            : `Mondo azionario in attesa: prima scansione automatica alle ${getEquitiesScanStartLabel()}, dopo la lettura del contesto USA.`,
         })
       })
 
@@ -2035,10 +2149,17 @@ export function TradingProvider({ children }) {
     recordScanStart(scannerConfig.universe.length, marketId)
 
     try {
+      const usMarketContext = scannerConfig.contextFetcher
+        ? await scannerConfig.contextFetcher()
+        : null
       const marketData = await scannerConfig.fetcher(scannerConfig.universe)
       const actionableRows = marketData.filter(scannerConfig.isActionable)
       const automaticRows = scannerConfig.sortByScore(
-        marketData.filter(scannerConfig.isAutoEligible),
+        filterAutomaticRowsByMarketContext(
+          marketData.filter(scannerConfig.isAutoEligible),
+          marketId,
+          usMarketContext,
+        ),
       )
 
       recordScanComplete(
@@ -2046,6 +2167,7 @@ export function TradingProvider({ children }) {
           scannedCount: marketData.length,
           signalCount: actionableRows.length,
           results: marketData,
+          usMarketContext,
         },
         marketId,
       )

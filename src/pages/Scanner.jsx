@@ -22,7 +22,7 @@ import {
 } from '../components/ui/Table'
 import { useToast } from '../components/ui/useToast'
 import { useTrading } from '../context/useTrading'
-import { fetchMarketData } from '../services/api'
+import { fetchMarketData, fetchUsMarketContext } from '../services/api'
 import { fetchCryptoMarketData } from '../services/cryptoApi'
 import {
   CRYPTO_MAX_AUTO_ATR_PCT,
@@ -47,6 +47,10 @@ import {
   isRejectedResult,
   sortByAutoScore,
 } from '../services/tradingRules'
+import {
+  filterEquityRowsByUsMarketContext,
+  getUsMarketContextSummary,
+} from '../services/usMarketContext'
 
 const currencyFormatter = new Intl.NumberFormat('it-IT', {
   style: 'currency',
@@ -415,6 +419,14 @@ function getExtendedScanReason(row, scannerConfig) {
   return `Titolo scartato: P/E non valido oppure RSI ${formatNumber(row.rsi)} fuori dalle zone operative richieste.`
 }
 
+function filterAutomaticRowsByContext(rows, marketId, usMarketContext) {
+  if (marketId !== 'equities') {
+    return rows
+  }
+
+  return filterEquityRowsByUsMarketContext(rows, usMarketContext)
+}
+
 export default function Scanner({ marketId }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -458,6 +470,7 @@ export default function Scanner({ marketId }) {
   const routeMarketLabel = routeMarketState?.marketLabel || effectiveMarketLabel
   const routeMaxPositions = effectiveStrategy.maxPositions || maxPositions
   const routeKillSwitchEnabled = Boolean(routeMarketState?.killSwitchEnabled)
+  const routeUsMarketContext = routeMarketState?.usMarketContext || null
   const scannerConfig = useMemo(() => {
     if (effectiveMarket === 'crypto') {
       const copy = getMarketCopy('crypto')
@@ -474,6 +487,7 @@ export default function Scanner({ marketId }) {
         scanLabel: copy.assetPlural,
         diagnosticLabel: copy.assetPlural,
         errorLabel: 'Kraken',
+        contextFetcher: null,
       }
     }
 
@@ -491,6 +505,7 @@ export default function Scanner({ marketId }) {
       scanLabel: copy.assetPlural,
       diagnosticLabel: copy.assetPlural,
       errorLabel: 'Yahoo Finance',
+      contextFetcher: fetchUsMarketContext,
     }
   }, [effectiveMarket])
   const [results, setResults] = useState(
@@ -573,8 +588,15 @@ export default function Scanner({ marketId }) {
     [results, scannerConfig],
   )
   const autoEligibleResults = useMemo(
-    () => scannerConfig.sortByScore(results.filter(scannerConfig.isAutoEligible)),
-    [results, scannerConfig],
+    () =>
+      scannerConfig.sortByScore(
+        filterAutomaticRowsByContext(
+          results.filter(scannerConfig.isAutoEligible),
+          effectiveMarket,
+          routeUsMarketContext,
+        ),
+      ),
+    [effectiveMarket, results, routeUsMarketContext, scannerConfig],
   )
   const resultsByTicker = useMemo(
     () => new Map(results.map((row) => [row.ticker, row])),
@@ -615,13 +637,23 @@ export default function Scanner({ marketId }) {
     recordScanStart(scannerConfig.universe.length, effectiveMarket)
 
     try {
+      const usMarketContext = scannerConfig.contextFetcher
+        ? await withTimeout(
+            scannerConfig.contextFetcher(),
+            'Tempo massimo superato: contesto USA non disponibile',
+          )
+        : null
       const marketData = await withTimeout(
         scannerConfig.fetcher(scannerConfig.universe),
         `Tempo massimo superato: ${scannerConfig.provider} non ha completato la scansione`,
       )
       const actionableRows = marketData.filter(scannerConfig.isActionable)
       const automaticRows = scannerConfig.sortByScore(
-        marketData.filter(scannerConfig.isAutoEligible),
+        filterAutomaticRowsByContext(
+          marketData.filter(scannerConfig.isAutoEligible),
+          effectiveMarket,
+          usMarketContext,
+        ),
       )
 
       setResults(marketData)
@@ -630,6 +662,7 @@ export default function Scanner({ marketId }) {
           scannedCount: marketData.length,
           signalCount: actionableRows.length,
           results: marketData,
+          usMarketContext,
         },
         effectiveMarket,
       )
@@ -648,7 +681,10 @@ export default function Scanner({ marketId }) {
         })
       } else if (routeAutomationEnabled && actionableRows.length > 0) {
         toast({
-          title: 'Pilota automatico: segnali presenti ma non abbastanza forti',
+          title: 'Pilota automatico: segnali presenti ma filtrati',
+          description: usMarketContext
+            ? getUsMarketContextSummary(usMarketContext)
+            : 'Nessun segnale abbastanza forte secondo i limiti rischio.',
         })
       } else if (automatic) {
         toast({
@@ -755,11 +791,18 @@ export default function Scanner({ marketId }) {
     recordScanStart(scannerConfig.universe.length, effectiveMarket)
 
     try {
+      const usMarketContext = scannerConfig.contextFetcher
+        ? await scannerConfig.contextFetcher()
+        : null
       const marketData = await scannerConfig.fetcher(scannerConfig.universe)
       const actionableRows = marketData.filter(scannerConfig.isActionable)
       const automaticRows = scannerConfig.sortByScore(
-        marketData.filter(
-          (row) => scannerConfig.isAutoEligible(row) && row.ticker !== closedTicker,
+        filterAutomaticRowsByContext(
+          marketData.filter(
+            (row) => scannerConfig.isAutoEligible(row) && row.ticker !== closedTicker,
+          ),
+          effectiveMarket,
+          usMarketContext,
         ),
       )
 
@@ -769,6 +812,7 @@ export default function Scanner({ marketId }) {
           scannedCount: marketData.length,
           signalCount: actionableRows.length,
           results: marketData,
+          usMarketContext,
         },
         effectiveMarket,
       )

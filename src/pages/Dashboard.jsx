@@ -26,6 +26,10 @@ import {
   filterTradesByToday,
 } from '../services/profitStats'
 import { LEGACY_POSITION_SIZE } from '../services/positionSizing'
+import {
+  getUsMarketContextDetail,
+  getUsMarketContextLabel,
+} from '../services/usMarketContext'
 import { getTradingStrategy } from '../strategies'
 
 const currencyFormatter = new Intl.NumberFormat('it-IT', {
@@ -247,6 +251,7 @@ export default function Dashboard({ marketId }) {
   const lastScanAt = routeMarketState.lastScanAt || null
   const lastScanCount = Number(routeMarketState.lastScanCount || 0)
   const lastSignalCount = Number(routeMarketState.lastSignalCount || 0)
+  const usMarketContext = routeMarketState.usMarketContext || null
   const marketLabel = routeMarketState.marketLabel || currentStrategy.label
   const maxPositions = currentStrategy.maxPositions || 5
   const marketCopy = getMarketCopy(effectiveMarket)
@@ -324,6 +329,13 @@ export default function Dashboard({ marketId }) {
             value={`${lastSignalCount}/${lastScanCount}`}
             info={`Segnali validi trovati sugli ${marketCopy.assetPlural} analizzati.`}
           />
+          {effectiveMarket === 'equities' ? (
+            <MiniMetric
+              label="Contesto USA"
+              value={getUsMarketContextLabel(usMarketContext)}
+              info={getUsMarketContextDetail(usMarketContext)}
+            />
+          ) : null}
           <MiniMetric
             label="Ordini"
             value={`${executedOrders.length}/${orders.length}`}
