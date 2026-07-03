@@ -47,6 +47,7 @@ const STORAGE_VERSION = 9
 const LIVE_MONITOR_INTERVAL_MS = 60_000
 const REMOTE_REFRESH_INTERVAL_MS = 3_000
 const STALE_SYNC_THRESHOLD_MS = 10_000
+const PRICE_FETCH_TIMEOUT_MS = 15_000
 const EQUITIES_SCAN_INTERVAL_MS = 15 * 60_000
 const CRYPTO_SCAN_INTERVAL_MS = 5 * 60_000
 const EXECUTION_MODE = 'simulation'
@@ -1078,6 +1079,15 @@ function createSimulationOrder({
   }
 }
 
+function withTimeout(promise, timeoutMs, message) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      window.setTimeout(() => reject(new Error(message)), timeoutMs)
+    }),
+  ])
+}
+
 function normalizeStoredState(parsedState) {
   const activeMarket = parsedState.activeMarket || DEFAULT_MARKET_ID
   const rawMarkets =
@@ -1752,7 +1762,7 @@ export function TradingProvider({ children }) {
     }
   }, [])
 
-  const updateTradingState = useCallback((updater) => {
+  const updateTradingState = useCallback((updater, { persist = true } = {}) => {
     const now = new Date().toISOString()
     const nextState = syncActiveMarketState({
       ...updater(stateRef.current),
@@ -1760,6 +1770,11 @@ export function TradingProvider({ children }) {
       lastStateMutationSource: 'browser',
       lastStateMutationSummary: 'Modifica locale in attesa di conferma Supabase.',
     })
+
+    if (!persist) {
+      skipNextRemoteSaveRef.current = true
+    }
+
     stateRef.current = nextState
     setState(nextState)
     setSyncMeta((current) => ({
@@ -1923,7 +1938,7 @@ export function TradingProvider({ children }) {
       }
 
       return activateMarketState(syncedCurrent, marketId, nextMarketState)
-    })
+    }, { persist: false })
   }, [updateTradingState])
 
   const recordScanComplete = useCallback(({ scannedCount, signalCount, results, usMarketContext }, targetMarketId = null) => {
@@ -2439,13 +2454,23 @@ export function TradingProvider({ children }) {
   const fetchPositionPrices = useCallback(async (positions, targetMarketId = null) => {
     const marketId = targetMarketId || stateRef.current.activeMarket
     return Promise.all(
-      positions.map(async (position) => ({
-        position,
-        latestPrice: await fetchLatestPrice(
-          position.ticker,
-          position.marketId || marketId,
-        ),
-      })),
+      positions.map(async (position) => {
+        try {
+          const latestPrice = await withTimeout(
+            fetchLatestPrice(position.ticker, position.marketId || marketId),
+            PRICE_FETCH_TIMEOUT_MS,
+            `${position.ticker}: tempo massimo superato sul prezzo aggiornato`,
+          )
+
+          return { position, latestPrice }
+        } catch (error) {
+          return {
+            position,
+            latestPrice: Number.NaN,
+            error: error.message || `${position.ticker}: prezzo non disponibile`,
+          }
+        }
+      }),
     )
   }, [])
 
@@ -2662,7 +2687,7 @@ export function TradingProvider({ children }) {
           }),
         ),
       })
-    })
+    }, { persist: false })
 
     let positionsWithPrices = []
 
@@ -2813,7 +2838,7 @@ export function TradingProvider({ children }) {
           }),
         ),
       })
-    })
+    }, { persist: false })
 
     let positionsWithPrices = []
 
