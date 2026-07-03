@@ -34,6 +34,7 @@ import {
   calculatePositionSize,
   canOpenPosition,
 } from '../src/services/positionSizing.js'
+import { getEodhdSymbol } from '../src/services/eodhdSymbols.js'
 import { mergeTickerProfile } from '../src/services/tickerMetadata.js'
 import {
   DEFAULT_MARKET_ID,
@@ -1208,7 +1209,7 @@ function extractEodhdProfile(fundamentalsData, ticker) {
 }
 
 async function fetchEodhdHistory(ticker) {
-  const data = await fetchEodhdJson(`eod/${encodeURIComponent(ticker)}`, {
+  const data = await fetchEodhdJson(`eod/${encodeURIComponent(getEodhdSymbol(ticker))}`, {
     period: 'd',
     order: 'a',
     from: getEodhdFromDate(),
@@ -1221,7 +1222,7 @@ async function fetchEodhdHistory(ticker) {
 async function fetchEodhdLatestPrice(ticker) {
   try {
     const realTimeData = await fetchEodhdJson(
-      `real-time/${encodeURIComponent(ticker)}`,
+      `real-time/${encodeURIComponent(getEodhdSymbol(ticker))}`,
     )
 
     return extractEodhdPrice(realTimeData, ticker)
@@ -1233,7 +1234,7 @@ async function fetchEodhdLatestPrice(ticker) {
 }
 
 async function fetchEodhdFundamentals(ticker) {
-  return fetchEodhdJson(`fundamentals/${encodeURIComponent(ticker)}`)
+  return fetchEodhdJson(`fundamentals/${encodeURIComponent(getEodhdSymbol(ticker))}`)
 }
 
 function getCoinGeckoApiKey() {
@@ -1498,14 +1499,29 @@ async function fetchTickerDiagnostic(ticker) {
 
     if (isEodhdConfigured()) {
       try {
-        const [eodhdHistory, fundamentalsData] = await Promise.all([
-          fetchEodhdHistory(ticker),
-          fetchEodhdFundamentals(ticker),
-        ])
-        history = eodhdHistory
-        pe = extractEodhdPeRatio(fundamentalsData, ticker)
-        profile = extractEodhdProfile(fundamentalsData, ticker)
+        history = await fetchEodhdHistory(ticker)
         provider = 'EODHD'
+
+        const fundamentalsData = await fetchEodhdFundamentals(ticker).catch(
+          () => null,
+        )
+
+        if (fundamentalsData) {
+          profile = extractEodhdProfile(fundamentalsData, ticker)
+
+          try {
+            pe = extractEodhdPeRatio(fundamentalsData, ticker)
+          } catch {
+            pe = null
+          }
+        }
+
+        if (!Number.isFinite(pe)) {
+          const summaryData = await fetchSummaryData(ticker)
+          pe = extractPeRatio(summaryData, ticker)
+          profile = profile || mergeTickerProfile(ticker)
+          provider = 'EODHD + Yahoo P/E'
+        }
       } catch {
         // Manteniamo Yahoo come fallback operativo, senza generare dati finti.
       }

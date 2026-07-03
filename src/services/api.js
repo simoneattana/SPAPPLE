@@ -1,5 +1,6 @@
 import { ATR, RSI } from 'technicalindicators'
 import { fetchLatestCryptoPrice } from './cryptoApi'
+import { getEodhdSymbol } from './eodhdSymbols'
 import { mergeTickerProfile } from './tickerMetadata'
 import {
   US_MARKET_CONTEXT_SYMBOL,
@@ -258,20 +259,42 @@ async function fetchTickerData(ticker) {
 }
 
 async function fetchEodhdTickerData(ticker) {
-  const encodedTicker = encodeURIComponent(ticker)
-  const [eodData, fundamentalsData] = await Promise.all([
-    fetchJson(`/api/eodhd/eod?symbol=${encodedTicker}`, `${ticker} storico EODHD`),
-    fetchJson(
-      `/api/eodhd/fundamentals?symbol=${encodedTicker}`,
-      `${ticker} fondamentali EODHD`,
-    ),
-  ])
+  const encodedTicker = encodeURIComponent(getEodhdSymbol(ticker))
+  const eodData = await fetchJson(
+    `/api/eodhd/eod?symbol=${encodedTicker}`,
+    `${ticker} storico EODHD`,
+  )
+  const fundamentalsData = await fetchJson(
+    `/api/eodhd/fundamentals?symbol=${encodedTicker}`,
+    `${ticker} fondamentali EODHD`,
+  ).catch(() => null)
 
   const history = extractEodhdHistory(eodData, ticker)
   const latestBar = history.at(-1)
-  const pe = extractEodhdPeRatio(fundamentalsData, ticker)
   const { rsi, atr } = calculateIndicators(history, ticker)
-  const profile = extractEodhdProfile(fundamentalsData, ticker)
+  let pe = null
+  let profile = fundamentalsData
+    ? extractEodhdProfile(fundamentalsData, ticker)
+    : null
+  let provider = 'EODHD'
+
+  if (fundamentalsData) {
+    try {
+      pe = extractEodhdPeRatio(fundamentalsData, ticker)
+    } catch {
+      pe = null
+    }
+  }
+
+  if (!Number.isFinite(pe)) {
+    const summaryData = await fetchJson(
+      `/api/yahoo/summary?symbol=${encodeURIComponent(ticker)}`,
+      `${ticker} P/E`,
+    )
+    pe = extractPeRatio(summaryData, ticker)
+    profile = profile || extractTickerProfile(summaryData, ticker)
+    provider = 'EODHD + Yahoo P/E'
+  }
 
   return {
     ticker,
@@ -281,7 +304,7 @@ async function fetchEodhdTickerData(ticker) {
     rsi,
     atr,
     status: 'ok',
-    provider: 'EODHD',
+    provider,
   }
 }
 
@@ -353,8 +376,9 @@ export async function fetchLatestPrice(ticker, marketId = 'equities') {
   }
 
   const encodedTicker = encodeURIComponent(ticker)
+  const encodedEodhdTicker = encodeURIComponent(getEodhdSymbol(ticker))
   const eodhdRealtimeData = await fetchJson(
-    `/api/eodhd/real-time?symbol=${encodedTicker}`,
+    `/api/eodhd/real-time?symbol=${encodedEodhdTicker}`,
     `${ticker} prezzo EODHD`,
   ).catch(() => null)
 
@@ -367,7 +391,7 @@ export async function fetchLatestPrice(ticker, marketId = 'equities') {
   }
 
   const eodhdData = await fetchJson(
-    `/api/eodhd/eod?symbol=${encodedTicker}`,
+    `/api/eodhd/eod?symbol=${encodedEodhdTicker}`,
     `${ticker} prezzo EODHD EOD`,
   ).catch(() => null)
 
