@@ -2280,9 +2280,21 @@ async function writeStateEvent(supabase, payload) {
     summary: payload.lastStateMutationSummary || 'Stato Spapple aggiornato',
   })
 
-  if (error && error.code !== '42P01' && error.code !== '42501') {
-    throw error
+  if (!error) {
+    return
   }
+
+  const optionalRealtimeMissing =
+    error.code === '42P01' ||
+    error.code === '42501' ||
+    error.code === 'PGRST205' ||
+    String(error.message || '').includes('spapple_state_events')
+
+  if (optionalRealtimeMissing) {
+    return
+  }
+
+  throw error
 }
 
 export async function writeTradingState(
