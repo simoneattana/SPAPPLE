@@ -652,11 +652,23 @@ export function normalizeTradingState(payload) {
 }
 
 function roundPrice(value) {
-  return Number(value.toFixed(4))
+  const number = Number(value)
+
+  if (!Number.isFinite(number)) {
+    return null
+  }
+
+  return Number(number.toFixed(4))
 }
 
 function roundQuantity(value) {
-  return Number(value.toFixed(8))
+  const number = Number(value)
+
+  if (!Number.isFinite(number)) {
+    return null
+  }
+
+  return Number(number.toFixed(8))
 }
 
 function assertNumber(value, label) {
@@ -2202,51 +2214,61 @@ export async function runBackendMonitor(state) {
                 }`
           : `${current.positions.length} posizioni controllate. Nessun target o stop raggiunto.`,
   })
-
-  return {
-    state: syncActiveMarketState({
-      ...current,
-      capital: roundPrice(capital),
-      vault: roundPrice(vault),
-      positions: activePositions,
-      orders,
-      history: [...closedTrades, ...current.history],
-      isChecking: false,
-      isScanning: false,
-      lastSyncAt: new Date().toISOString(),
-      nextScanAt:
-        scanPatch.nextScanAt ||
-        (scanDue || closeGuardActive
-          ? getNextScanAt(current.activeMarket, now)
-          : current.nextScanAt || getNextScanAt(current.activeMarket, now)),
-      lastAutomationMessage:
-        openedTrades.length > 0
-          ? `${closedTrades.length} chiusure e ${openedTrades.length} nuove aperture automatiche.${
-              scanPatch.usMarketContext
-                ? ` ${getUsMarketContextSummary(scanPatch.usMarketContext)}`
-                : ''
-            }`
-          : closedTrades.length > 0
-            ? `${closedTrades.length} posizioni chiuse automaticamente.`
-            : scanDue
-              ? `Controllo backend completato: nessun nuovo slot apribile ora.${
-                  scanPatch.usMarketContext
-                    ? ` ${getUsMarketContextSummary(scanPatch.usMarketContext)}`
-                    : ''
-                }`
-              : 'Controllo backend completato: posizioni monitorate, prossima scansione gia programmata.',
-      ...scanPatch,
-      lastBackendCheckAt: new Date().toISOString(),
-      lastLiveCheckAt: new Date().toISOString(),
-      engineStatus:
-        openedTrades.length > 0
-          ? 'Slot riempiti dal backend'
-          : activePositions.length > 0
+  const nextMarketState = {
+    ...current,
+    capital: roundPrice(capital),
+    vault: roundPrice(vault),
+    positions: activePositions,
+    orders,
+    history: [...closedTrades, ...current.history],
+    isChecking: false,
+    isScanning: false,
+    lastSyncAt: new Date().toISOString(),
+    nextScanAt:
+      scanPatch.nextScanAt ||
+      (scanDue || closeGuardActive
+        ? getNextScanAt(current.activeMarket, now)
+        : current.nextScanAt || getNextScanAt(current.activeMarket, now)),
+    lastAutomationMessage:
+      openedTrades.length > 0
+        ? `${closedTrades.length} chiusure e ${openedTrades.length} nuove aperture automatiche.${
+            scanPatch.usMarketContext
+              ? ` ${getUsMarketContextSummary(scanPatch.usMarketContext)}`
+              : ''
+          }`
+        : closedTrades.length > 0
+          ? `${closedTrades.length} posizioni chiuse automaticamente.`
+          : scanDue
+            ? `Controllo backend completato: nessun nuovo slot apribile ora.${
+                scanPatch.usMarketContext
+                  ? ` ${getUsMarketContextSummary(scanPatch.usMarketContext)}`
+                  : ''
+              }`
+            : 'Controllo backend completato: posizioni monitorate, prossima scansione gia programmata.',
+    ...scanPatch,
+    lastBackendCheckAt: new Date().toISOString(),
+    lastLiveCheckAt: new Date().toISOString(),
+    engineStatus:
+      openedTrades.length > 0
+        ? 'Slot riempiti dal backend'
+        : activePositions.length > 0
           ? 'Monitor backend attivo'
           : closeGuardActive
             ? `Protezione azioni ${getEquitiesCloseGuardLabel()} completata`
             : 'In attesa di nuova scansione',
-      ...appendLogs(current, activity),
+    ...appendLogs(current, activity),
+  }
+  delete nextMarketState.markets
+
+  return {
+    state: syncActiveMarketState({
+      ...current,
+      activeMarket: current.activeMarket,
+      markets: {
+        ...(current.markets || {}),
+        [current.activeMarket]: nextMarketState,
+      },
+      ...nextMarketState,
     }),
     closedTrades,
     openedTrades,
