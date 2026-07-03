@@ -154,6 +154,58 @@ function createResetGuardUntil() {
   return new Date(Date.now() + 5 * 60 * 1000).toISOString()
 }
 
+function sanitizeTransientFlags(payload = {}) {
+  const nextPayload = {
+    ...payload,
+    isChecking: false,
+    isScanning: false,
+  }
+  const markets = payload.markets && typeof payload.markets === 'object'
+    ? payload.markets
+    : {}
+
+  nextPayload.markets = Object.fromEntries(
+    Object.entries(markets).map(([marketId, marketState = {}]) => {
+      const wasChecking = Boolean(marketState.isChecking)
+      const wasScanning = Boolean(marketState.isScanning)
+      const positions = Array.isArray(marketState.positions)
+        ? marketState.positions
+        : []
+      let engineStatus = marketState.engineStatus
+      let lastAutomationMessage = marketState.lastAutomationMessage
+
+      if (wasChecking) {
+        engineStatus =
+          positions.length > 0 ? 'Monitor live pronto' : 'In attesa'
+        lastAutomationMessage =
+          positions.length > 0
+            ? 'Controllo precedente interrotto: stato remoto riallineato.'
+            : lastAutomationMessage
+      }
+
+      if (wasScanning) {
+        engineStatus =
+          positions.length > 0 ? engineStatus : 'In attesa di nuova scansione'
+        lastAutomationMessage =
+          lastAutomationMessage || 'Scansione precedente interrotta: stato remoto riallineato.'
+      }
+
+      return [
+        marketId,
+        {
+          ...marketState,
+          isChecking: false,
+          isScanning: false,
+          engineStatus,
+          lastAutomationMessage,
+        },
+      ]
+    }),
+  )
+
+  return nextPayload
+}
+
 function isResetGuardActive(payload = {}) {
   return timestamp(payload.resetGuardUntil) > Date.now()
 }
@@ -234,7 +286,7 @@ async function mergeIncomingState(supabase, incomingPayload) {
     throw error
   }
 
-  const incoming = normalizeTradingState(incomingPayload)
+  const incoming = normalizeTradingState(sanitizeTransientFlags(incomingPayload))
   const markets = mergeMarkets(incoming, currentPayload)
   const activeMarket = incoming.activeMarket || DEFAULT_MARKET_ID
   const activeMarketState = markets[activeMarket] || {}
@@ -322,7 +374,7 @@ export default async function handler(request, response) {
       const nextPayload =
         body.reset === true
           ? normalizeTradingState({
-              ...body.payload,
+              ...sanitizeTransientFlags(body.payload),
               resetGuardUntil: createResetGuardUntil(),
             })
           : await mergeIncomingState(supabase, body.payload)
