@@ -69,6 +69,23 @@ Le letture e scritture passano dalla funzione serverless con chiave privata.
 La tabella `public.spapple_state_events` espone solo eventi di revisione, non il
 payload operativo completo.
 
+## Dati di mercato
+
+Per le azioni europee Spapple usa EODHD come provider primario per storico EOD,
+prezzi aggiornati e fondamentali. Yahoo Finance rimane solo come fallback reale
+nel caso in cui EODHD non restituisca un singolo ticker. RSI e ATR vengono ancora
+calcolati internamente con `technicalindicators`, così il metodo resta coerente e
+non consuma chiamate extra sugli indicatori tecnici.
+
+Variabile richiesta:
+
+```bash
+EODHD_API_KEY=...
+```
+
+La chiave deve essere configurata in `.env.local` per lo sviluppo locale e nelle
+Environment Variables del progetto Vercel per produzione, preview e development.
+
 ## Verifiche
 
 ```bash

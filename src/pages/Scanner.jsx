@@ -496,7 +496,7 @@ export default function Scanner({ marketId }) {
     const copy = getMarketCopy('equities')
     return {
       copy,
-      provider: 'Yahoo Finance',
+      provider: 'EODHD / Yahoo Finance',
       universe: EUROPEAN_TICKERS,
       fetcher: fetchMarketData,
       isActionable: isActionableResult,
@@ -506,7 +506,7 @@ export default function Scanner({ marketId }) {
       getScore: getAutoScore,
       scanLabel: copy.assetPlural,
       diagnosticLabel: copy.assetPlural,
-      errorLabel: 'Yahoo Finance',
+      errorLabel: 'EODHD / Yahoo Finance',
       contextFetcher: fetchUsMarketContext,
     }
   }, [effectiveMarket])

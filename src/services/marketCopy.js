@@ -5,7 +5,7 @@ const marketCopies = {
     assetSingular: 'titolo',
     assetPlural: 'titoli',
     assetType: 'societa',
-    provider: 'Yahoo Finance',
+    provider: 'EODHD / Yahoo Finance',
     scanMode: 'EOD',
     scanDescription:
       'Analisi su azioni europee con P/E positivo, prezzo di chiusura, RSI e ATR.',

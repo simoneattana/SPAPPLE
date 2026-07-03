@@ -224,11 +224,11 @@ function getMarketScannerConfig(marketId) {
   }
 
   return {
-    errorLabel: 'Yahoo Finance',
+    errorLabel: 'EODHD / Yahoo Finance',
     fetcher: fetchMarketData,
     isActionable: isActionableResult,
     isAutoEligible: isAutoEligibleResult,
-    provider: 'Yahoo Finance',
+    provider: 'EODHD / Yahoo Finance',
     sortByScore: sortByAutoScore,
     universe: EUROPEAN_TICKERS,
     contextFetcher: fetchUsMarketContext,

@@ -34,11 +34,13 @@ import {
   calculatePositionSize,
   canOpenPosition,
 } from '../src/services/positionSizing.js'
+import { mergeTickerProfile } from '../src/services/tickerMetadata.js'
 import {
   DEFAULT_MARKET_ID,
   TRADING_STRATEGIES,
   getTradingStrategy,
 } from '../src/strategies/index.js'
+import { fetchEodhdJson, isEodhdConfigured } from './_eodhd.js'
 import { clearYahooAuth, fetchYahooJson, getYahooAuth } from './_yahoo.js'
 
 export const STATE_ID = 'default'
@@ -1121,6 +1123,119 @@ async function fetchChartPrice(ticker) {
   return number
 }
 
+function getEodhdFromDate(days = 120) {
+  const date = new Date()
+  date.setDate(date.getDate() - days)
+  return date.toISOString().slice(0, 10)
+}
+
+function extractEodhdHistory(eodData, ticker) {
+  if (!Array.isArray(eodData)) {
+    throw new Error(`${ticker}: storico EODHD non disponibile`)
+  }
+
+  const history = eodData
+    .map((bar) => ({
+      date: bar.date,
+      high: bar.high,
+      low: bar.low,
+      close: bar.adjusted_close ?? bar.close,
+    }))
+    .filter(
+      (bar) =>
+        bar.date &&
+        bar.high !== null &&
+        bar.high !== undefined &&
+        bar.low !== null &&
+        bar.low !== undefined &&
+        bar.close !== null &&
+        bar.close !== undefined,
+    )
+    .map((bar) => ({
+      date: bar.date,
+      high: assertNumber(bar.high, `${ticker}: massimo EODHD`),
+      low: assertNumber(bar.low, `${ticker}: minimo EODHD`),
+      close: assertNumber(bar.close, `${ticker}: chiusura EODHD`),
+    }))
+
+  if (history.length < MIN_HISTORY_LENGTH) {
+    throw new Error(`${ticker}: storico EODHD giornaliero insufficiente`)
+  }
+
+  return history
+}
+
+function extractEodhdPeRatio(fundamentalsData, ticker) {
+  const highlights = fundamentalsData?.Highlights || {}
+  const valuation = fundamentalsData?.Valuation || {}
+  const pe =
+    highlights.PERatio ??
+    highlights.TrailingPE ??
+    highlights.ForwardPE ??
+    valuation.TrailingPE ??
+    valuation.ForwardPE
+  const peNumber = assertNumber(pe, `${ticker}: P/E EODHD`)
+
+  if (peNumber <= 0) {
+    throw new Error(`${ticker}: P/E EODHD non profittevole`)
+  }
+
+  return peNumber
+}
+
+function extractEodhdPrice(realTimeData, ticker) {
+  const price =
+    realTimeData?.close ??
+    realTimeData?.adjusted_close ??
+    realTimeData?.previousClose ??
+    realTimeData?.last ??
+    realTimeData?.price
+
+  return assertNumber(price, `${ticker}: prezzo EODHD`)
+}
+
+function extractEodhdProfile(fundamentalsData, ticker) {
+  const general = fundamentalsData?.General || {}
+
+  return mergeTickerProfile(ticker, {
+    name: general.Name || null,
+    sector: general.Sector || null,
+    industry: general.Industry || null,
+    country: general.CountryName || general.CountryISO || null,
+    website: general.WebURL || null,
+    description: general.Description || null,
+  })
+}
+
+async function fetchEodhdHistory(ticker) {
+  const data = await fetchEodhdJson(`eod/${encodeURIComponent(ticker)}`, {
+    period: 'd',
+    order: 'a',
+    from: getEodhdFromDate(),
+    to: new Date().toISOString().slice(0, 10),
+  })
+
+  return extractEodhdHistory(data, ticker)
+}
+
+async function fetchEodhdLatestPrice(ticker) {
+  try {
+    const realTimeData = await fetchEodhdJson(
+      `real-time/${encodeURIComponent(ticker)}`,
+    )
+
+    return extractEodhdPrice(realTimeData, ticker)
+  } catch {
+    const history = await fetchEodhdHistory(ticker)
+
+    return history.at(-1).close
+  }
+}
+
+async function fetchEodhdFundamentals(ticker) {
+  return fetchEodhdJson(`fundamentals/${encodeURIComponent(ticker)}`)
+}
+
 function getCoinGeckoApiKey() {
   return process.env.COINGECKO_API_KEY || process.env.CG_API_KEY || ''
 }
@@ -1225,6 +1340,14 @@ export async function fetchLatestMarketPrice(ticker, marketId = DEFAULT_MARKET_I
     return history.at(-1).close
   }
 
+  if (isEodhdConfigured()) {
+    try {
+      return await fetchEodhdLatestPrice(ticker)
+    } catch {
+      // Yahoo resta una rete di sicurezza se EODHD non restituisce quel ticker.
+    }
+  }
+
   try {
     return await fetchSummaryPrice(ticker)
   } catch {
@@ -1233,6 +1356,14 @@ export async function fetchLatestMarketPrice(ticker, marketId = DEFAULT_MARKET_I
 }
 
 async function fetchChartHistory(ticker) {
+  if (isEodhdConfigured()) {
+    try {
+      return await fetchEodhdHistory(ticker)
+    } catch {
+      // Se EODHD non copre il simbolo specifico, continuiamo con Yahoo.
+    }
+  }
+
   const yahooUrl = new URL(
     `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}`,
   )
@@ -1360,16 +1491,42 @@ function getDiagnostic(row) {
 
 async function fetchTickerDiagnostic(ticker) {
   try {
-    const [history, summaryData] = await Promise.all([
-      fetchChartHistory(ticker),
-      fetchSummaryData(ticker),
-    ])
+    let history
+    let pe
+    let profile = null
+    let provider = 'Yahoo Finance'
+
+    if (isEodhdConfigured()) {
+      try {
+        const [eodhdHistory, fundamentalsData] = await Promise.all([
+          fetchEodhdHistory(ticker),
+          fetchEodhdFundamentals(ticker),
+        ])
+        history = eodhdHistory
+        pe = extractEodhdPeRatio(fundamentalsData, ticker)
+        profile = extractEodhdProfile(fundamentalsData, ticker)
+        provider = 'EODHD'
+      } catch {
+        // Manteniamo Yahoo come fallback operativo, senza generare dati finti.
+      }
+    }
+
+    if (!history) {
+      const [yahooHistory, summaryData] = await Promise.all([
+        fetchChartHistory(ticker),
+        fetchSummaryData(ticker),
+      ])
+      history = yahooHistory
+      pe = extractPeRatio(summaryData, ticker)
+      profile = mergeTickerProfile(ticker)
+    }
+
     const latestBar = history.at(-1)
-    const pe = extractPeRatio(summaryData, ticker)
     const { rsi, atr } = calculateIndicators(history, ticker)
     const row = {
       ticker,
-      profile: null,
+      provider,
+      profile,
       currentPrice: latestBar.close,
       pe,
       rsi,
@@ -2059,7 +2216,7 @@ export async function runBackendMonitor(state) {
         lastDataProvider:
           current.activeMarket === 'crypto'
             ? 'Kraken + CoinGecko'
-            : 'Yahoo Finance',
+            : 'EODHD / Yahoo Finance',
         lastAutomationMessage:
           openedTrades.length > 0
             ? `Ho aperto ${openedTrades.length} nuovi slot dal backend.${
@@ -2169,7 +2326,7 @@ export async function runBackendMonitor(state) {
         lastDataProvider:
           current.activeMarket === 'crypto'
             ? 'Kraken + CoinGecko'
-            : 'Yahoo Finance',
+            : 'EODHD / Yahoo Finance',
       }
     } catch (error) {
       refillErrors.push(error.message || 'Ricerca nuovi titoli non riuscita')

@@ -68,6 +68,42 @@ function extractChartHistory(chartData, ticker) {
   return history
 }
 
+function extractEodhdHistory(eodData, ticker) {
+  if (!Array.isArray(eodData)) {
+    throw new Error(`${ticker}: storico EODHD non disponibile`)
+  }
+
+  const history = eodData
+    .map((bar) => ({
+      date: bar.date,
+      high: bar.high,
+      low: bar.low,
+      close: bar.adjusted_close ?? bar.close,
+    }))
+    .filter(
+      (bar) =>
+        bar.date &&
+        bar.high !== null &&
+        bar.high !== undefined &&
+        bar.low !== null &&
+        bar.low !== undefined &&
+        bar.close !== null &&
+        bar.close !== undefined,
+    )
+    .map((bar) => ({
+      date: bar.date,
+      high: assertNumber(bar.high, `${ticker}: massimo EODHD`),
+      low: assertNumber(bar.low, `${ticker}: minimo EODHD`),
+      close: assertNumber(bar.close, `${ticker}: chiusura EODHD`),
+    }))
+
+  if (history.length < MIN_HISTORY_LENGTH) {
+    throw new Error(`${ticker}: storico EODHD giornaliero insufficiente`)
+  }
+
+  return history
+}
+
 function extractUsContextHistory(chartData) {
   const result = chartData?.chart?.result?.[0]
   const timestamps = result?.timestamp
@@ -105,6 +141,24 @@ function extractPeRatio(summaryData, ticker) {
   return peNumber
 }
 
+function extractEodhdPeRatio(fundamentalsData, ticker) {
+  const highlights = fundamentalsData?.Highlights || {}
+  const valuation = fundamentalsData?.Valuation || {}
+  const pe =
+    highlights.PERatio ??
+    highlights.TrailingPE ??
+    highlights.ForwardPE ??
+    valuation.TrailingPE ??
+    valuation.ForwardPE
+  const peNumber = assertNumber(pe, `${ticker}: P/E EODHD`)
+
+  if (peNumber <= 0) {
+    throw new Error(`${ticker}: P/E EODHD non profittevole`)
+  }
+
+  return peNumber
+}
+
 function extractMarketPrice(summaryData, ticker) {
   const summary = summaryData?.quoteSummary?.result?.[0]
   const price =
@@ -113,6 +167,17 @@ function extractMarketPrice(summaryData, ticker) {
     summary?.price?.preMarketPrice?.raw
 
   return assertNumber(price, `${ticker}: prezzo di mercato`)
+}
+
+function extractEodhdPrice(realTimeData, ticker) {
+  const price =
+    realTimeData?.close ??
+    realTimeData?.adjusted_close ??
+    realTimeData?.previousClose ??
+    realTimeData?.last ??
+    realTimeData?.price
+
+  return assertNumber(price, `${ticker}: prezzo EODHD`)
 }
 
 function extractTickerProfile(summaryData, ticker) {
@@ -132,6 +197,19 @@ function extractTickerProfile(summaryData, ticker) {
     country: assetProfile.country || null,
     website: assetProfile.website || null,
     description: description || null,
+  })
+}
+
+function extractEodhdProfile(fundamentalsData, ticker) {
+  const general = fundamentalsData?.General || {}
+
+  return mergeTickerProfile(ticker, {
+    name: general.Name || null,
+    sector: general.Sector || null,
+    industry: general.Industry || null,
+    country: general.CountryName || general.CountryISO || null,
+    website: general.WebURL || null,
+    description: general.Description || null,
   })
 }
 
@@ -172,6 +250,42 @@ function calculateIndicators(history, ticker) {
 }
 
 async function fetchTickerData(ticker) {
+  try {
+    return await fetchEodhdTickerData(ticker)
+  } catch {
+    return fetchYahooTickerData(ticker)
+  }
+}
+
+async function fetchEodhdTickerData(ticker) {
+  const encodedTicker = encodeURIComponent(ticker)
+  const [eodData, fundamentalsData] = await Promise.all([
+    fetchJson(`/api/eodhd/eod?symbol=${encodedTicker}`, `${ticker} storico EODHD`),
+    fetchJson(
+      `/api/eodhd/fundamentals?symbol=${encodedTicker}`,
+      `${ticker} fondamentali EODHD`,
+    ),
+  ])
+
+  const history = extractEodhdHistory(eodData, ticker)
+  const latestBar = history.at(-1)
+  const pe = extractEodhdPeRatio(fundamentalsData, ticker)
+  const { rsi, atr } = calculateIndicators(history, ticker)
+  const profile = extractEodhdProfile(fundamentalsData, ticker)
+
+  return {
+    ticker,
+    profile,
+    currentPrice: latestBar.close,
+    pe,
+    rsi,
+    atr,
+    status: 'ok',
+    provider: 'EODHD',
+  }
+}
+
+async function fetchYahooTickerData(ticker) {
   const encodedTicker = encodeURIComponent(ticker)
   const [chartData, summaryData] = await Promise.all([
     fetchJson(`/api/yahoo/chart?symbol=${encodedTicker}`, `${ticker} storico`),
@@ -192,6 +306,7 @@ async function fetchTickerData(ticker) {
     rsi,
     atr,
     status: 'ok',
+    provider: 'Yahoo Finance',
   }
 }
 
@@ -238,6 +353,32 @@ export async function fetchLatestPrice(ticker, marketId = 'equities') {
   }
 
   const encodedTicker = encodeURIComponent(ticker)
+  const eodhdRealtimeData = await fetchJson(
+    `/api/eodhd/real-time?symbol=${encodedTicker}`,
+    `${ticker} prezzo EODHD`,
+  ).catch(() => null)
+
+  if (eodhdRealtimeData) {
+    try {
+      return extractEodhdPrice(eodhdRealtimeData, ticker)
+    } catch {
+      // Se EODHD non espone un prezzo aggiornato valido, passiamo a Yahoo.
+    }
+  }
+
+  const eodhdData = await fetchJson(
+    `/api/eodhd/eod?symbol=${encodedTicker}`,
+    `${ticker} prezzo EODHD EOD`,
+  ).catch(() => null)
+
+  if (eodhdData) {
+    try {
+      return extractEodhdHistory(eodhdData, ticker).at(-1).close
+    } catch {
+      // Se anche lo storico EODHD non è leggibile, usiamo Yahoo.
+    }
+  }
+
   const summaryData = await fetchJson(
     `/api/yahoo/summary?symbol=${encodedTicker}`,
     `${ticker} prezzo aggiornato`,
