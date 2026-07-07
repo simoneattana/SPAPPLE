@@ -2045,6 +2045,7 @@ function evaluatePosition(position, latestPrice, { forceCloseReason = null } = {
           ticker: position.ticker,
         })
       : null
+  const shouldClosePosition = Boolean(closeOrder)
 
   return {
     monitoredPosition: {
@@ -2059,7 +2060,7 @@ function evaluatePosition(position, latestPrice, { forceCloseReason = null } = {
     },
     closeOrder,
     closedTrade:
-      profitExit.isWin || isLoss
+      shouldClosePosition
         ? {
             ticker: position.ticker,
             type: position.type,
