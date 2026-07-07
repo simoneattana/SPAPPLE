@@ -34,6 +34,7 @@ import {
   subscribeToStateEvents,
 } from '../services/realtimeState'
 import { useAuth } from '../services/useAuth'
+import { safeGetItem, safeSetItem } from '../services/safeStorage'
 import {
   DEFAULT_MARKET_ID,
   TRADING_STRATEGIES,
@@ -1128,7 +1129,7 @@ function normalizeStoredState(parsedState) {
 
 function loadInitialState() {
   try {
-    const storedState = localStorage.getItem(STORAGE_KEY)
+    const storedState = safeGetItem(STORAGE_KEY)
 
     if (!storedState) {
       return initialState
@@ -1473,7 +1474,7 @@ export function TradingProvider({ children }) {
   }, [state])
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+    safeSetItem(STORAGE_KEY, JSON.stringify(state))
   }, [state])
 
   const applyRemoteSnapshot = useCallback((remoteState, message = 'Dati sincronizzati.') => {
@@ -1488,7 +1489,7 @@ export function TradingProvider({ children }) {
     remoteUpdatedAtRef.current = remoteState.updatedAt || null
     stateRef.current = hydratedState
     setState(hydratedState)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(hydratedState))
+    safeSetItem(STORAGE_KEY, JSON.stringify(hydratedState))
     setSyncMeta((current) => ({
       ...current,
       status: 'live',

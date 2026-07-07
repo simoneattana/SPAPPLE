@@ -1,16 +1,17 @@
 import { useMemo, useState } from 'react'
 import { AuthContext } from './authState'
+import { safeGetItem, safeRemoveItem, safeSetItem } from './safeStorage'
 
 const AUTH_STORAGE_KEY = 'spapple-auth'
 
 export function AuthProvider({ children }) {
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    return localStorage.getItem(AUTH_STORAGE_KEY) === 'true'
+    return safeGetItem(AUTH_STORAGE_KEY) === 'true'
   })
 
   const login = (password) => {
     if (password === 'alpha') {
-      localStorage.setItem(AUTH_STORAGE_KEY, 'true')
+      safeSetItem(AUTH_STORAGE_KEY, 'true')
       setIsAuthenticated(true)
       return true
     }
@@ -19,7 +20,7 @@ export function AuthProvider({ children }) {
   }
 
   const logout = () => {
-    localStorage.removeItem(AUTH_STORAGE_KEY)
+    safeRemoveItem(AUTH_STORAGE_KEY)
     setIsAuthenticated(false)
   }
 
