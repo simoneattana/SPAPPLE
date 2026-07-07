@@ -53,9 +53,14 @@ CRON_SECRET=...
 ```
 
 Il monitor automatico backend vive su Vercel in `/api/cron/monitor`.
-Lo scheduler e gestito da GitHub Actions con il workflow
-`.github/workflows/spapple-monitor.yml`, ogni 5 minuti. L'endpoint accetta solo
-richieste con header `Authorization: Bearer CRON_SECRET`.
+Lo scheduler ufficiale è Vercel Cron, configurato in `vercel.json` ogni 5
+minuti. L'endpoint accetta solo richieste con header
+`Authorization: Bearer CRON_SECRET`, header che Vercel Cron invia quando la
+variabile `CRON_SECRET` è configurata nel progetto.
+
+Il workflow GitHub Actions `.github/workflows/spapple-monitor.yml` resta
+disponibile solo come comando manuale di emergenza (`workflow_dispatch`) e non è
+più la fonte automatica principale.
 
 La tabella richiesta è definita nella migrazione:
 
