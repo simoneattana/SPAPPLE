@@ -65,6 +65,7 @@ const REQUEST_CONCURRENCY = 8
 const EXECUTION_MODE = 'simulation'
 const EQUITIES_SCAN_INTERVAL_MS = 15 * 60_000
 const CRYPTO_SCAN_INTERVAL_MS = 5 * 60_000
+const backendFxRateCache = new Map()
 const DEFAULT_RISK_LIMITS = {
   maxDailyOrders: 20,
   maxDailyCapitalPct: 1,
@@ -1401,12 +1402,18 @@ function extractFxRate(data, pair) {
 async function fetchBackendFxRateToEur(currency = 'EUR') {
   const from = String(currency || 'EUR').toUpperCase()
 
+  if (backendFxRateCache.has(from)) {
+    return backendFxRateCache.get(from)
+  }
+
   if (from === 'EUR') {
-    return {
+    const fx = {
       pair: 'EUREUR.FOREX',
       rate: 1,
       provider: 'EODHD',
     }
+    backendFxRateCache.set(from, fx)
+    return fx
   }
 
   const directPair = `${from}EUR.FOREX`
@@ -1415,20 +1422,24 @@ async function fetchBackendFxRateToEur(currency = 'EUR') {
   try {
     const data = await fetchEodhdJson(`real-time/${directPair}`)
 
-    return {
+    const fx = {
       pair: directPair,
       rate: extractFxRate(data, directPair),
       provider: 'EODHD',
     }
+    backendFxRateCache.set(from, fx)
+    return fx
   } catch {
     const data = await fetchEodhdJson(`real-time/${inversePair}`)
     const inverseRate = extractFxRate(data, inversePair)
 
-    return {
+    const fx = {
       pair: inversePair,
       rate: 1 / inverseRate,
       provider: 'EODHD',
     }
+    backendFxRateCache.set(from, fx)
+    return fx
   }
 }
 
@@ -1485,15 +1496,22 @@ async function fetchTickerDiagnostic(ticker) {
     let pe
     let profile = null
     let provider = 'Yahoo Finance'
+    const isUsTicker = String(ticker).endsWith('.US')
+    let yahooSummaryData = null
 
     if (isEodhdConfigured()) {
       try {
-        history = await fetchEodhdHistory(ticker)
-        provider = 'EODHD'
+        const [eodhdHistory, fundamentalsData, summaryData] = await Promise.all([
+          fetchEodhdHistory(ticker),
+          isUsTicker
+            ? Promise.resolve(null)
+            : fetchEodhdFundamentals(ticker).catch(() => null),
+          isUsTicker ? fetchSummaryData(ticker) : Promise.resolve(null),
+        ])
 
-        const fundamentalsData = await fetchEodhdFundamentals(ticker).catch(
-          () => null,
-        )
+        history = eodhdHistory
+        yahooSummaryData = summaryData
+        provider = 'EODHD'
 
         if (fundamentalsData) {
           profile = extractEodhdProfile(fundamentalsData, ticker)
@@ -1506,7 +1524,7 @@ async function fetchTickerDiagnostic(ticker) {
         }
 
         if (!Number.isFinite(pe)) {
-          const summaryData = await fetchSummaryData(ticker)
+          const summaryData = yahooSummaryData || (await fetchSummaryData(ticker))
           pe = extractPeRatio(summaryData, ticker)
           profile = profile || mergeTickerProfile(ticker)
           provider = 'EODHD + Yahoo P/E'

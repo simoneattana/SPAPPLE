@@ -14,6 +14,7 @@ const MIN_HISTORY_LENGTH = 30
 const RSI_PERIOD = 14
 const ATR_PERIOD = 14
 const REQUEST_CONCURRENCY = 8
+const fxRateCache = new Map()
 
 async function fetchJson(url, label) {
   const response = await fetch(url)
@@ -254,7 +255,13 @@ function calculateIndicators(history, ticker) {
 
 async function withCurrencyData(row) {
   const currency = getTickerCurrency(row.ticker)
-  const fx = await fetchFxRateToEur(currency)
+  const cacheKey = String(currency || 'EUR').toUpperCase()
+
+  if (!fxRateCache.has(cacheKey)) {
+    fxRateCache.set(cacheKey, fetchFxRateToEur(currency))
+  }
+
+  const fx = await fxRateCache.get(cacheKey)
   const currentPriceEur = convertToBaseCurrency(row.currentPrice, fx.rate)
   const atrEur = convertToBaseCurrency(row.atr, fx.rate)
 
@@ -280,14 +287,25 @@ async function fetchTickerData(ticker) {
 async function fetchEodhdTickerData(ticker) {
   const encodedTicker = encodeURIComponent(getEodhdSymbol(ticker))
   const yahooTicker = getYahooSymbol(ticker)
-  const eodData = await fetchJson(
-    `/api/eodhd/eod?symbol=${encodedTicker}`,
-    `${ticker} storico EODHD`,
-  )
-  const fundamentalsData = await fetchJson(
-    `/api/eodhd/fundamentals?symbol=${encodedTicker}`,
-    `${ticker} fondamentali EODHD`,
-  ).catch(() => null)
+  const isUsTicker = String(ticker).endsWith('.US')
+  const [eodData, fundamentalsData, yahooSummaryData] = await Promise.all([
+    fetchJson(
+      `/api/eodhd/eod?symbol=${encodedTicker}`,
+      `${ticker} storico EODHD`,
+    ),
+    isUsTicker
+      ? Promise.resolve(null)
+      : fetchJson(
+          `/api/eodhd/fundamentals?symbol=${encodedTicker}`,
+          `${ticker} fondamentali EODHD`,
+        ).catch(() => null),
+    isUsTicker
+      ? fetchJson(
+          `/api/yahoo/summary?symbol=${encodeURIComponent(yahooTicker)}`,
+          `${ticker} P/E`,
+        )
+      : Promise.resolve(null),
+  ])
 
   const history = extractEodhdHistory(eodData, ticker)
   const latestBar = history.at(-1)
@@ -307,10 +325,12 @@ async function fetchEodhdTickerData(ticker) {
   }
 
   if (!Number.isFinite(pe)) {
-    const summaryData = await fetchJson(
-      `/api/yahoo/summary?symbol=${encodeURIComponent(yahooTicker)}`,
-      `${ticker} P/E`,
-    )
+    const summaryData =
+      yahooSummaryData ||
+      (await fetchJson(
+        `/api/yahoo/summary?symbol=${encodeURIComponent(yahooTicker)}`,
+        `${ticker} P/E`,
+      ))
     pe = extractPeRatio(summaryData, ticker)
     profile = profile || extractTickerProfile(summaryData, ticker)
     provider = 'EODHD + Yahoo P/E'
