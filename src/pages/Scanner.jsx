@@ -47,7 +47,7 @@ const numberFormatter = new Intl.NumberFormat('it-IT', {
   maximumFractionDigits: 2,
 })
 
-const SCAN_TIMEOUT_MS = 45000
+const SCAN_TIMEOUT_MS = 120000
 
 function withTimeout(promise, message) {
   let timeoutId
