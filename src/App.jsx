@@ -76,15 +76,15 @@ function AppRoutes() {
       >
         <Route index element={<Navigate to="/europa/dashboard" replace />} />
         <Route path="dashboard" element={<Navigate to="/europa/dashboard" replace />} />
-        <Route path="scanner" element={<Navigate to="/europa/scanner" replace />} />
-        <Route path="portafoglio" element={<Navigate to="/europa/scanner" replace />} />
+        <Route path="scanner" element={<Scanner />} />
+        <Route path="portafoglio" element={<Navigate to="/scanner" replace />} />
         <Route path="ordini" element={<Navigate to="/europa/ordini" replace />} />
         <Route path="utili" element={<Navigate to="/europa/utili" replace />} />
         <Route path="diario" element={<Navigate to="/europa/diario" replace />} />
         <Route path="storico" element={<Navigate to="/europa/diario" replace />} />
         <Route path="azioni/dashboard" element={<Navigate to="/europa/dashboard" replace />} />
-        <Route path="azioni/scanner" element={<Navigate to="/europa/scanner" replace />} />
-        <Route path="azioni/portafoglio" element={<Navigate to="/europa/scanner" replace />} />
+        <Route path="azioni/scanner" element={<Navigate to="/scanner?mercato=equities" replace />} />
+        <Route path="azioni/portafoglio" element={<Navigate to="/scanner?mercato=equities" replace />} />
         <Route path="azioni/ordini" element={<Navigate to="/europa/ordini" replace />} />
         <Route path="azioni/utili" element={<Navigate to="/europa/utili" replace />} />
         <Route path="azioni/diario" element={<Navigate to="/europa/diario" replace />} />
@@ -95,9 +95,9 @@ function AppRoutes() {
         />
         <Route
           path="europa/scanner"
-          element={<MarketPage marketId="equities"><Scanner /></MarketPage>}
+          element={<Navigate to="/scanner?mercato=equities" replace />}
         />
-        <Route path="europa/portafoglio" element={<Navigate to="/europa/scanner" replace />} />
+        <Route path="europa/portafoglio" element={<Navigate to="/scanner?mercato=equities" replace />} />
         <Route
           path="europa/ordini"
           element={<MarketPage marketId="equities"><Orders /></MarketPage>}
@@ -117,9 +117,9 @@ function AppRoutes() {
         />
         <Route
           path="usa/scanner"
-          element={<MarketPage marketId="usa"><Scanner /></MarketPage>}
+          element={<Navigate to="/scanner?mercato=usa" replace />}
         />
-        <Route path="usa/portafoglio" element={<Navigate to="/usa/scanner" replace />} />
+        <Route path="usa/portafoglio" element={<Navigate to="/scanner?mercato=usa" replace />} />
         <Route
           path="usa/ordini"
           element={<MarketPage marketId="usa"><Orders /></MarketPage>}
@@ -139,9 +139,9 @@ function AppRoutes() {
         />
         <Route
           path="asia/scanner"
-          element={<MarketPage marketId="asia"><Scanner /></MarketPage>}
+          element={<Navigate to="/scanner?mercato=asia" replace />}
         />
-        <Route path="asia/portafoglio" element={<Navigate to="/asia/scanner" replace />} />
+        <Route path="asia/portafoglio" element={<Navigate to="/scanner?mercato=asia" replace />} />
         <Route
           path="asia/ordini"
           element={<MarketPage marketId="asia"><Orders /></MarketPage>}

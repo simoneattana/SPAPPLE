@@ -1537,6 +1537,7 @@ export function TradingProvider({ children }) {
   const applyingRemoteStateRef = useRef(false)
   const syncTickRef = useRef(null)
   const liveCheckRunningRef = useRef(false)
+  const automatedScanRunningRef = useRef(false)
   const scanRunningRef = useRef(new Set())
   const closingPositionsRef = useRef(new Set())
 
@@ -3149,8 +3150,13 @@ export function TradingProvider({ children }) {
       })
     }
 
-    const intervalId = window.setInterval(() => {
+    const intervalId = window.setInterval(async () => {
+      if (automatedScanRunningRef.current) {
+        return
+      }
+
       const snapshot = syncActiveMarketState(stateRef.current)
+      const dueMarketIds = []
 
       marketIds.forEach((marketId) => {
         const marketState = normalizeMarketState(
@@ -3167,9 +3173,23 @@ export function TradingProvider({ children }) {
           Number.isFinite(dueAt) &&
           dueAt <= Date.now()
         ) {
-          runAutomatedScan(marketId)
+          dueMarketIds.push(marketId)
         }
       })
+
+      if (dueMarketIds.length === 0) {
+        return
+      }
+
+      automatedScanRunningRef.current = true
+
+      try {
+        for (const marketId of dueMarketIds) {
+          await runAutomatedScan(marketId)
+        }
+      } finally {
+        automatedScanRunningRef.current = false
+      }
     }, 5_000)
 
     return () => {

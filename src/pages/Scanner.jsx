@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   BookOpenText,
   Loader2,
@@ -48,6 +49,11 @@ const numberFormatter = new Intl.NumberFormat('it-IT', {
 })
 
 const SCAN_TIMEOUT_MS = 120000
+const SCANNER_MARKET_FILTERS = [
+  { id: 'equities', label: 'Europa' },
+  { id: 'usa', label: 'USA' },
+  { id: 'asia', label: 'Asia' },
+]
 
 function withTimeout(promise, message) {
   let timeoutId
@@ -453,7 +459,9 @@ export default function Scanner({ marketId }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [closingId, setClosingId] = useState(null)
+  const [searchParams, setSearchParams] = useSearchParams()
   const autoScanStarted = useRef(false)
+  const scanTokenRef = useRef(0)
   const { toast } = useToast()
   const {
     automationEnabled,
@@ -473,9 +481,23 @@ export default function Scanner({ marketId }) {
     recordScanError,
     recordScanStart,
     refreshRemoteState,
+    setActiveMarket,
     syncMeta,
   } = useTrading()
-  const effectiveMarket = marketId || activeMarket
+  const requestedMarket = searchParams.get('mercato')
+  const requestedMarketIsValid = SCANNER_MARKET_FILTERS.some(
+    (item) => item.id === requestedMarket,
+  )
+  const activeMarketIsVisible = SCANNER_MARKET_FILTERS.some(
+    (item) => item.id === activeMarket,
+  )
+  const effectiveMarket =
+    marketId ||
+    (requestedMarketIsValid
+      ? requestedMarket
+      : activeMarketIsVisible
+        ? activeMarket
+        : 'equities')
   const effectiveStrategy = getTradingStrategy(effectiveMarket)
   const effectiveMarketLabel = effectiveStrategy.label
   const routeMarketState = markets?.[effectiveMarket] || null
@@ -495,6 +517,7 @@ export default function Scanner({ marketId }) {
   const routeMaxPositions = effectiveStrategy.maxPositions || maxPositions
   const routeKillSwitchEnabled = Boolean(routeMarketState?.killSwitchEnabled)
   const routeUsMarketContext = routeMarketState?.usMarketContext || null
+  const isUnifiedScanner = !marketId
   const scannerConfig = useMemo(() => {
     const copy = getMarketCopy(effectiveMarket)
     return {
@@ -616,6 +639,37 @@ export default function Scanner({ marketId }) {
     autoScanStarted.current = false
   }, [effectiveMarket])
 
+  useEffect(() => {
+    if (!isUnifiedScanner || requestedMarketIsValid) {
+      return
+    }
+
+    setSearchParams({ mercato: effectiveMarket }, { replace: true })
+  }, [
+    effectiveMarket,
+    isUnifiedScanner,
+    requestedMarketIsValid,
+    setSearchParams,
+  ])
+
+  useEffect(() => {
+    if (activeMarket !== effectiveMarket) {
+      setActiveMarket(effectiveMarket)
+    }
+  }, [activeMarket, effectiveMarket, setActiveMarket])
+
+  const handleMarketFilterChange = (nextMarketId) => {
+    if (nextMarketId === effectiveMarket) {
+      return
+    }
+
+    scanTokenRef.current += 1
+    setError('')
+    setLoading(false)
+    setActiveMarket(nextMarketId)
+    setSearchParams({ mercato: nextMarketId })
+  }
+
   const scanIsFromToday = useMemo(() => {
     if (!visibleLastScanAt) {
       return false
@@ -625,6 +679,8 @@ export default function Scanner({ marketId }) {
   }, [visibleLastScanAt])
 
   const handleScan = useCallback(async ({ automatic = false } = {}) => {
+    const scanToken = scanTokenRef.current + 1
+    scanTokenRef.current = scanToken
     setLoading(true)
     setError('')
     recordScanStart(scannerConfig.universe.length, effectiveMarket)
@@ -648,6 +704,10 @@ export default function Scanner({ marketId }) {
           usMarketContext,
         ),
       )
+
+      if (scanTokenRef.current !== scanToken) {
+        return
+      }
 
       setResults(marketData)
       recordScanComplete(
@@ -685,6 +745,10 @@ export default function Scanner({ marketId }) {
         })
       }
     } catch (apiError) {
+      if (scanTokenRef.current !== scanToken) {
+        return
+      }
+
       console.error(apiError)
       setError(apiError.message)
       recordScanError(apiError.message, effectiveMarket)
@@ -693,7 +757,9 @@ export default function Scanner({ marketId }) {
         variant: 'destructive',
       })
     } finally {
-      setLoading(false)
+      if (scanTokenRef.current === scanToken) {
+        setLoading(false)
+      }
     }
   }, [
     executeAutomatedTrades,
@@ -858,14 +924,17 @@ export default function Scanner({ marketId }) {
       <header className="flex flex-col gap-5 rounded-lg border border-slate-800 bg-[#090b10] p-5 shadow-xl shadow-black/20 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">
-            Scanner quantitativo · {scannerConfig.copy.eyebrow}
+            Scanner quantitativo unico · {scannerConfig.copy.eyebrow}
           </p>
           <h1 className="mt-3 text-2xl font-semibold text-white sm:text-3xl">
-            Scanner{' '}
-            {routeMarketLabel || marketLabel || currentStrategy?.label}
+            Scanner mercati
           </h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
-            Analisi {scannerConfig.copy.scanMode} automatica su{' '}
+            Vista centrale con filtro mercato. Ora stai analizzando{' '}
+            <span className="font-semibold text-slate-300">
+              {routeMarketLabel || marketLabel || currentStrategy?.label}
+            </span>
+            : {scannerConfig.copy.scanMode} su{' '}
             {scannerConfig.universe.length}{' '}
             {scannerConfig.scanLabel} con dati reali da {scannerConfig.provider}.
             {scannerConfig.copy.scanDescription}
@@ -881,6 +950,50 @@ export default function Scanner({ marketId }) {
           Aggiorna Scansione {scannerConfig.copy.scanMode}
         </Button>
       </header>
+
+      {isUnifiedScanner ? (
+        <div className="rounded-lg border border-slate-800 bg-[#090b10] p-3">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Filtro mercato
+              </p>
+              <p className="mt-1 text-sm text-slate-400">
+                Le scansioni restano separate nei dati, ma vengono coordinate da
+                questa regia unica.
+              </p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {SCANNER_MARKET_FILTERS.map((item) => {
+                const active = item.id === effectiveMarket
+                const marketState = markets?.[item.id] || {}
+                const openPositions = Array.isArray(marketState.positions)
+                  ? marketState.positions.length
+                  : 0
+                const signalCount = Number(marketState.lastSignalCount || 0)
+
+                return (
+                  <Button
+                    key={item.id}
+                    variant={active ? 'default' : 'ghost'}
+                    className={
+                      active
+                        ? 'justify-between'
+                        : 'justify-between border border-slate-800 bg-slate-950/60'
+                    }
+                    onClick={() => handleMarketFilterChange(item.id)}
+                  >
+                    <span>{item.label}</span>
+                    <span className="text-xs opacity-75">
+                      {openPositions} pos. · {signalCount} segn.
+                    </span>
+                  </Button>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <MarketCountdownPanel marketId={effectiveMarket} />
 

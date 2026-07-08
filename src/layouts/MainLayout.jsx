@@ -30,7 +30,6 @@ const marketNavigation = [
     base: '/europa',
     items: [
       { label: 'Dashboard Europa', to: '/europa/dashboard', icon: LayoutDashboard },
-      { label: 'Scanner Europa', to: '/europa/scanner', icon: Radar },
       { label: 'Ordini Europa', to: '/europa/ordini', icon: ClipboardList },
       { label: 'Utili Europa', to: '/europa/utili', icon: BadgeEuro },
       { label: 'Storico Europa', to: '/europa/diario', icon: BookOpen },
@@ -42,7 +41,6 @@ const marketNavigation = [
     base: '/usa',
     items: [
       { label: 'Dashboard USA', to: '/usa/dashboard', icon: LayoutDashboard },
-      { label: 'Scanner USA', to: '/usa/scanner', icon: Radar },
       { label: 'Ordini USA', to: '/usa/ordini', icon: ClipboardList },
       { label: 'Utili USA', to: '/usa/utili', icon: BadgeEuro },
       { label: 'Storico USA', to: '/usa/diario', icon: BookOpen },
@@ -54,13 +52,18 @@ const marketNavigation = [
     base: '/asia',
     items: [
       { label: 'Dashboard Asia', to: '/asia/dashboard', icon: LayoutDashboard },
-      { label: 'Scanner Asia', to: '/asia/scanner', icon: Radar },
       { label: 'Ordini Asia', to: '/asia/ordini', icon: ClipboardList },
       { label: 'Utili Asia', to: '/asia/utili', icon: BadgeEuro },
       { label: 'Storico Asia', to: '/asia/diario', icon: BookOpen },
     ],
   },
 ]
+
+const primaryNavigation = [
+  { label: 'Scanner mercati', to: '/scanner', icon: Radar },
+]
+
+const visibleMarketIds = ['equities', 'usa', 'asia']
 
 const utilityNavigation = [
   { label: 'Cos’è Spapple', to: '/spiegazione', icon: Info },
@@ -88,6 +91,36 @@ function BrandHeader({ theme }) {
 function NavigationContent({ routeMarket, onNavigate }) {
   return (
     <>
+      <div className="rounded-lg border border-[var(--market-accent-border)] bg-[var(--market-accent-soft)] p-2">
+        <p className="px-2 pb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--market-accent)]">
+          Regia unica
+        </p>
+        <div className="flex flex-col gap-1">
+          {primaryNavigation.map((item) => {
+            const Icon = item.icon
+
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                onClick={onNavigate}
+                className={({ isActive }) =>
+                  [
+                    'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition',
+                    isActive
+                      ? 'bg-[var(--market-accent)] text-slate-950 shadow-lg shadow-[var(--market-accent-soft)]'
+                      : 'text-slate-300 hover:bg-slate-900 hover:text-white',
+                  ].join(' ')
+                }
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                <span>{item.label}</span>
+              </NavLink>
+            )
+          })}
+        </div>
+      </div>
+
       {marketNavigation.map((section) => (
         <div
           key={section.id}
@@ -225,14 +258,23 @@ export default function MainLayout() {
   const { activeMarket } = useTrading()
   const location = useLocation()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const scannerMarket = new URLSearchParams(location.search).get('mercato')
   const routeMarket = location.pathname.startsWith('/usa')
     ? 'usa'
     : location.pathname.startsWith('/asia')
       ? 'asia'
-      : location.pathname.startsWith('/europa') ||
-          location.pathname.startsWith('/azioni')
-        ? 'equities'
-        : activeMarket
+      : location.pathname.startsWith('/scanner')
+        ? visibleMarketIds.includes(scannerMarket)
+          ? scannerMarket
+          : visibleMarketIds.includes(activeMarket)
+            ? activeMarket
+            : 'equities'
+        : location.pathname.startsWith('/europa') ||
+            location.pathname.startsWith('/azioni')
+          ? 'equities'
+          : visibleMarketIds.includes(activeMarket)
+            ? activeMarket
+            : 'equities'
   const theme = getMarketTheme(routeMarket)
   const navigate = useNavigate()
   const styleVars = {
