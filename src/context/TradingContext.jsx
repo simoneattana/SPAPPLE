@@ -34,6 +34,8 @@ import {
 } from '../services/realtimeState'
 import { useAuth } from '../services/useAuth'
 import { safeGetItem, safeSetItem } from '../services/safeStorage'
+import { convertToBaseCurrency } from '../services/currency'
+import { getTickerCurrency } from '../services/marketUniverse'
 import {
   DEFAULT_MARKET_ID,
   TRADING_STRATEGIES,
@@ -1150,6 +1152,96 @@ function getStrategyMaxPositions(strategy) {
     : MAX_POSITIONS
 }
 
+function getMarketCurrencyData(ticker, price, atr, marketData = {}) {
+  const currency = marketData?.currency || getTickerCurrency(ticker)
+  const fxToEur = Number(marketData?.fxToEur)
+  const entryFxToEur = Number.isFinite(fxToEur) && fxToEur > 0 ? fxToEur : 1
+  const entryPriceEur =
+    Number(marketData?.currentPriceEur) ||
+    convertToBaseCurrency(price, entryFxToEur) ||
+    price
+  const atrAtEntryEur =
+    Number(marketData?.atrEur) ||
+    convertToBaseCurrency(atr, entryFxToEur) ||
+    atr
+
+  return {
+    currency,
+    entryFxToEur,
+    entryPriceEur,
+    atrAtEntryEur,
+    fxPair: marketData?.fxPair || null,
+    fxProvider: marketData?.fxProvider || null,
+  }
+}
+
+function getPositionEntryPriceEur(position) {
+  const explicitPrice = Number(position.entryPriceEur)
+
+  if (Number.isFinite(explicitPrice) && explicitPrice > 0) {
+    return explicitPrice
+  }
+
+  const entryPrice = Number(position.entryPrice)
+  const fxToEur = Number(position.entryFxToEur || position.fxToEur || 1)
+
+  if (!Number.isFinite(entryPrice) || entryPrice <= 0) {
+    return null
+  }
+
+  return entryPrice * (Number.isFinite(fxToEur) && fxToEur > 0 ? fxToEur : 1)
+}
+
+function getPositionLatestPriceEur(position, latestPrice, priceData = {}) {
+  const explicitPrice = Number(priceData?.latestPriceEur)
+
+  if (Number.isFinite(explicitPrice) && explicitPrice > 0) {
+    return explicitPrice
+  }
+
+  const price = Number(latestPrice)
+  const fxToEur = Number(
+    priceData?.fxToEur ||
+      priceData?.latestFxToEur ||
+      position.latestFxToEur ||
+      position.entryFxToEur ||
+      position.fxToEur ||
+      1,
+  )
+
+  if (!Number.isFinite(price) || price <= 0) {
+    return null
+  }
+
+  return price * (Number.isFinite(fxToEur) && fxToEur > 0 ? fxToEur : 1)
+}
+
+function calculatePositionPnLEur(position, latestPrice, priceData = {}) {
+  const invested = Number(position.invested || LEGACY_POSITION_SIZE)
+  const entryPriceEur = getPositionEntryPriceEur(position)
+  const latestPriceEur = getPositionLatestPriceEur(position, latestPrice, priceData)
+
+  if (
+    !Number.isFinite(invested) ||
+    invested <= 0 ||
+    !Number.isFinite(entryPriceEur) ||
+    entryPriceEur <= 0 ||
+    !Number.isFinite(latestPriceEur)
+  ) {
+    return null
+  }
+
+  const quantity =
+    Number.isFinite(Number(position.quantity)) && Number(position.quantity) > 0
+      ? Number(position.quantity)
+      : invested / entryPriceEur
+  const long = position.type === 'LONG'
+
+  return long
+    ? (latestPriceEur - entryPriceEur) * quantity
+    : (entryPriceEur - latestPriceEur) * quantity
+}
+
 function buildTrade(
   ticker,
   price,
@@ -1159,6 +1251,7 @@ function buildTrade(
   profile = null,
   strategy = getTradingStrategy(),
   order = null,
+  marketData = {},
 ) {
   const atrPct = (atr / price) * 100
   const isCrypto = strategy.id === 'crypto'
@@ -1168,6 +1261,8 @@ function buildTrade(
   const stopMultiplier = isCrypto ? 1.8 : atrPct < 1.5 ? 1.2 : 1.5
   const long = type === 'LONG'
   const openedAt = new Date().toISOString()
+  const currencyData = getMarketCurrencyData(ticker, price, atr, marketData)
+  const quantity = roundQuantity(invested / currencyData.entryPriceEur)
 
   return {
     id: `${ticker}-${type}-${Date.now()}`,
@@ -1178,6 +1273,12 @@ function buildTrade(
     type,
     openOrderId: order?.id || null,
     openedAt,
+    currency: currencyData.currency,
+    entryFxToEur: currencyData.entryFxToEur,
+    entryPriceEur: roundPrice(currencyData.entryPriceEur),
+    atrAtEntryEur: roundPrice(currencyData.atrAtEntryEur),
+    fxPair: currencyData.fxPair,
+    fxProvider: currencyData.fxProvider,
     entryPrice: roundPrice(price),
     atrAtEntry: roundPrice(atr),
     takeProfit: roundPrice(
@@ -1198,7 +1299,7 @@ function buildTrade(
     favorablePrice: roundPrice(price),
     daysHeld: 0,
     invested: roundPrice(invested),
-    quantity: order?.quantity || roundQuantity(invested / price),
+    quantity,
     targetPct,
     maxTargetPct,
     trailingPct,
@@ -1352,14 +1453,28 @@ function evaluatePositions(
     }
 
     const investedAtRisk = position.invested || LEGACY_POSITION_SIZE
-    const quantity = investedAtRisk / position.entryPrice
-    const long = position.type === 'LONG'
-    const pnlEur = long
-      ? (latestPrice - position.entryPrice) * quantity
-      : (position.entryPrice - latestPrice) * quantity
+    const quantity =
+      Number.isFinite(Number(position.quantity)) && Number(position.quantity) > 0
+        ? Number(position.quantity)
+        : investedAtRisk / (getPositionEntryPriceEur(position) || position.entryPrice)
+    const pnlEur = calculatePositionPnLEur(position, latestPrice, priceData)
+
+    if (!Number.isFinite(Number(pnlEur))) {
+      activePositions.push(updatedPosition)
+      return
+    }
+
     const monitoredPosition = {
       ...updatedPosition,
       latestPrice: roundPrice(latestPrice),
+      latestFxToEur:
+        Number(priceData?.fxToEur || priceData?.latestFxToEur) ||
+        position.latestFxToEur ||
+        position.entryFxToEur ||
+        1,
+      latestPriceEur: roundPrice(
+        getPositionLatestPriceEur(position, latestPrice, priceData),
+      ),
       latestPriceAt: new Date().toISOString(),
       unrealizedPnl: roundPrice(pnlEur),
     }
@@ -1426,11 +1541,17 @@ function evaluatePositions(
       closeOrderId: closeOrder.id,
       openedAt: position.openedAt || null,
       entryPrice: position.entryPrice,
+      entryPriceEur: roundPrice(getPositionEntryPriceEur(position)),
+      currency: position.currency || getTickerCurrency(position.ticker),
+      entryFxToEur: position.entryFxToEur || 1,
       invested,
       pnlEur: roundedPnl,
       result,
       exitDate: new Date().toISOString(),
       exitPrice: roundPrice(latestPrice),
+      exitPriceEur: roundPrice(
+        getPositionLatestPriceEur(position, latestPrice, priceData),
+      ),
       exitReason,
       recoveredCapital: roundPrice(recoveredCapital),
     })
@@ -2043,7 +2164,7 @@ export function TradingProvider({ children }) {
     })
   }, [updateTradingState])
 
-  const executeTrade = useCallback((ticker, price, atr, type, profile = null, targetMarketId = null) => {
+  const executeTrade = useCallback((ticker, price, atr, type, profile = null, targetMarketId = null, marketData = {}) => {
     const current = syncActiveMarketState(stateRef.current)
     const marketId = targetMarketId || current.activeMarket
     const strategy = getTradingStrategy(marketId)
@@ -2132,8 +2253,14 @@ export function TradingProvider({ children }) {
       profile,
       strategy,
       order,
+      marketData,
     )
-    order = { ...order, positionId: trade.id }
+    order = {
+      ...order,
+      positionId: trade.id,
+      quantity: trade.quantity,
+      executedPriceEur: trade.entryPriceEur,
+    }
     const nextMarketState = {
       ...marketState,
       capital: roundPrice(marketState.capital - positionSize),
@@ -2300,8 +2427,14 @@ export function TradingProvider({ children }) {
         row.profile || null,
         strategy,
         order,
+        row,
       )
-      order = { ...order, positionId: trade.id }
+      order = {
+        ...order,
+        positionId: trade.id,
+        quantity: trade.quantity,
+        executedPriceEur: trade.entryPriceEur,
+      }
       orders = appendOrders({ orders }, order)
       positions.push(trade)
       capital = roundPrice(capital - positionSize)
@@ -2526,11 +2659,17 @@ export function TradingProvider({ children }) {
         position.marketId || marketId,
       )
       const invested = position.invested || LEGACY_POSITION_SIZE
-      const quantity = invested / position.entryPrice
-      const long = position.type === 'LONG'
-      const pnlEur = long
-        ? (latestPrice - position.entryPrice) * quantity
-        : (position.entryPrice - latestPrice) * quantity
+      const entryPriceEur = getPositionEntryPriceEur(position)
+      const quantity =
+        Number.isFinite(Number(position.quantity)) && Number(position.quantity) > 0
+          ? Number(position.quantity)
+          : invested / (entryPriceEur || position.entryPrice)
+      const pnlEur = calculatePositionPnLEur(position, latestPrice)
+
+      if (!Number.isFinite(Number(pnlEur))) {
+        throw new Error(`${position.ticker}: P/L non calcolabile`)
+      }
+
       const roundedPnl = roundPrice(pnlEur)
       const result = roundedPnl >= 0 ? 'WIN' : 'LOSS'
       const recoveredCapital = Math.max(invested + roundedPnl, 0)
@@ -2556,11 +2695,17 @@ export function TradingProvider({ children }) {
         closeOrderId: closeOrder.id,
         openedAt: position.openedAt || null,
         entryPrice: position.entryPrice,
+        entryPriceEur: roundPrice(entryPriceEur || position.entryPrice),
+        currency: position.currency || getTickerCurrency(position.ticker),
+        entryFxToEur: position.entryFxToEur || 1,
         invested,
         pnlEur: roundedPnl,
         result,
         exitDate: new Date().toISOString(),
         exitPrice: roundPrice(latestPrice),
+        exitPriceEur: roundPrice(
+          getPositionLatestPriceEur(position, latestPrice) || latestPrice,
+        ),
         exitReason: 'MANUALE',
         recoveredCapital: roundPrice(recoveredCapital),
       }

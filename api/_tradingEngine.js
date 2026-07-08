@@ -34,6 +34,7 @@ import {
   canOpenPosition,
 } from '../src/services/positionSizing.js'
 import { getEodhdSymbol, getYahooSymbol } from '../src/services/eodhdSymbols.js'
+import { getTickerCurrency } from '../src/services/marketUniverse.js'
 import { mergeTickerProfile } from '../src/services/tickerMetadata.js'
 import {
   DEFAULT_MARKET_ID,
@@ -671,6 +672,17 @@ function roundQuantity(value) {
   }
 
   return Number(number.toFixed(8))
+}
+
+function convertToEur(value, fxToEur = 1) {
+  const amount = Number(value)
+  const rate = Number(fxToEur)
+
+  if (!Number.isFinite(amount) || !Number.isFinite(rate) || rate <= 0) {
+    return null
+  }
+
+  return amount * rate
 }
 
 function assertNumber(value, label) {
@@ -1471,6 +1483,83 @@ function calculateIndicators(history, ticker) {
   }
 }
 
+function extractFxRate(data, pair) {
+  const rate =
+    data?.close ??
+    data?.adjusted_close ??
+    data?.previousClose ??
+    data?.last ??
+    data?.price
+  const number = Number(rate)
+
+  if (!Number.isFinite(number) || number <= 0) {
+    throw new Error(`${pair}: cambio EODHD non disponibile`)
+  }
+
+  return number
+}
+
+async function fetchBackendFxRateToEur(currency = 'EUR') {
+  const from = String(currency || 'EUR').toUpperCase()
+
+  if (from === 'EUR') {
+    return {
+      pair: 'EUREUR.FOREX',
+      rate: 1,
+      provider: 'EODHD',
+    }
+  }
+
+  const directPair = `${from}EUR.FOREX`
+  const inversePair = `EUR${from}.FOREX`
+
+  try {
+    const data = await fetchEodhdJson(`real-time/${directPair}`)
+
+    return {
+      pair: directPair,
+      rate: extractFxRate(data, directPair),
+      provider: 'EODHD',
+    }
+  } catch {
+    const data = await fetchEodhdJson(`real-time/${inversePair}`)
+    const inverseRate = extractFxRate(data, inversePair)
+
+    return {
+      pair: inversePair,
+      rate: 1 / inverseRate,
+      provider: 'EODHD',
+    }
+  }
+}
+
+async function withCurrencyData(row) {
+  if (row.market === 'crypto') {
+    return {
+      ...row,
+      currency: 'EUR',
+      fxToEur: 1,
+      fxPair: 'EUREUR.FOREX',
+      fxProvider: 'EODHD',
+      currentPriceEur: row.currentPrice,
+      atrEur: row.atr,
+    }
+  }
+
+  const currency = getTickerCurrency(row.ticker)
+  const fx = await fetchBackendFxRateToEur(currency)
+
+  return {
+    ...row,
+    currency,
+    fxToEur: fx.rate,
+    fxPair: fx.pair,
+    fxProvider: fx.provider,
+    currentPriceEur: convertToEur(row.currentPrice, fx.rate),
+    atrEur: convertToEur(row.atr, fx.rate),
+  }
+}
+
 function getDiagnostic(row) {
   if (row.status === 'error') {
     return row.reason || 'Dati non disponibili'
@@ -1540,7 +1629,7 @@ async function fetchTickerDiagnostic(ticker) {
 
     const latestBar = history.at(-1)
     const { rsi, atr } = calculateIndicators(history, ticker)
-    const row = {
+    const baseRow = {
       ticker,
       provider,
       profile,
@@ -1550,6 +1639,7 @@ async function fetchTickerDiagnostic(ticker) {
       atr,
       status: 'ok',
     }
+    const row = await withCurrencyData(baseRow)
 
     return {
       ...row,
@@ -1560,9 +1650,15 @@ async function fetchTickerDiagnostic(ticker) {
       ticker,
       profile: null,
       currentPrice: null,
+      currentPriceEur: null,
+      currency: getTickerCurrency(ticker),
+      fxToEur: null,
+      fxPair: null,
+      fxProvider: null,
       pe: null,
       rsi: null,
       atr: null,
+      atrEur: null,
       status: 'error',
       reason: getDiagnostic({
         status: 'error',
@@ -1763,6 +1859,14 @@ function buildTrade(row, invested, strategy = getTradingStrategy(), order = null
       : 'SHORT'
   const long = type === 'LONG'
   const openedAt = new Date().toISOString()
+  const currency = row.currency || getTickerCurrency(row.ticker)
+  const entryFxToEur =
+    Number.isFinite(Number(row.fxToEur)) && Number(row.fxToEur) > 0
+      ? Number(row.fxToEur)
+      : 1
+  const entryPriceEur = Number(row.currentPriceEur) || convertToEur(row.currentPrice, entryFxToEur)
+  const atrAtEntryEur = Number(row.atrEur) || convertToEur(row.atr, entryFxToEur)
+  const quantity = roundQuantity(invested / entryPriceEur)
 
   return {
     id: `${row.ticker}-${type}-${Date.now()}-${crypto.randomUUID()}`,
@@ -1773,6 +1877,12 @@ function buildTrade(row, invested, strategy = getTradingStrategy(), order = null
     type,
     openOrderId: order?.id || null,
     openedAt,
+    currency,
+    entryFxToEur,
+    entryPriceEur: roundPrice(entryPriceEur),
+    atrAtEntryEur: roundPrice(atrAtEntryEur),
+    fxPair: row.fxPair || null,
+    fxProvider: row.fxProvider || null,
     entryPrice: roundPrice(row.currentPrice),
     atrAtEntry: roundPrice(row.atr),
     takeProfit: roundPrice(
@@ -1799,7 +1909,7 @@ function buildTrade(row, invested, strategy = getTradingStrategy(), order = null
     favorablePrice: roundPrice(row.currentPrice),
     daysHeld: 0,
     invested: roundPrice(invested),
-    quantity: order?.quantity || roundQuantity(invested / row.currentPrice),
+    quantity,
     targetPct,
     maxTargetPct,
     trailingPct,
@@ -1986,7 +2096,12 @@ async function refillOpenSlots(state, excludedTickers = []) {
       ticker: row.ticker,
     })
     const trade = buildTrade(row, positionSize, strategy, order)
-    order = { ...order, positionId: trade.id }
+    order = {
+      ...order,
+      positionId: trade.id,
+      quantity: trade.quantity,
+      executedPriceEur: trade.entryPriceEur,
+    }
     orders = appendOrders({ orders }, order)
     positions.push(trade)
     capital = roundPrice(capital - positionSize)
@@ -2008,11 +2123,21 @@ async function refillOpenSlots(state, excludedTickers = []) {
 
 function evaluatePosition(position, latestPrice, { forceCloseReason = null } = {}) {
   const invested = position.invested || LEGACY_POSITION_SIZE
-  const quantity = invested / position.entryPrice
+  const entryPriceEur =
+    Number(position.entryPriceEur) ||
+    convertToEur(position.entryPrice, position.entryFxToEur || 1)
+  const latestPriceEur = convertToEur(
+    latestPrice,
+    position.latestFxToEur || position.entryFxToEur || 1,
+  )
+  const quantity =
+    Number.isFinite(Number(position.quantity)) && Number(position.quantity) > 0
+      ? Number(position.quantity)
+      : invested / entryPriceEur
   const long = position.type === 'LONG'
   const pnlEur = long
-    ? (latestPrice - position.entryPrice) * quantity
-    : (position.entryPrice - latestPrice) * quantity
+    ? (latestPriceEur - entryPriceEur) * quantity
+    : (entryPriceEur - latestPriceEur) * quantity
   const roundedPnl = roundPrice(pnlEur)
   const profitExit = evaluateProfitExit(position, latestPrice)
   const effectiveStopLoss = getProtectedStopLoss(position, profitExit)
@@ -2062,6 +2187,8 @@ function evaluatePosition(position, latestPrice, { forceCloseReason = null } = {
         ? roundPrice(effectiveStopLoss)
         : position.stopLoss,
       latestPrice: roundPrice(latestPrice),
+      latestFxToEur: position.latestFxToEur || position.entryFxToEur || 1,
+      latestPriceEur: roundPrice(latestPriceEur),
       latestPriceAt: new Date().toISOString(),
       unrealizedPnl: roundPrice(pnlEur),
     },
@@ -2075,11 +2202,15 @@ function evaluatePosition(position, latestPrice, { forceCloseReason = null } = {
             closeOrderId: closeOrder.id,
             openedAt: position.openedAt || null,
             entryPrice: position.entryPrice,
+            entryPriceEur: roundPrice(entryPriceEur),
+            currency: position.currency || getTickerCurrency(position.ticker),
+            entryFxToEur: position.entryFxToEur || 1,
             invested,
             pnlEur: roundedPnl,
             result,
             exitDate: new Date().toISOString(),
             exitPrice: roundPrice(latestPrice),
+            exitPriceEur: roundPrice(latestPriceEur),
             exitReason,
             recoveredCapital: roundPrice(recoveredCapital),
           }

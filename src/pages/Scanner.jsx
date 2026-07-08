@@ -22,6 +22,10 @@ import {
 import { useToast } from '../components/ui/useToast'
 import { useTrading } from '../context/useTrading'
 import { fetchMarketData, fetchUsMarketContext } from '../services/api'
+import {
+  formatCurrencyAmount,
+  formatFxRate,
+} from '../services/currency'
 import { getMarketCopy } from '../services/marketCopy'
 import { getTradingStrategy } from '../strategies'
 import {
@@ -37,11 +41,6 @@ import {
   filterEquityRowsByUsMarketContext,
   getUsMarketContextSummary,
 } from '../services/usMarketContext'
-
-const currencyFormatter = new Intl.NumberFormat('it-IT', {
-  style: 'currency',
-  currency: 'EUR',
-})
 
 const numberFormatter = new Intl.NumberFormat('it-IT', {
   minimumFractionDigits: 2,
@@ -64,9 +63,32 @@ function withTimeout(promise, message) {
 }
 
 function formatCurrency(value) {
-  return value !== null && value !== undefined && Number.isFinite(Number(value))
-    ? currencyFormatter.format(value)
-    : 'Non disponibile'
+  return formatCurrencyAmount(value, 'EUR')
+}
+
+function formatMarketCurrency(value, currency = 'EUR') {
+  return formatCurrencyAmount(value, currency)
+}
+
+function getRowCurrency(row) {
+  return row?.currency || 'EUR'
+}
+
+function getRowFxToEur(row) {
+  const rate = Number(row?.fxToEur)
+  return Number.isFinite(rate) && rate > 0 ? rate : 1
+}
+
+function getRowPriceEur(row) {
+  const explicitPrice = Number(row?.currentPriceEur)
+
+  if (Number.isFinite(explicitPrice)) {
+    return explicitPrice
+  }
+
+  const price = Number(row?.currentPrice)
+
+  return Number.isFinite(price) ? price * getRowFxToEur(row) : null
 }
 
 function formatNumber(value) {
@@ -109,6 +131,50 @@ function getPositionLivePrice(position, scanRow) {
   return Number.isFinite(scanPrice) ? scanPrice : null
 }
 
+function getPositionCurrency(position, scanRow) {
+  return position.currency || getRowCurrency(scanRow)
+}
+
+function getPositionEntryPriceEur(position) {
+  const explicitPrice = Number(position.entryPriceEur)
+
+  if (Number.isFinite(explicitPrice) && explicitPrice > 0) {
+    return explicitPrice
+  }
+
+  const entryPrice = Number(position.entryPrice)
+  const fxToEur = Number(position.entryFxToEur || position.fxToEur || 1)
+
+  if (!Number.isFinite(entryPrice) || entryPrice <= 0) {
+    return null
+  }
+
+  return entryPrice * (Number.isFinite(fxToEur) && fxToEur > 0 ? fxToEur : 1)
+}
+
+function getPositionLivePriceEur(position, scanRow) {
+  const explicitPrice = Number(position.latestPriceEur)
+
+  if (Number.isFinite(explicitPrice) && explicitPrice > 0) {
+    return explicitPrice
+  }
+
+  const livePrice = getPositionLivePrice(position, scanRow)
+  const fxToEur = Number(
+    scanRow?.fxToEur ||
+      position.latestFxToEur ||
+      position.entryFxToEur ||
+      position.fxToEur ||
+      1,
+  )
+
+  if (!Number.isFinite(Number(livePrice))) {
+    return null
+  }
+
+  return Number(livePrice) * (Number.isFinite(fxToEur) && fxToEur > 0 ? fxToEur : 1)
+}
+
 function getPositionPriceSource(position, scanRow) {
   if (Number.isFinite(Number(position.latestPrice))) {
     return position.latestPriceAt
@@ -127,19 +193,43 @@ function calculatePositionPnl(position, scanRow) {
   }
 
   const invested = Number(position.invested)
-  const entryPrice = Number(position.entryPrice)
+  const entryPrice = getPositionEntryPriceEur(position)
+  const livePriceEur = getPositionLivePriceEur(position, scanRow)
 
-  if (!Number.isFinite(invested) || !Number.isFinite(entryPrice) || entryPrice <= 0) {
+  if (
+    !Number.isFinite(invested) ||
+    !Number.isFinite(entryPrice) ||
+    entryPrice <= 0 ||
+    !Number.isFinite(Number(livePriceEur))
+  ) {
     return null
   }
 
-  const quantity = invested / entryPrice
+  const quantity =
+    Number.isFinite(Number(position.quantity)) && Number(position.quantity) > 0
+      ? Number(position.quantity)
+      : invested / entryPrice
   const pnl =
     position.type === 'LONG'
-      ? (livePrice - entryPrice) * quantity
-      : (entryPrice - livePrice) * quantity
+      ? (livePriceEur - entryPrice) * quantity
+      : (entryPrice - livePriceEur) * quantity
 
   return pnl
+}
+
+function PriceStack({ price, currency = 'EUR', eurValue = null, fxToEur = null }) {
+  return (
+    <div className="min-w-32">
+      <p className="font-medium text-white">
+        {formatMarketCurrency(price, currency)}
+      </p>
+      {currency !== 'EUR' ? (
+        <p className="mt-1 text-xs text-slate-500">
+          {formatCurrency(eurValue)} · cambio {formatFxRate(fxToEur)}
+        </p>
+      ) : null}
+    </div>
+  )
 }
 
 function calculatePositionPnlPct(position, pnl) {
@@ -320,7 +410,7 @@ function InvestmentCell({ position }) {
         {formatCurrency(position.invested)}
       </p>
       <p className="mt-1 text-xs leading-5 text-slate-500">
-        Aperta a {formatCurrency(position.entryPrice)}
+        Capitale allocato sulla posizione aperta
       </p>
     </div>
   )
@@ -649,6 +739,7 @@ export default function Scanner({ marketId }) {
         type,
         row.profile || null,
         effectiveMarket,
+        row,
       )
       toast({
         title: `Posizione ${type === 'LONG' ? 'Long' : 'Short'} su ${trade.ticker} aperta`,
@@ -851,6 +942,7 @@ export default function Scanner({ marketId }) {
                 {visiblePositions.map((position) => {
                   const scanRow = resultsByTicker.get(position.ticker)
                   const livePrice = getPositionLivePrice(position, scanRow)
+                  const positionCurrency = getPositionCurrency(position, scanRow)
                   const livePnl = calculatePositionPnl(position, scanRow)
                   const livePnlPct = calculatePositionPnlPct(position, livePnl)
                   const pnlPositive = Number(livePnl) >= 0
@@ -871,10 +963,27 @@ export default function Scanner({ marketId }) {
                       <TableCell className="font-semibold text-[var(--market-accent)]">
                         {formatCurrency(position.invested)}
                       </TableCell>
-                      <TableCell>{formatCurrency(position.entryPrice)}</TableCell>
+                      <TableCell>
+                        <PriceStack
+                          price={position.entryPrice}
+                          currency={positionCurrency}
+                          eurValue={getPositionEntryPriceEur(position)}
+                          fxToEur={position.entryFxToEur || scanRow?.fxToEur || 1}
+                        />
+                      </TableCell>
                       <TableCell>
                         <div>
-                          <p>{formatCurrency(livePrice)}</p>
+                          <PriceStack
+                            price={livePrice}
+                            currency={positionCurrency}
+                            eurValue={getPositionLivePriceEur(position, scanRow)}
+                            fxToEur={
+                              scanRow?.fxToEur ||
+                              position.latestFxToEur ||
+                              position.entryFxToEur ||
+                              1
+                            }
+                          />
                           <p className="mt-1 text-xs text-slate-500">
                             {getPositionPriceSource(position, scanRow)}
                           </p>
@@ -911,15 +1020,24 @@ export default function Scanner({ marketId }) {
                       <TableCell>
                         <div className="min-w-36 text-sm leading-6">
                           <p>
-                            Lock {formatCurrency(position.takeProfit)}
+                            Lock {formatMarketCurrency(
+                              position.takeProfit,
+                              positionCurrency,
+                            )}
                           </p>
                           {position.finalTakeProfit ? (
                             <p className="text-slate-400">
-                              Max {formatCurrency(position.finalTakeProfit)}
+                              Max {formatMarketCurrency(
+                                position.finalTakeProfit,
+                                positionCurrency,
+                              )}
                             </p>
                           ) : null}
                           <p className="text-slate-500">
-                            SL {formatCurrency(position.stopLoss)}
+                            SL {formatMarketCurrency(
+                              position.stopLoss,
+                              positionCurrency,
+                            )}
                           </p>
                         </div>
                       </TableCell>
@@ -981,7 +1099,9 @@ export default function Scanner({ marketId }) {
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
                     <TableHead>Ticker</TableHead>
-                    <TableHead>Prezzo</TableHead>
+                    <TableHead>Prezzo mercato</TableHead>
+                    <TableHead>Cambio EUR</TableHead>
+                    <TableHead>Valore EUR</TableHead>
                     <TableHead>Investito reale</TableHead>
                     <TableHead>Dati</TableHead>
                     <TableHead>Strategia suggerita</TableHead>
@@ -999,7 +1119,25 @@ export default function Scanner({ marketId }) {
                           profile={row.profile}
                         />
                       </TableCell>
-                      <TableCell>{formatCurrency(row.currentPrice)}</TableCell>
+                      <TableCell>
+                        <PriceStack
+                          price={row.currentPrice}
+                          currency={getRowCurrency(row)}
+                          eurValue={getRowPriceEur(row)}
+                          fxToEur={row.fxToEur}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <p className="text-sm text-slate-300">
+                          {getRowCurrency(row) === 'EUR'
+                            ? '1,0000'
+                            : formatFxRate(row.fxToEur)}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {row.fxPair || 'EUR'}
+                        </p>
+                      </TableCell>
+                      <TableCell>{formatCurrency(getRowPriceEur(row))}</TableCell>
                       <TableCell>
                         <InvestmentCell position={getOpenPosition(row.ticker)} />
                       </TableCell>
@@ -1069,7 +1207,8 @@ export default function Scanner({ marketId }) {
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
                     <TableHead>Ticker</TableHead>
-                    <TableHead>Prezzo</TableHead>
+                    <TableHead>Prezzo mercato</TableHead>
+                    <TableHead>Valore EUR</TableHead>
                     <TableHead>Motivo</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -1083,7 +1222,15 @@ export default function Scanner({ marketId }) {
                           profile={row.profile}
                         />
                       </TableCell>
-                      <TableCell>{formatCurrency(row.currentPrice)}</TableCell>
+                      <TableCell>
+                        <PriceStack
+                          price={row.currentPrice}
+                          currency={getRowCurrency(row)}
+                          eurValue={getRowPriceEur(row)}
+                          fxToEur={row.fxToEur}
+                        />
+                      </TableCell>
+                      <TableCell>{formatCurrency(getRowPriceEur(row))}</TableCell>
                       <TableCell>
                         <p className="max-w-3xl text-sm leading-6 text-slate-400">
                           {getExtendedScanReason(row, scannerConfig)}
