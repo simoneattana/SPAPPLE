@@ -1,7 +1,11 @@
 import { ATR, RSI } from 'technicalindicators'
 import { fetchLatestCryptoPrice } from './cryptoApi'
 import { convertToBaseCurrency, fetchFxRateToEur } from './currency'
-import { getEodhdSymbol, getYahooSymbol } from './eodhdSymbols'
+import {
+  getEodhdSymbol,
+  getYahooSymbol,
+  shouldUseEodhdForTicker,
+} from './eodhdSymbols'
 import { getTickerCurrency } from './marketUniverse'
 import { mergeTickerProfile } from './tickerMetadata'
 import {
@@ -277,6 +281,10 @@ async function withCurrencyData(row) {
 }
 
 async function fetchTickerData(ticker) {
+  if (!shouldUseEodhdForTicker(ticker)) {
+    return fetchYahooTickerData(ticker)
+  }
+
   try {
     return await fetchEodhdTickerData(ticker)
   } catch {
@@ -425,10 +433,13 @@ export async function fetchLatestPrice(ticker, marketId = 'equities') {
   const yahooTicker = getYahooSymbol(ticker)
   const encodedTicker = encodeURIComponent(yahooTicker)
   const encodedEodhdTicker = encodeURIComponent(getEodhdSymbol(ticker))
-  const eodhdRealtimeData = await fetchJson(
-    `/api/eodhd/real-time?symbol=${encodedEodhdTicker}`,
-    `${ticker} prezzo EODHD`,
-  ).catch(() => null)
+  const useEodhd = shouldUseEodhdForTicker(ticker)
+  const eodhdRealtimeData = useEodhd
+    ? await fetchJson(
+        `/api/eodhd/real-time?symbol=${encodedEodhdTicker}`,
+        `${ticker} prezzo EODHD`,
+      ).catch(() => null)
+    : null
 
   if (eodhdRealtimeData) {
     try {
@@ -438,10 +449,12 @@ export async function fetchLatestPrice(ticker, marketId = 'equities') {
     }
   }
 
-  const eodhdData = await fetchJson(
-    `/api/eodhd/eod?symbol=${encodedEodhdTicker}`,
-    `${ticker} prezzo EODHD EOD`,
-  ).catch(() => null)
+  const eodhdData = useEodhd
+    ? await fetchJson(
+        `/api/eodhd/eod?symbol=${encodedEodhdTicker}`,
+        `${ticker} prezzo EODHD EOD`,
+      ).catch(() => null)
+    : null
 
   if (eodhdData) {
     try {

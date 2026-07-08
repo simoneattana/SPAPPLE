@@ -33,7 +33,11 @@ import {
   calculatePositionSize,
   canOpenPosition,
 } from '../src/services/positionSizing.js'
-import { getEodhdSymbol, getYahooSymbol } from '../src/services/eodhdSymbols.js'
+import {
+  getEodhdSymbol,
+  getYahooSymbol,
+  shouldUseEodhdForTicker,
+} from '../src/services/eodhdSymbols.js'
 import { getTickerCurrency } from '../src/services/marketUniverse.js'
 import {
   getMarketCloseGuardLabel,
@@ -982,8 +986,11 @@ function createSimulationOrder({
 
 async function fetchSummaryPrice(ticker) {
   const { cookie, crumb } = await getYahooAuth()
+  const yahooSymbol = getYahooSymbol(ticker)
   const yahooUrl = new URL(
-    `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}`,
+    `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(
+      yahooSymbol,
+    )}`,
   )
   yahooUrl.searchParams.set('modules', 'price')
   yahooUrl.searchParams.set('crumb', crumb)
@@ -1011,8 +1018,11 @@ async function fetchSummaryPrice(ticker) {
 }
 
 async function fetchChartPrice(ticker) {
+  const yahooSymbol = getYahooSymbol(ticker)
   const yahooUrl = new URL(
-    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}`,
+    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
+      yahooSymbol,
+    )}`,
   )
   yahooUrl.searchParams.set('range', '5d')
   yahooUrl.searchParams.set('interval', '1d')
@@ -1252,7 +1262,7 @@ export async function fetchLatestMarketPrice(ticker, marketId = DEFAULT_MARKET_I
     return history.at(-1).close
   }
 
-  if (isEodhdConfigured()) {
+  if (isEodhdConfigured() && shouldUseEodhdForTicker(ticker)) {
     try {
       return await fetchEodhdLatestPrice(ticker)
     } catch {
@@ -1268,7 +1278,7 @@ export async function fetchLatestMarketPrice(ticker, marketId = DEFAULT_MARKET_I
 }
 
 async function fetchChartHistory(ticker) {
-  if (isEodhdConfigured()) {
+  if (isEodhdConfigured() && shouldUseEodhdForTicker(ticker)) {
     try {
       return await fetchEodhdHistory(ticker)
     } catch {
@@ -1499,7 +1509,7 @@ async function fetchTickerDiagnostic(ticker) {
     const isUsTicker = String(ticker).endsWith('.US')
     let yahooSummaryData = null
 
-    if (isEodhdConfigured()) {
+    if (isEodhdConfigured() && shouldUseEodhdForTicker(ticker)) {
       try {
         const [eodhdHistory, fundamentalsData, summaryData] = await Promise.all([
           fetchEodhdHistory(ticker),
