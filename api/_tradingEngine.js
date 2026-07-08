@@ -58,7 +58,7 @@ import { fetchEodhdJson, isEodhdConfigured } from './_eodhd.js'
 import { clearYahooAuth, fetchYahooJson, getYahooAuth } from './_yahoo.js'
 
 export const STATE_ID = 'default'
-export const STORAGE_VERSION = 9
+export const STORAGE_VERSION = 10
 export { DEFAULT_MARKET_ID }
 
 const MAX_POSITIONS = 5
@@ -69,6 +69,9 @@ const REQUEST_CONCURRENCY = 8
 const EXECUTION_MODE = 'simulation'
 const EQUITIES_SCAN_INTERVAL_MS = 15 * 60_000
 const CRYPTO_SCAN_INTERVAL_MS = 5 * 60_000
+const ORDER_RETENTION_MS = 60 * 24 * 60 * 60 * 1000
+const STATE_EVENT_RETENTION_MS = 60 * 24 * 60 * 60 * 1000
+const MAX_ORDER_AUDIT_RECORDS = 180
 const backendFxRateCache = new Map()
 const DEFAULT_RISK_LIMITS = {
   maxDailyOrders: 20,
@@ -276,33 +279,90 @@ function dedupeClosedTrades(history = []) {
   )
 }
 
+function isRecentOrder(order, now = Date.now()) {
+  const timestamp = new Date(
+    order?.createdAt || order?.executedAt || order?.submittedAt || 0,
+  ).getTime()
+
+  return Number.isFinite(timestamp) && now - timestamp <= ORDER_RETENTION_MS
+}
+
+function compactOrder(order) {
+  if (!order?.id) {
+    return null
+  }
+
+  const compacted = {
+    id: order.id,
+    marketId: order.marketId || null,
+    marketLabel: order.marketLabel || null,
+    action: order.action || null,
+    side: order.side || null,
+    direction: order.direction || null,
+    status: order.status || 'ESEGUITO',
+    source: order.source || 'system',
+    ticker: order.ticker || null,
+    positionId: order.positionId || null,
+    quantity: Number.isFinite(Number(order.quantity))
+      ? roundQuantity(Number(order.quantity))
+      : null,
+    notional: Number.isFinite(Number(order.notional))
+      ? roundPrice(Number(order.notional))
+      : 0,
+    requestedPrice: Number.isFinite(Number(order.requestedPrice))
+      ? roundPrice(Number(order.requestedPrice))
+      : null,
+    executedPrice: Number.isFinite(Number(order.executedPrice))
+      ? roundPrice(Number(order.executedPrice))
+      : null,
+    executedPriceEur: Number.isFinite(Number(order.executedPriceEur))
+      ? roundPrice(Number(order.executedPriceEur))
+      : null,
+    reason: order.reason || null,
+    dataQuality: order.dataQuality || null,
+    createdAt: order.createdAt || order.executedAt || new Date().toISOString(),
+    executedAt: order.executedAt || null,
+  }
+
+  return Object.fromEntries(
+    Object.entries(compacted).filter(([, value]) => value !== null),
+  )
+}
+
 function dedupeOrders(orders = []) {
   const normalizedOrders = Array.isArray(orders) ? orders : []
   const byKey = new Map()
+  const now = Date.now()
 
   normalizedOrders.forEach((order) => {
-    if (!order?.id) {
+    if (!order?.id || !isRecentOrder(order, now)) {
+      return
+    }
+
+    const compactedOrder = compactOrder(order)
+
+    if (!compactedOrder) {
       return
     }
 
     const key =
-      order.action === 'CLOSE' && order.positionId
-        ? `close-${order.positionId}`
-        : `order-${order.id}`
+      compactedOrder.action === 'CLOSE' && compactedOrder.positionId
+        ? `close-${compactedOrder.positionId}`
+        : `order-${compactedOrder.id}`
     const current = byKey.get(key)
 
     if (
       !current ||
-      new Date(order.createdAt || 0) > new Date(current.createdAt || 0)
+      new Date(compactedOrder.createdAt || 0) > new Date(current.createdAt || 0)
     ) {
-      byKey.set(key, order)
+      byKey.set(key, compactedOrder)
     }
   })
 
   return [...byKey.values()].sort(
     (first, second) =>
       new Date(second.createdAt || 0) - new Date(first.createdAt || 0),
-  )
+  ).slice(0, MAX_ORDER_AUDIT_RECORDS)
 }
 
 function calculateVaultFromHistory(history = []) {
@@ -619,7 +679,7 @@ function appendLogs(state, activity) {
 
 function appendOrders(state, orders) {
   const nextOrders = Array.isArray(orders) ? orders : [orders]
-  return [...nextOrders, ...(state.orders || [])].slice(0, 250)
+  return dedupeOrders([...nextOrders, ...(state.orders || [])])
 }
 
 function isSameDay(value, dayKey = new Date().toISOString().slice(0, 10)) {
@@ -839,12 +899,10 @@ function createLegacyCloseOrder(trade, marketId, marketLabel, index) {
       : null
   const createdAt = trade.exitDate || new Date().toISOString()
 
-  return {
+  return compactOrder({
     id,
     marketId,
     marketLabel,
-    executionMode: EXECUTION_MODE,
-    broker: 'simulationBroker',
     action: 'CLOSE',
     side: getCloseOrderSide(trade.type),
     direction: trade.type,
@@ -869,16 +927,7 @@ function createLegacyCloseOrder(trade, marketId, marketLabel, index) {
     createdAt,
     submittedAt: createdAt,
     executedAt: createdAt,
-    statusHistory: [
-      { status: 'CREATO', at: createdAt },
-      { status: 'INVIATO', at: createdAt },
-      {
-        status: 'ESEGUITO',
-        at: createdAt,
-        detail: complete ? 'Backfill storico completo' : 'Backfill storico incompleto',
-      },
-    ],
-  }
+  })
 }
 
 function backfillLegacyCloseOrders(marketId, marketLabel, history = [], orders = []) {
@@ -954,12 +1003,10 @@ function createSimulationOrder({
         ? normalizedNotional / normalizedPrice
         : null
 
-  return {
+  return compactOrder({
     id: `order-${Date.now()}-${crypto.randomUUID()}`,
     marketId,
     marketLabel,
-    executionMode: EXECUTION_MODE,
-    broker: 'simulationBroker',
     action,
     side,
     direction,
@@ -985,18 +1032,7 @@ function createSimulationOrder({
     createdAt: now,
     submittedAt: status === 'RIFIUTATO' ? null : now,
     executedAt: status === 'ESEGUITO' ? now : null,
-    statusHistory:
-      status === 'RIFIUTATO'
-        ? [
-            { status: 'CREATO', at: now },
-            { status: 'RIFIUTATO', at: now, detail: reason },
-          ]
-        : [
-            { status: 'CREATO', at: now },
-            { status: 'INVIATO', at: now },
-            { status: 'ESEGUITO', at: now },
-          ],
-  }
+  })
 }
 
 async function fetchSummaryPrice(ticker) {
@@ -2597,6 +2633,14 @@ export async function readTradingState(supabase) {
 }
 
 async function writeStateEvent(supabase, payload) {
+  const deleteBefore = new Date(Date.now() - STATE_EVENT_RETENTION_MS).toISOString()
+
+  await supabase
+    .from('spapple_state_events')
+    .delete()
+    .eq('state_id', STATE_ID)
+    .lt('created_at', deleteBefore)
+
   const { error } = await supabase.from('spapple_state_events').insert({
     state_id: STATE_ID,
     revision: payload.stateRevision,
