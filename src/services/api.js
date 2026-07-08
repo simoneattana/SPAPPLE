@@ -1,6 +1,8 @@
 import { ATR, RSI } from 'technicalindicators'
 import { fetchLatestCryptoPrice } from './cryptoApi'
-import { getEodhdSymbol } from './eodhdSymbols'
+import { convertToBaseCurrency, fetchFxRateToEur } from './currency'
+import { getEodhdSymbol, getYahooSymbol } from './eodhdSymbols'
+import { getTickerCurrency } from './marketUniverse'
 import { mergeTickerProfile } from './tickerMetadata'
 import {
   US_MARKET_CONTEXT_SYMBOL,
@@ -250,6 +252,23 @@ function calculateIndicators(history, ticker) {
   }
 }
 
+async function withCurrencyData(row) {
+  const currency = getTickerCurrency(row.ticker)
+  const fx = await fetchFxRateToEur(currency)
+  const currentPriceEur = convertToBaseCurrency(row.currentPrice, fx.rate)
+  const atrEur = convertToBaseCurrency(row.atr, fx.rate)
+
+  return {
+    ...row,
+    currency,
+    fxToEur: fx.rate,
+    fxPair: fx.pair,
+    fxProvider: fx.provider,
+    currentPriceEur,
+    atrEur,
+  }
+}
+
 async function fetchTickerData(ticker) {
   try {
     return await fetchEodhdTickerData(ticker)
@@ -260,6 +279,7 @@ async function fetchTickerData(ticker) {
 
 async function fetchEodhdTickerData(ticker) {
   const encodedTicker = encodeURIComponent(getEodhdSymbol(ticker))
+  const yahooTicker = getYahooSymbol(ticker)
   const eodData = await fetchJson(
     `/api/eodhd/eod?symbol=${encodedTicker}`,
     `${ticker} storico EODHD`,
@@ -288,7 +308,7 @@ async function fetchEodhdTickerData(ticker) {
 
   if (!Number.isFinite(pe)) {
     const summaryData = await fetchJson(
-      `/api/yahoo/summary?symbol=${encodeURIComponent(ticker)}`,
+      `/api/yahoo/summary?symbol=${encodeURIComponent(yahooTicker)}`,
       `${ticker} P/E`,
     )
     pe = extractPeRatio(summaryData, ticker)
@@ -309,7 +329,8 @@ async function fetchEodhdTickerData(ticker) {
 }
 
 async function fetchYahooTickerData(ticker) {
-  const encodedTicker = encodeURIComponent(ticker)
+  const yahooTicker = getYahooSymbol(ticker)
+  const encodedTicker = encodeURIComponent(yahooTicker)
   const [chartData, summaryData] = await Promise.all([
     fetchJson(`/api/yahoo/chart?symbol=${encodedTicker}`, `${ticker} storico`),
     fetchJson(`/api/yahoo/summary?symbol=${encodedTicker}`, `${ticker} P/E`),
@@ -335,7 +356,7 @@ async function fetchYahooTickerData(ticker) {
 
 async function fetchTickerDiagnostic(ticker) {
   try {
-    const row = await fetchTickerData(ticker)
+    const row = await withCurrencyData(await fetchTickerData(ticker))
 
     return {
       ...row,
@@ -346,9 +367,15 @@ async function fetchTickerDiagnostic(ticker) {
       ticker,
       profile: mergeTickerProfile(ticker),
       currentPrice: null,
+      currentPriceEur: null,
+      currency: getTickerCurrency(ticker),
+      fxToEur: null,
+      fxPair: null,
+      fxProvider: null,
       pe: null,
       rsi: null,
       atr: null,
+      atrEur: null,
       status: 'error',
       reason: getDiagnostic({
         status: 'error',
@@ -375,7 +402,8 @@ export async function fetchLatestPrice(ticker, marketId = 'equities') {
     return fetchLatestCryptoPrice(ticker)
   }
 
-  const encodedTicker = encodeURIComponent(ticker)
+  const yahooTicker = getYahooSymbol(ticker)
+  const encodedTicker = encodeURIComponent(yahooTicker)
   const encodedEodhdTicker = encodeURIComponent(getEodhdSymbol(ticker))
   const eodhdRealtimeData = await fetchJson(
     `/api/eodhd/real-time?symbol=${encodedEodhdTicker}`,

@@ -80,3 +80,85 @@ export const EUROPEAN_TICKERS = [
   'KNEBV.HE',
   'EQNR.OL',
 ]
+
+export const US_TICKERS = [
+  'AAPL.US',
+  'MSFT.US',
+  'NVDA.US',
+  'AMZN.US',
+  'META.US',
+  'GOOGL.US',
+  'TSLA.US',
+  'AVGO.US',
+  'JPM.US',
+  'V.US',
+  'MA.US',
+  'UNH.US',
+  'LLY.US',
+  'XOM.US',
+  'COST.US',
+  'HD.US',
+  'PG.US',
+  'NFLX.US',
+  'AMD.US',
+  'CRM.US',
+  'ORCL.US',
+  'ADBE.US',
+  'BAC.US',
+  'KO.US',
+  'PEP.US',
+  'MRK.US',
+  'WMT.US',
+  'MCD.US',
+  'CSCO.US',
+  'INTC.US',
+]
+
+export const ASIA_TICKERS = [
+  '7203.TSE',
+  '6758.TSE',
+  '9984.TSE',
+  '8306.TSE',
+  '6861.TSE',
+  '8035.TSE',
+  '9432.TSE',
+  '6098.TSE',
+  '6501.TSE',
+  '4063.TSE',
+  '0700.HK',
+  '9988.HK',
+  '3690.HK',
+  '1299.HK',
+  '0939.HK',
+  '1398.HK',
+  '2318.HK',
+  '0388.HK',
+  '0005.HK',
+  '0941.HK',
+]
+
+const TICKER_CURRENCY_SUFFIXES = [
+  { suffix: '.US', currency: 'USD' },
+  { suffix: '.TSE', currency: 'JPY' },
+  { suffix: '.HK', currency: 'HKD' },
+  { suffix: '.SW', currency: 'CHF' },
+  { suffix: '.ST', currency: 'SEK' },
+  { suffix: '.CO', currency: 'DKK' },
+  { suffix: '.OL', currency: 'NOK' },
+]
+
+export function getTickerCurrency(ticker) {
+  const value = String(ticker || '').toUpperCase()
+  const match = TICKER_CURRENCY_SUFFIXES.find(({ suffix }) =>
+    value.endsWith(suffix),
+  )
+
+  return match?.currency || 'EUR'
+}
+
+export const MARKET_UNIVERSES = {
+  europe: EUROPEAN_TICKERS,
+  equities: EUROPEAN_TICKERS,
+  usa: US_TICKERS,
+  asia: ASIA_TICKERS,
+}

@@ -15,6 +15,22 @@ export const marketThemes = {
     accentBorder: 'rgba(103, 232, 249, 0.35)',
     accentHover: '#a5f3fc',
   },
+  usa: {
+    id: 'usa',
+    label: 'Borsa USA',
+    accent: '#67e8f9',
+    accentSoft: 'rgba(103, 232, 249, 0.12)',
+    accentBorder: 'rgba(103, 232, 249, 0.35)',
+    accentHover: '#a5f3fc',
+  },
+  asia: {
+    id: 'asia',
+    label: 'Borse Asia',
+    accent: '#facc15',
+    accentSoft: 'rgba(250, 204, 21, 0.12)',
+    accentBorder: 'rgba(250, 204, 21, 0.35)',
+    accentHover: '#fde047',
+  },
 }
 
 export function getMarketTheme(marketId = 'equities') {

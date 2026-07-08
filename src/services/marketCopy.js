@@ -91,6 +91,90 @@ const marketCopies = {
       },
     ],
   },
+  usa: {
+    label: 'Borsa USA',
+    eyebrow: 'Mercato azionario USA',
+    assetSingular: 'titolo USA',
+    assetPlural: 'titoli USA',
+    assetType: 'societa',
+    provider: 'EODHD',
+    scanMode: 'NYSE / Nasdaq',
+    budgetReason:
+      'Budget separato in euro, con prezzi operativi in USD e controvalore EUR calcolato tramite Forex EODHD.',
+    scanDescription:
+      'Analisi su azioni USA con P/E positivo, prezzo in USD, cambio EUR, RSI e ATR.',
+    diagnosticDescription:
+      'Dopo l’avvio vedrai per ogni titolo USA se è stato ammesso, scartato per RSI neutrale, scartato per P/E o escluso per dati non disponibili.',
+    glossary: [
+      {
+        term: 'Prezzo USD',
+        description:
+          'Prezzo originale del titolo nel mercato USA. Il controvalore in euro viene calcolato a fianco.',
+      },
+      {
+        term: 'Cambio EUR',
+        description:
+          'Tasso Forex EODHD usato per convertire USD in euro.',
+      },
+      {
+        term: 'P/E',
+        description:
+          'Rapporto prezzo/utili: se è assente o non positivo, il titolo viene scartato.',
+      },
+      {
+        term: 'RSI',
+        description:
+          'Indicatore di temperatura: sotto 30 segnala possibile rimbalzo, sopra 70 possibile eccesso.',
+      },
+      {
+        term: 'ATR',
+        description:
+          'Misura la volatilità media e aiuta a calibrare target e stop loss.',
+      },
+    ],
+  },
+  asia: {
+    label: 'Borse Asia',
+    eyebrow: 'Mercato azionario Asia',
+    assetSingular: 'titolo asiatico',
+    assetPlural: 'titoli asiatici',
+    assetType: 'societa',
+    provider: 'EODHD',
+    scanMode: 'Asia',
+    budgetReason:
+      'Budget separato in euro, con prezzi in valuta locale e controvalore EUR calcolato tramite Forex EODHD.',
+    scanDescription:
+      'Analisi su azioni asiatiche con P/E positivo, prezzo in valuta locale, cambio EUR, RSI e ATR.',
+    diagnosticDescription:
+      'Dopo l’avvio vedrai per ogni titolo asiatico se è stato ammesso, scartato per RSI neutrale, scartato per P/E o escluso per dati non disponibili.',
+    glossary: [
+      {
+        term: 'Valuta locale',
+        description:
+          'Il titolo resta espresso nella valuta del mercato, ad esempio JPY per Tokyo o HKD per Hong Kong.',
+      },
+      {
+        term: 'Cambio EUR',
+        description:
+          'Tasso Forex EODHD usato per convertire la valuta locale in euro.',
+      },
+      {
+        term: 'P/E',
+        description:
+          'Rapporto prezzo/utili: se è assente o non positivo, il titolo viene scartato.',
+      },
+      {
+        term: 'RSI',
+        description:
+          'Indicatore di temperatura: sotto 30 segnala possibile rimbalzo, sopra 70 possibile eccesso.',
+      },
+      {
+        term: 'ATR',
+        description:
+          'Misura la volatilità media e aiuta a calibrare target e stop loss.',
+      },
+    ],
+  },
 }
 
 export function getMarketCopy(marketId = 'equities') {
