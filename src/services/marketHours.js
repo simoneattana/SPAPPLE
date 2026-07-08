@@ -183,8 +183,8 @@ export function isMarketCloseGuardActive(strategy, date = new Date(), ticker = n
   )
 }
 
-export function isMarketScanBlocked(strategy, date = new Date()) {
-  return !getSessions(strategy).some(
+export function isMarketScanBlocked(strategy, date = new Date(), ticker = null) {
+  return !getSessions(strategy, ticker).some(
     (session) => getSessionStatus(session, date).isOpenForScan,
   )
 }

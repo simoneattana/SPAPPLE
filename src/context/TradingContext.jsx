@@ -714,6 +714,21 @@ function getOpeningOrderBlockReason(marketState, notional, strategy) {
     return 'Kill switch attivo: nuove aperture bloccate.'
   }
 
+  if (marketState.pendingTicker) {
+    if (isMarketCloseGuardActive(strategy, new Date(), marketState.pendingTicker)) {
+      return `${marketState.pendingTicker}: protezione ${getMarketCloseGuardLabel(
+        strategy,
+        marketState.pendingTicker,
+      )} attiva. Nuove aperture bloccate fino alla prossima seduta.`
+    }
+
+    if (isMarketScanBlocked(strategy, new Date(), marketState.pendingTicker)) {
+      return `${marketState.pendingTicker}: borsa di riferimento chiusa. Nuove aperture consentite solo da ${getMarketScanStartLabel(
+        strategy,
+      )}.`
+    }
+  }
+
   if (isMarketCloseGuardActive(strategy)) {
     return `Protezione azionaria ${getMarketCloseGuardLabel(strategy)} attiva: nuove aperture bloccate fino alla prossima seduta.`
   }
