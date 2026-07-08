@@ -958,7 +958,7 @@ export default function Scanner({ marketId }) {
       </header>
 
       {isUnifiedScanner ? (
-        <div className="rounded-lg border border-slate-800 bg-[#090b10] p-3">
+        <div className="rounded-lg border border-slate-700 bg-[#090b10] p-4 shadow-xl shadow-black/20">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
@@ -969,7 +969,7 @@ export default function Scanner({ marketId }) {
                 questa regia unica.
               </p>
             </div>
-            <div className="grid gap-2 sm:grid-cols-3">
+            <div className="grid w-full gap-3 lg:max-w-3xl sm:grid-cols-3">
               {SCANNER_MARKET_FILTERS.map((item) => {
                 const active = item.id === effectiveMarket
                 const marketState = markets?.[item.id] || {}
@@ -982,15 +982,16 @@ export default function Scanner({ marketId }) {
                   <Button
                     key={item.id}
                     variant={active ? 'default' : 'ghost'}
+                    aria-pressed={active}
                     className={
                       active
-                        ? 'justify-between'
-                        : 'justify-between border border-slate-800 bg-slate-950/60'
+                        ? 'h-auto min-h-16 justify-between border border-[var(--market-accent)] px-4 py-3 text-base shadow-xl shadow-[var(--market-accent-soft)]'
+                        : 'h-auto min-h-16 justify-between border border-slate-600 bg-slate-900 px-4 py-3 text-base text-slate-100 shadow-lg shadow-black/20 hover:border-[var(--market-accent-border)] hover:bg-slate-800 hover:text-white'
                     }
                     onClick={() => handleMarketFilterChange(item.id)}
                   >
-                    <span>{item.label}</span>
-                    <span className="text-xs opacity-75">
+                    <span className="font-semibold">{item.label}</span>
+                    <span className="rounded-md border border-current/20 bg-black/20 px-2 py-1 text-xs opacity-80">
                       {openPositions} pos. · {signalCount} segn.
                     </span>
                   </Button>
