@@ -258,6 +258,11 @@ export default function Dashboard({ marketId }) {
   const marketLabel = routeMarketState.marketLabel || currentStrategy.label
   const maxPositions = currentStrategy.maxPositions || 5
   const marketCopy = getMarketCopy(effectiveMarket)
+  const currentUniverseCount = Array.isArray(currentStrategy.universe)
+    ? currentStrategy.universe.length
+    : lastScanCount
+  const scanUniverseIsCurrent =
+    lastScanCount > 0 && lastScanCount === currentUniverseCount
   const positionPercent = Math.round(
     (currentStrategy?.positionSizing?.percent || 0.1) * 100,
   )
@@ -329,8 +334,16 @@ export default function Dashboard({ marketId }) {
           />
           <MiniMetric
             label="Segnali"
-            value={`${lastSignalCount}/${lastScanCount}`}
-            info={`Segnali validi trovati sugli ${marketCopy.assetPlural} analizzati.`}
+            value={
+              scanUniverseIsCurrent
+                ? `${lastSignalCount}/${lastScanCount}`
+                : `${lastSignalCount}/${lastScanCount || 0} · universo ${currentUniverseCount}`
+            }
+            info={
+              scanUniverseIsCurrent
+                ? `Segnali validi trovati sugli ${marketCopy.assetPlural} analizzati.`
+                : `L’ultima scansione è stata fatta su ${lastScanCount || 0} ${marketCopy.assetPlural}; l’universo attuale è di ${currentUniverseCount}. La prossima scansione aggiornerà il dato.`
+            }
           />
           {effectiveMarket === 'equities' ? (
             <MiniMetric

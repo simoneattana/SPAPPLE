@@ -677,6 +677,8 @@ export default function Scanner({ marketId }) {
 
     return new Date(visibleLastScanAt).toDateString() === new Date().toDateString()
   }, [visibleLastScanAt])
+  const scanUniverseIsCurrent =
+    Number(routeMarketState?.lastScanCount || 0) === scannerConfig.universe.length
 
   const handleScan = useCallback(async ({ automatic = false } = {}) => {
     const scanToken = scanTokenRef.current + 1
@@ -775,7 +777,7 @@ export default function Scanner({ marketId }) {
   useEffect(() => {
     const shouldAutoScan =
       !autoScanStarted.current &&
-      (!visibleLastScanResults?.length || !scanIsFromToday)
+      (!visibleLastScanResults?.length || !scanIsFromToday || !scanUniverseIsCurrent)
 
     if (!shouldAutoScan) {
       return
@@ -783,7 +785,12 @@ export default function Scanner({ marketId }) {
 
     autoScanStarted.current = true
     handleScan({ automatic: true })
-  }, [handleScan, visibleLastScanResults?.length, scanIsFromToday])
+  }, [
+    handleScan,
+    scanIsFromToday,
+    scanUniverseIsCurrent,
+    visibleLastScanResults?.length,
+  ])
 
   const handleExecuteTrade = async (row) => {
     const type = getRowTradeType(row)
