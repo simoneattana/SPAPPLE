@@ -81,7 +81,10 @@ function exitReasonLabel(reason) {
   const labels = {
     BREAK_EVEN_STOP: 'Stop a pareggio',
     MANUALE: 'Manuale',
-    SESSION_PROTECTION: 'Protezione 16:25',
+    PRE_CLOSE_CAPITAL_PROTECTION: 'Protezione capitale',
+    PRE_CLOSE_PROFIT_LOCK: 'Utile pre-chiusura',
+    PRE_CLOSE_RISK: 'Rischio pre-chiusura',
+    SESSION_PROTECTION: 'Protezione sessione',
     STOP_LOSS: 'Stop loss',
     TAKE_PROFIT: 'Take profit',
     TAKE_PROFIT_MAX: 'Target massimo',

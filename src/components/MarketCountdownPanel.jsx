@@ -7,6 +7,11 @@ import {
   CRYPTO_MAX_AUTO_ATR_PCT,
 } from '../services/cryptoRules'
 import { getMarketCopy } from '../services/marketCopy'
+import {
+  getMarketCloseGuardLabel,
+  isMarketCloseGuardActive,
+  isMarketScanBlocked,
+} from '../services/marketHours'
 import { getTradingStrategy } from '../strategies'
 import { useTrading } from '../context/useTrading'
 
@@ -123,6 +128,8 @@ export function MarketCountdownPanel({ marketId }) {
   const lastSignalCount = Number(marketState.lastSignalCount || 0)
   const nextLiveCheckAt = marketState.nextLiveCheckAt || null
   const nextScanAt = marketState.nextScanAt || null
+  const scanBlocked = isMarketScanBlocked(strategy)
+  const closeGuardActive = isMarketCloseGuardActive(strategy)
   const scanSummary = getScanSummary({
     lastScanAt,
     lastScanCount,
@@ -156,20 +163,32 @@ export function MarketCountdownPanel({ marketId }) {
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <CountdownMetric
-          detail="Aggiorna dati esterni, RSI, ATR e segnali."
+          detail={
+            scanBlocked
+              ? 'Nuove aperture bloccate fuori finestra operativa.'
+              : 'Aggiorna dati esterni, RSI, ATR e segnali.'
+          }
           icon={RefreshCw}
           label="Nuova scansione"
           value={formatCountdown(nextScanAt)}
         />
         <CountdownMetric
           detail={
-            positions.length > 0
+            closeGuardActive
+              ? `Protezione ${getMarketCloseGuardLabel(strategy)} attiva.`
+              : positions.length > 0
               ? `${positions.length} posizioni aperte sotto controllo.`
               : 'Parte solo quando ci sono posizioni aperte.'
           }
           icon={Clock3}
-          label="Prezzi posizioni"
-          value={positions.length > 0 ? formatCountdown(nextLiveCheckAt) : 'Sospeso'}
+          label="Protezione / prezzi"
+          value={
+            closeGuardActive
+              ? 'Attiva'
+              : positions.length > 0
+                ? formatCountdown(nextLiveCheckAt)
+                : 'Sospeso'
+          }
         />
         <CountdownMetric
           detail={`${lastScanCount} analizzati · ${lastSignalCount} segnali`}

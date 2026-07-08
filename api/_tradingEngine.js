@@ -35,6 +35,15 @@ import {
 } from '../src/services/positionSizing.js'
 import { getEodhdSymbol, getYahooSymbol } from '../src/services/eodhdSymbols.js'
 import { getTickerCurrency } from '../src/services/marketUniverse.js'
+import {
+  getMarketCloseGuardLabel,
+  getMarketScanStartLabel,
+  getMarketSessionStatus,
+  getNextMarketScanAt,
+  getPreCloseProtectionDecision,
+  isMarketCloseGuardActive,
+  isMarketScanBlocked,
+} from '../src/services/marketHours.js'
 import { mergeTickerProfile } from '../src/services/tickerMetadata.js'
 import {
   DEFAULT_MARKET_ID,
@@ -56,70 +65,12 @@ const REQUEST_CONCURRENCY = 8
 const EXECUTION_MODE = 'simulation'
 const EQUITIES_SCAN_INTERVAL_MS = 15 * 60_000
 const CRYPTO_SCAN_INTERVAL_MS = 5 * 60_000
-const EQUITIES_MARKET_CLOSE_GUARD = {
-  marketId: 'equities',
-  timezone: 'Europe/Rome',
-  hour: 16,
-  minute: 25,
-}
-const EQUITIES_MARKET_SCAN_START = {
-  hour: 9,
-  minute: 5,
-}
 const DEFAULT_RISK_LIMITS = {
   maxDailyOrders: 20,
   maxDailyCapitalPct: 1,
   maxConsecutiveLosses: 3,
 }
 const DEFAULT_REENTRY_COOLDOWN_MS = 6 * 60 * 60 * 1000
-
-function getTimeInTimezone(date = new Date(), timezone = 'Europe/Rome') {
-  const parts = new Intl.DateTimeFormat('it-IT', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-    timeZone: timezone,
-  }).formatToParts(date)
-  const hour = Number(parts.find((part) => part.type === 'hour')?.value)
-  const minute = Number(parts.find((part) => part.type === 'minute')?.value)
-  const second = Number(parts.find((part) => part.type === 'second')?.value)
-
-  return { hour, minute, second }
-}
-
-function isEquitiesCloseGuardActive(strategy, date = new Date()) {
-  if (strategy?.id !== EQUITIES_MARKET_CLOSE_GUARD.marketId) {
-    return false
-  }
-
-  const { hour, minute } = getTimeInTimezone(
-    date,
-    EQUITIES_MARKET_CLOSE_GUARD.timezone,
-  )
-
-  if (!Number.isFinite(hour) || !Number.isFinite(minute)) {
-    return false
-  }
-
-  const currentMinutes = hour * 60 + minute
-  const guardMinutes =
-    EQUITIES_MARKET_CLOSE_GUARD.hour * 60 + EQUITIES_MARKET_CLOSE_GUARD.minute
-
-  return currentMinutes >= guardMinutes
-}
-
-function getEquitiesCloseGuardLabel() {
-  return `${String(EQUITIES_MARKET_CLOSE_GUARD.hour).padStart(2, '0')}:${String(
-    EQUITIES_MARKET_CLOSE_GUARD.minute,
-  ).padStart(2, '0')}`
-}
-
-function getEquitiesScanStartLabel() {
-  return `${String(EQUITIES_MARKET_SCAN_START.hour).padStart(2, '0')}:${String(
-    EQUITIES_MARKET_SCAN_START.minute,
-  ).padStart(2, '0')}`
-}
 
 function getMarketScanIntervalMs(marketId) {
   return marketId === 'crypto' ? CRYPTO_SCAN_INTERVAL_MS : EQUITIES_SCAN_INTERVAL_MS
@@ -133,63 +84,11 @@ function getRiskLimits(strategy, riskLimits = {}) {
   }
 }
 
-function getNextEquitiesScanAt(now = new Date()) {
-  const currentRomeTime = getTimeInTimezone(
-    now,
-    EQUITIES_MARKET_CLOSE_GUARD.timezone,
-  )
-  const currentSeconds =
-    currentRomeTime.hour * 3600 +
-    currentRomeTime.minute * 60 +
-    currentRomeTime.second
-  const scanStartSeconds =
-    EQUITIES_MARKET_SCAN_START.hour * 3600 +
-    EQUITIES_MARKET_SCAN_START.minute * 60
-
-  if (!Number.isFinite(currentSeconds)) {
-    return new Date(now.getTime() + EQUITIES_SCAN_INTERVAL_MS)
-  }
-
-  const secondsUntilOpen =
-    currentSeconds < scanStartSeconds
-      ? scanStartSeconds - currentSeconds
-      : 24 * 3600 - currentSeconds + scanStartSeconds
-
-  return new Date(now.getTime() + secondsUntilOpen * 1000)
-}
-
-function isEquitiesScanBlocked(strategy, date = new Date()) {
-  if (strategy?.id !== EQUITIES_MARKET_CLOSE_GUARD.marketId) {
-    return false
-  }
-
-  const { hour, minute } = getTimeInTimezone(
-    date,
-    EQUITIES_MARKET_CLOSE_GUARD.timezone,
-  )
-
-  if (!Number.isFinite(hour) || !Number.isFinite(minute)) {
-    return false
-  }
-
-  const currentMinutes = hour * 60 + minute
-  const scanStartMinutes =
-    EQUITIES_MARKET_SCAN_START.hour * 60 + EQUITIES_MARKET_SCAN_START.minute
-  const closeMinutes =
-    EQUITIES_MARKET_CLOSE_GUARD.hour * 60 + EQUITIES_MARKET_CLOSE_GUARD.minute
-
-  return currentMinutes < scanStartMinutes || currentMinutes >= closeMinutes
-}
-
 function getNextScanAt(marketId, from = new Date()) {
   const strategy = getTradingStrategy(marketId)
 
-  if (isEquitiesCloseGuardActive(strategy, from)) {
-    return getNextEquitiesScanAt(from).toISOString()
-  }
-
-  if (isEquitiesScanBlocked(strategy, from)) {
-    return getNextEquitiesScanAt(from).toISOString()
+  if (isMarketCloseGuardActive(strategy, from) || isMarketScanBlocked(strategy, from)) {
+    return getNextMarketScanAt(strategy, from).toISOString()
   }
 
   return new Date(from.getTime() + getMarketScanIntervalMs(marketId)).toISOString()
@@ -206,7 +105,7 @@ function normalizeNextScanAt(marketId, value, fallbackValue = null) {
 
   if (
     Number.isFinite(candidateDate.getTime()) &&
-    isEquitiesScanBlocked(getTradingStrategy(marketId), candidateDate)
+    isMarketScanBlocked(getTradingStrategy(marketId), candidateDate)
   ) {
     return getNextScanAt(marketId, candidateDate)
   }
@@ -812,8 +711,8 @@ function getOpeningOrderBlockReason(marketState, notional, strategy) {
     return 'Kill switch attivo: nuove aperture bloccate.'
   }
 
-  if (isEquitiesCloseGuardActive(strategy)) {
-    return `Protezione azionaria ${getEquitiesCloseGuardLabel()} attiva: nuove aperture bloccate fino alla prossima seduta.`
+  if (isMarketCloseGuardActive(strategy)) {
+    return `Protezione azionaria ${getMarketCloseGuardLabel(strategy)} attiva: nuove aperture bloccate fino alla prossima seduta.`
   }
 
   if (marketState.pendingTicker) {
@@ -1995,7 +1894,7 @@ function getProtectedStopLoss(position, profitExit) {
     : Math.min(currentStopLoss, entryPrice)
 }
 
-function getCloseReasonText(exitReason) {
+function getCloseReasonText(exitReason, strategy = null) {
   if (exitReason === 'STOP_LOSS') {
     return 'Chiusura automatica backend: stop loss raggiunto.'
   }
@@ -2004,8 +1903,16 @@ function getCloseReasonText(exitReason) {
     return 'Chiusura automatica backend: stop a pareggio raggiunto.'
   }
 
-  if (exitReason === 'SESSION_PROTECTION') {
-    return `Chiusura automatica backend: protezione azionaria ${getEquitiesCloseGuardLabel()} attivata.`
+  if (exitReason === 'PRE_CLOSE_PROFIT_LOCK') {
+    return 'Chiusura automatica backend: protezione pre-chiusura, utile consolidato.'
+  }
+
+  if (exitReason === 'PRE_CLOSE_CAPITAL_PROTECTION') {
+    return 'Chiusura automatica backend: protezione pre-chiusura, capitale protetto.'
+  }
+
+  if (exitReason === 'PRE_CLOSE_RISK' || exitReason === 'SESSION_PROTECTION') {
+    return `Chiusura automatica backend: protezione ${getMarketCloseGuardLabel(strategy)} attivata.`
   }
 
   if (exitReason === 'TRAILING_PROFIT') {
@@ -2121,14 +2028,23 @@ async function refillOpenSlots(state, excludedTickers = []) {
   }
 }
 
-function evaluatePosition(position, latestPrice, { forceCloseReason = null } = {}) {
+function evaluatePosition(
+  position,
+  latestPrice,
+  { forceCloseReason = null, priceData = {} } = {},
+) {
   const invested = position.invested || LEGACY_POSITION_SIZE
   const entryPriceEur =
     Number(position.entryPriceEur) ||
     convertToEur(position.entryPrice, position.entryFxToEur || 1)
+  const latestFxToEur =
+    Number(priceData.latestFxToEur || priceData.fxToEur) ||
+    position.latestFxToEur ||
+    position.entryFxToEur ||
+    1
   const latestPriceEur = convertToEur(
     latestPrice,
-    position.latestFxToEur || position.entryFxToEur || 1,
+    latestFxToEur,
   )
   const quantity =
     Number.isFinite(Number(position.quantity)) && Number(position.quantity) > 0
@@ -2139,6 +2055,18 @@ function evaluatePosition(position, latestPrice, { forceCloseReason = null } = {
     ? (latestPriceEur - entryPriceEur) * quantity
     : (entryPriceEur - latestPriceEur) * quantity
   const roundedPnl = roundPrice(pnlEur)
+  const positionStrategy = getTradingStrategy(position.marketId)
+  const sessionStatus = getMarketSessionStatus(
+    positionStrategy,
+    new Date(),
+    position.ticker,
+  )
+  const preCloseDecision = getPreCloseProtectionDecision({
+    position,
+    latestPrice,
+    pnlEur,
+    sessionStatus,
+  })
   const profitExit = evaluateProfitExit(position, latestPrice)
   const effectiveStopLoss = getProtectedStopLoss(position, profitExit)
   const lockProtected =
@@ -2151,16 +2079,22 @@ function evaluatePosition(position, latestPrice, { forceCloseReason = null } = {
     ? latestPrice <= effectiveStopLoss
     : latestPrice >= effectiveStopLoss
   const isForcedClose = Boolean(forceCloseReason)
+  const isPreCloseClose = preCloseDecision.shouldClose
   const exitReason = isForcedClose
     ? forceCloseReason
-    : isProfitableExit
-      ? profitExit.exitReason
-      : lockProtected && roundedPnl >= 0
-        ? 'BREAK_EVEN_STOP'
-        : 'STOP_LOSS'
-  const result = isProfitableExit || roundedPnl >= 0 ? 'WIN' : 'LOSS'
+    : isPreCloseClose
+      ? preCloseDecision.exitReason
+      : isProfitableExit
+        ? profitExit.exitReason
+        : lockProtected && roundedPnl >= 0
+          ? 'BREAK_EVEN_STOP'
+          : 'STOP_LOSS'
+  const result = roundedPnl >= 0 ? 'WIN' : 'LOSS'
+  const pnlOriginal = long
+    ? (latestPrice - position.entryPrice) * quantity
+    : (position.entryPrice - latestPrice) * quantity
   const closeOrder =
-    isForcedClose || isProfitableExit || profitExit.isWin || isLoss
+    isForcedClose || isPreCloseClose || isProfitableExit || profitExit.isWin || isLoss
       ? createSimulationOrder({
           action: 'CLOSE',
           direction: position.type,
@@ -2171,7 +2105,7 @@ function evaluatePosition(position, latestPrice, { forceCloseReason = null } = {
           positionId: position.id,
           quantity: position.quantity || quantity,
           requestedPrice: latestPrice,
-          reason: getCloseReasonText(exitReason),
+          reason: getCloseReasonText(exitReason, positionStrategy),
           side: getCloseOrderSide(position.type),
           source: 'backend-monitor',
           ticker: position.ticker,
@@ -2187,10 +2121,12 @@ function evaluatePosition(position, latestPrice, { forceCloseReason = null } = {
         ? roundPrice(effectiveStopLoss)
         : position.stopLoss,
       latestPrice: roundPrice(latestPrice),
-      latestFxToEur: position.latestFxToEur || position.entryFxToEur || 1,
+      latestFxToEur,
       latestPriceEur: roundPrice(latestPriceEur),
       latestPriceAt: new Date().toISOString(),
       unrealizedPnl: roundPrice(pnlEur),
+      preCloseRiskScore: preCloseDecision.riskScore,
+      preCloseRiskMessage: preCloseDecision.message,
     },
     closeOrder,
     closedTrade:
@@ -2206,11 +2142,15 @@ function evaluatePosition(position, latestPrice, { forceCloseReason = null } = {
             currency: position.currency || getTickerCurrency(position.ticker),
             entryFxToEur: position.entryFxToEur || 1,
             invested,
+            pnlOriginal: roundPrice(pnlOriginal),
             pnlEur: roundedPnl,
             result,
             exitDate: new Date().toISOString(),
             exitPrice: roundPrice(latestPrice),
             exitPriceEur: roundPrice(latestPriceEur),
+            exitFxToEur: latestFxToEur,
+            preCloseRiskScore: preCloseDecision.riskScore,
+            preCloseRiskMessage: preCloseDecision.message,
             exitReason,
             recoveredCapital: roundPrice(recoveredCapital),
           }
@@ -2223,9 +2163,9 @@ export async function runBackendMonitor(state) {
   const strategy = getTradingStrategy(current.activeMarket)
   const sizing = strategy.positionSizing
   const maxPositions = getStrategyMaxPositions(strategy)
-  const closeGuardActive = isEquitiesCloseGuardActive(strategy)
+  const closeGuardActive = isMarketCloseGuardActive(strategy)
   const now = new Date()
-  const scanBlocked = isEquitiesScanBlocked(strategy, now)
+  const scanBlocked = isMarketScanBlocked(strategy, now)
   const nextScanTime = current.nextScanAt ? new Date(current.nextScanAt).getTime() : 0
   const scanDue = !nextScanTime || nextScanTime <= now.getTime()
 
@@ -2258,11 +2198,11 @@ export async function runBackendMonitor(state) {
         type: 'backend-monitor',
         status: 'waiting',
         title: closeGuardActive
-          ? `Protezione azioni ${getEquitiesCloseGuardLabel()} attiva`
-          : `Azioni in attesa delle ${getEquitiesScanStartLabel()}`,
+          ? `Protezione azioni ${getMarketCloseGuardLabel(strategy)} attiva`
+          : `Azioni in attesa delle ${getMarketScanStartLabel(strategy)}`,
         detail: closeGuardActive
           ? 'Nessuna posizione azionaria aperta. Nuove aperture bloccate fino alla prossima seduta.'
-          : `Nessuna posizione azionaria aperta. La prima scansione partirà alle ${getEquitiesScanStartLabel()}, dopo la lettura della chiusura USA.`,
+          : `Nessuna posizione azionaria aperta. La prima scansione partirà alle ${getMarketScanStartLabel(strategy)}, dopo la lettura della chiusura USA.`,
       })
 
       return {
@@ -2271,13 +2211,13 @@ export async function runBackendMonitor(state) {
           isChecking: false,
           isScanning: false,
           engineStatus: closeGuardActive
-            ? `Protezione azioni ${getEquitiesCloseGuardLabel()} attiva`
-            : `In attesa delle ${getEquitiesScanStartLabel()}`,
+            ? `Protezione azioni ${getMarketCloseGuardLabel(strategy)} attiva`
+            : `In attesa delle ${getMarketScanStartLabel(strategy)}`,
           nextScanAt: getNextScanAt(current.activeMarket, now),
           lastBackendCheckAt: new Date().toISOString(),
           lastAutomationMessage: closeGuardActive
-            ? `Mondo azionario fermo: nessuna scansione o apertura prima delle ${getEquitiesScanStartLabel()}.`
-            : `Mondo azionario in attesa: prima scansione automatica alle ${getEquitiesScanStartLabel()}, con contesto USA.`,
+            ? `Mondo azionario fermo: nessuna scansione o apertura prima delle ${getMarketScanStartLabel(strategy)}.`
+            : `Mondo azionario in attesa: prima scansione automatica alle ${getMarketScanStartLabel(strategy)}, con contesto USA.`,
           ...appendLogs(current, activity),
         }),
         closedTrades: [],
@@ -2422,11 +2362,18 @@ export async function runBackendMonitor(state) {
         position.ticker,
         position.marketId || current.activeMarket,
       )
+      const currency = position.currency || getTickerCurrency(position.ticker)
+      const fx = await fetchBackendFxRateToEur(currency).catch(() => ({
+        rate: position.entryFxToEur || 1,
+      }))
       const { monitoredPosition, closedTrade, closeOrder } = evaluatePosition(
         position,
         latestPrice,
         {
-          forceCloseReason: closeGuardActive ? 'SESSION_PROTECTION' : null,
+          forceCloseReason: null,
+          priceData: {
+            latestFxToEur: Number(fx.rate) || position.entryFxToEur || 1,
+          },
         },
       )
 
@@ -2502,7 +2449,7 @@ export async function runBackendMonitor(state) {
         ? 'Rotazione automatica completata'
         : closedTrades.length > 0
         ? closeGuardActive
-          ? `Protezione azioni ${getEquitiesCloseGuardLabel()} eseguita`
+          ? `Protezione azioni ${getMarketCloseGuardLabel(strategy)} eseguita`
           : 'Uscita automatica backend'
         : 'Controllo backend completato',
     detail:
@@ -2518,7 +2465,7 @@ export async function runBackendMonitor(state) {
             }`
           : closedTrades.length > 0
             ? closeGuardActive
-              ? `${closedTrades.length} posizioni azionarie chiuse dalla protezione ${getEquitiesCloseGuardLabel()}. Nessuna nuova apertura azionaria consentita.`
+              ? `${closedTrades.length} posizioni azionarie chiuse dalla protezione ${getMarketCloseGuardLabel(strategy)}. Nessuna nuova apertura azionaria consentita.`
               : `${closedTrades.length} posizioni chiuse automaticamente. Nessun nuovo titolo abbastanza forte.${
                   scanPatch.usMarketContext
                     ? ` ${getUsMarketContextSummary(scanPatch.usMarketContext)}`
@@ -2566,7 +2513,7 @@ export async function runBackendMonitor(state) {
         : activePositions.length > 0
           ? 'Monitor backend attivo'
           : closeGuardActive
-            ? `Protezione azioni ${getEquitiesCloseGuardLabel()} completata`
+            ? `Protezione azioni ${getMarketCloseGuardLabel(strategy)} completata`
             : 'In attesa di nuova scansione',
     ...appendLogs(current, activity),
   }

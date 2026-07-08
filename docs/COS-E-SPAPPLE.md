@@ -347,7 +347,7 @@ Spapple puo chiudere una posizione in questi casi:
 - trailing profit attivato
 - stop loss raggiunto
 - stop a pareggio raggiunto
-- protezione azionaria delle 16:25
+- protezione pre-chiusura con risk score
 - chiusura manuale da interfaccia
 
 La chiusura aggiorna:
@@ -366,16 +366,25 @@ Se la posizione chiude in perdita, il capitale recuperato viene ridotto dalla
 perdita effettiva. La perdita non viene sottratta dal profitto storico gia
 realizzato, ma incide sul P/L netto del periodo.
 
-## Protezione azionaria 16:25
+## Protezione pre-chiusura
 
-Il mondo azionario e trattato con una regola prudenziale.
+Ogni mercato azionario e trattato con una regola prudenziale propria.
 
-Spapple blocca nuove aperture azionarie dopo le 16:25, ora italiana, e puo
-forzare la chiusura delle posizioni azionarie aperte per evitare esposizione
-oltre la finestra operativa stabilita.
+Spapple blocca nuove aperture prima della chiusura del mercato e valuta le
+posizioni aperte con un risk score. Non chiude tutto in modo cieco: consolida
+gli utili, protegge il capitale quando la posizione e a pareggio o positiva, e
+taglia le posizioni ad alto rischio prima dell'overnight.
 
-La prima scansione azionaria automatica e consentita dalle 09:05.
-Prima di quell'orario Spapple resta in attesa.
+Le finestre principali sono:
+
+- Europa: scansione dalle 09:05, blocco nuove aperture dalle 17:00,
+  protezione dalle 17:10.
+- USA: scansione dalle 09:35 New York, blocco nuove aperture dalle 15:30,
+  protezione dalle 15:40.
+- Asia Tokyo: scansione dalle 09:05 Tokyo, blocco nuove aperture dalle 15:00,
+  protezione dalle 15:10.
+- Asia Hong Kong: scansione dalle 09:35 Hong Kong, blocco nuove aperture dalle
+  15:30, protezione dalle 15:45.
 
 Questa scelta serve a rendere la simulazione piu realistica rispetto agli orari
 di mercato e a ridurre il rischio di mantenere posizioni azionarie oltre la
@@ -388,7 +397,7 @@ finestra decisa.
 La scansione azionaria:
 
 - parte dalle 09:05
-- si ferma dopo le 16:25
+- blocca nuove aperture prima della chiusura del mercato
 - viene programmata ogni 15 minuti
 - usa EODHD/Yahoo Finance
 - legge anche il contesto del mercato USA quando disponibile

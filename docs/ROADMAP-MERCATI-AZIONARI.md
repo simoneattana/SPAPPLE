@@ -162,19 +162,21 @@ Scopo: rendere realistici gli orari di scansione.
 Europa:
 
 - prima scansione: 09:05 Europe/Rome
-- protezione fine giornata: 16:25 Europe/Rome
+- blocco nuove aperture: 17:00 Europe/Rome
+- protezione pre-chiusura con risk score: dalle 17:10 Europe/Rome
 
 USA:
 
 - mercato principale: NYSE/Nasdaq
-- orari calcolati rispetto a Europe/Rome
-- scansione dopo apertura USA
-- protezione prima della chiusura USA
+- scansione dopo apertura USA: 09:35 New York
+- blocco nuove aperture: 15:30 New York
+- protezione pre-chiusura con risk score: dalle 15:40 New York
 
 Asia:
 
 - prima versione: Giappone + Hong Kong
-- orari separati da Europa e USA
+- Tokyo: scansione 09:05, blocco 15:00, protezione 15:10
+- Hong Kong: scansione 09:35, blocco 15:30, protezione 15:45
 - se la finestra asiatica e chiusa, nessuna nuova apertura
 
 Verifica:
