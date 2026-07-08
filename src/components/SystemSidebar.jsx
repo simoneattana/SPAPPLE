@@ -32,6 +32,20 @@ function formatActivityDate(value) {
   return dateTimeFormatter.format(new Date(value))
 }
 
+function formatRemoteStatus(status) {
+  const text = String(status || 'disconnesso')
+
+  if (
+    text.includes('<!DOCTYPE') ||
+    text.includes('<html') ||
+    text.toLowerCase().includes('bad gateway')
+  ) {
+    return 'errore temporaneo Supabase'
+  }
+
+  return text.length > 70 ? `${text.slice(0, 70)}...` : text
+}
+
 function getRomeClockParts(date = new Date()) {
   const parts = new Intl.DateTimeFormat('it-IT', {
     hour: '2-digit',
@@ -206,6 +220,7 @@ export function SystemSidebar() {
   const lastSignalCount = Number(marketState.lastSignalCount || 0)
   const lastLiveCheckAt = marketState.lastLiveCheckAt || null
   const lastBackendCheckAt = marketState.lastBackendCheckAt || null
+  const readableRemoteStatus = formatRemoteStatus(remoteStatus)
   const marketLabel = marketState.marketLabel || strategy.label
   const operatingState = getOperatingState({
     engineStatus,
@@ -318,7 +333,7 @@ export function SystemSidebar() {
         <p className="mt-2 text-[11px] text-slate-600">
           Sync: {formatActivityDate(lastSyncAt || lastLiveCheckAt)} · Backend:{' '}
           {formatActivityDate(lastBackendCheckAt)} · Archivio:{' '}
-          {remoteStatus}
+          {readableRemoteStatus}
         </p>
       </div>
 

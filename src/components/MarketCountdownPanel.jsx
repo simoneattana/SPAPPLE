@@ -54,6 +54,20 @@ function formatCountdown(target) {
   return formatDuration(Math.ceil(remainingMs / 1000))
 }
 
+function formatRemoteStatus(status) {
+  const text = String(status || 'disconnesso')
+
+  if (
+    text.includes('<!DOCTYPE') ||
+    text.includes('<html') ||
+    text.toLowerCase().includes('bad gateway')
+  ) {
+    return 'errore temporaneo Supabase'
+  }
+
+  return text.length > 70 ? `${text.slice(0, 70)}...` : text
+}
+
 function getScanSummary({ lastScanAt, lastScanCount, lastSignalCount, marketId }) {
   if (!lastScanAt) {
     return 'Non ho ancora una scansione salvata per questo mercato.'
@@ -92,6 +106,7 @@ function CountdownMetric({ detail, icon: Icon, label, value, variant = 'default'
 
 export function MarketCountdownPanel({ marketId }) {
   const { markets, remoteStatus } = useTrading()
+  const readableRemoteStatus = formatRemoteStatus(remoteStatus)
   const [, setNow] = useState(Date.now())
   const strategy = getTradingStrategy(marketId)
   const marketState = markets?.[strategy.id] || {}
@@ -164,7 +179,7 @@ export function MarketCountdownPanel({ marketId }) {
           variant="muted"
         />
         <CountdownMetric
-          detail={`Archivio: ${remoteStatus}. Lavora anche ad app chiusa.`}
+          detail={`Archivio: ${readableRemoteStatus}. Lavora anche ad app chiusa.`}
           icon={ServerCog}
           label="Backend remoto"
           value={formatActivityDate(lastBackendCheckAt)}

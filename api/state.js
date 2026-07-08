@@ -13,6 +13,20 @@ function isAuthorized(request) {
   return request.headers['x-spapple-password'] === expectedPassword
 }
 
+function normalizeApiError(error, fallback = 'Stato remoto non disponibile') {
+  const rawMessage = String(error?.message || error || fallback).trim()
+
+  if (
+    rawMessage.includes('<!DOCTYPE') ||
+    rawMessage.includes('<html') ||
+    rawMessage.toLowerCase().includes('bad gateway')
+  ) {
+    return 'Supabase temporaneamente non disponibile. Spapple riprovera automaticamente.'
+  }
+
+  return rawMessage.length > 220 ? `${rawMessage.slice(0, 220)}...` : rawMessage
+}
+
 async function readRequestBody(request) {
   if (request.body && typeof request.body === 'object') {
     return request.body
@@ -340,7 +354,7 @@ export default async function handler(request, response) {
         stateRevision: payload.stateRevision || 0,
       })
     } catch (error) {
-      sendJson(response, 500, { error: error.message })
+      sendJson(response, 500, { error: normalizeApiError(error) })
     }
 
     return
@@ -396,7 +410,9 @@ export default async function handler(request, response) {
       })
       return
     } catch (error) {
-      sendJson(response, error.statusCode || 500, { error: error.message })
+      sendJson(response, error.statusCode || 500, {
+        error: normalizeApiError(error),
+      })
       return
     }
   }
