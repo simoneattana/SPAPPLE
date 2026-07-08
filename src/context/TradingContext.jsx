@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchLatestPrice, fetchMarketData, fetchUsMarketContext } from '../services/api'
 import { fetchCryptoMarketData } from '../services/cryptoApi'
 import { CRYPTO_TICKERS } from '../services/cryptoUniverse'
-import { EUROPEAN_TICKERS } from '../services/marketUniverse'
 import {
   LEGACY_POSITION_SIZE,
   MIN_POSITION_SIZE,
@@ -211,6 +210,8 @@ function normalizeNextScanAt(marketId, value, fallbackValue = null) {
 }
 
 function getMarketScannerConfig(marketId) {
+  const strategy = getTradingStrategy(marketId)
+
   if (marketId === 'crypto') {
     return {
       errorLabel: 'Kraken',
@@ -231,8 +232,8 @@ function getMarketScannerConfig(marketId) {
     isAutoEligible: isAutoEligibleResult,
     provider: 'EODHD / Yahoo Finance',
     sortByScore: sortByAutoScore,
-    universe: EUROPEAN_TICKERS,
-    contextFetcher: fetchUsMarketContext,
+    universe: strategy.universe,
+    contextFetcher: marketId === 'equities' ? fetchUsMarketContext : null,
   }
 }
 
@@ -241,7 +242,7 @@ const initialActivity = {
   type: 'system',
   status: 'done',
   title: 'Sistema azzerato',
-  detail: 'Nuova simulazione avviata: Azioni 30.000€, Crypto 20.000€ e pilota automatico attivo.',
+  detail: 'Nuova simulazione avviata: Europa, USA e Asia con pilota automatico attivo.',
   createdAt: new Date().toISOString(),
 }
 

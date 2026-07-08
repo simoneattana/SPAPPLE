@@ -7,7 +7,7 @@ import {
   writeTradingState,
 } from '../_tradingEngine.js'
 
-const MONITORED_MARKETS = ['equities', 'crypto']
+const MONITORED_MARKETS = ['equities', 'usa', 'asia']
 
 function isAuthorized(request) {
   const cronSecret = process.env.CRON_SECRET
@@ -83,7 +83,7 @@ export default async function handler(request, response) {
 
     const writeResult = await writeTradingState(supabase, nextPayload, {
       source: 'backend-monitor',
-      summary: 'Monitor backend eseguito su azioni e crypto.',
+      summary: 'Monitor backend eseguito su Europa, USA e Asia.',
     })
 
     sendJson(response, 200, {

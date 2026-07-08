@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  AlertTriangle,
   BookOpenText,
   Loader2,
   Play,
@@ -23,19 +22,6 @@ import {
 import { useToast } from '../components/ui/useToast'
 import { useTrading } from '../context/useTrading'
 import { fetchMarketData, fetchUsMarketContext } from '../services/api'
-import { fetchCryptoMarketData } from '../services/cryptoApi'
-import {
-  CRYPTO_MAX_AUTO_ATR_PCT,
-  getCryptoAtrPct,
-  getCryptoAutoScore,
-  getCryptoSignalType,
-  isCryptoActionableResult,
-  isCryptoAutoEligibleResult,
-  isCryptoRejectedResult,
-  sortByCryptoAutoScore,
-} from '../services/cryptoRules'
-import { CRYPTO_TICKERS } from '../services/cryptoUniverse'
-import { EUROPEAN_TICKERS } from '../services/marketUniverse'
 import { getMarketCopy } from '../services/marketCopy'
 import { getTradingStrategy } from '../strategies'
 import {
@@ -179,10 +165,6 @@ function StrategyBadge({ rsi }) {
 }
 
 function getRowTradeType(row) {
-  if (row.market === 'crypto') {
-    return getCryptoSignalType(row)
-  }
-
   if (row.rsi < 30) {
     return 'LONG'
   }
@@ -212,8 +194,7 @@ function StrategyCell({ row, marketCopy }) {
 }
 
 function ReasonCell({ row }) {
-  const isCrypto = row.market === 'crypto'
-  const assetLabel = isCrypto ? 'asset crypto' : 'titolo'
+  const assetLabel = 'titolo'
 
   if (row.status !== 'ok') {
     return (
@@ -249,8 +230,6 @@ function ReasonCell({ row }) {
 }
 
 function TechnicalTooltip({ row }) {
-  const isCrypto = row.market === 'crypto'
-
   return (
     <div className="group relative inline-flex">
       <Button size="sm" variant="ghost">
@@ -268,10 +247,10 @@ function TechnicalTooltip({ row }) {
           </div>
           <div className="rounded-lg border border-slate-800 bg-slate-950 p-2">
             <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">
-              {isCrypto ? 'Volume €' : 'P/E'}
+              P/E
             </p>
             <p className="mt-1 text-sm font-semibold text-white">
-              {isCrypto ? formatCurrency(row.volumeEur) : formatNumber(row.pe)}
+              {formatNumber(row.pe)}
             </p>
           </div>
           <div className="rounded-lg border border-slate-800 bg-slate-950 p-2">
@@ -283,36 +262,6 @@ function TechnicalTooltip({ row }) {
             </p>
           </div>
         </div>
-        {isCrypto ? (
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            <div className="rounded-lg border border-slate-800 bg-slate-950 p-2">
-              <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">
-                Market cap
-              </p>
-              <p className="mt-1 text-sm font-semibold text-white">
-                {formatCurrency(row.marketCapEur)}
-              </p>
-            </div>
-            <div className="rounded-lg border border-slate-800 bg-slate-950 p-2">
-              <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">
-                Ranking
-              </p>
-              <p className="mt-1 text-sm font-semibold text-white">
-                {row.marketCapRank ? `#${row.marketCapRank}` : 'Non disponibile'}
-              </p>
-            </div>
-          </div>
-        ) : null}
-        {isCrypto && (row.mappingWarning || row.mappingIssue) ? (
-          <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-400/10 p-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-200">
-              Mapping simboli
-            </p>
-            <p className="mt-1 text-xs leading-5 text-amber-100/80">
-              {row.mappingIssue || row.mappingWarning}
-            </p>
-          </div>
-        ) : null}
         <p className="mt-3 text-xs uppercase tracking-[0.14em] text-slate-500">
           Perché
         </p>
@@ -325,13 +274,10 @@ function TechnicalTooltip({ row }) {
 }
 
 function AutoRuleCell({ row }) {
-  const isCrypto = row.market === 'crypto'
-  const atrPct = isCrypto ? getCryptoAtrPct(row) : getAtrPct(row)
-  const maxAtrPct = isCrypto ? CRYPTO_MAX_AUTO_ATR_PCT : MAX_AUTO_ATR_PCT
-  const eligible = isCrypto
-    ? isCryptoAutoEligibleResult(row)
-    : isAutoEligibleResult(row)
-  const score = isCrypto ? getCryptoAutoScore(row) : getAutoScore(row)
+  const atrPct = getAtrPct(row)
+  const maxAtrPct = MAX_AUTO_ATR_PCT
+  const eligible = isAutoEligibleResult(row)
+  const score = getAutoScore(row)
 
   if (eligible) {
     return (
@@ -381,16 +327,6 @@ function InvestmentCell({ position }) {
 }
 
 function getExtendedScanReason(row, scannerConfig) {
-  const isCrypto = row.market === 'crypto'
-
-  if (row.mappingIssue) {
-    return `Asset escluso: il mapping tra simbolo visibile e coppia operativa non è confermato. ${row.mappingIssue}`
-  }
-
-  if (row.mappingWarning) {
-    return `Asset controllato con alias operativo: ${row.mappingWarning}`
-  }
-
   if (row.status !== 'ok') {
     return row.reason || 'Asset escluso perché i dati reali non sono disponibili o non sono completi.'
   }
@@ -410,10 +346,6 @@ function getExtendedScanReason(row, scannerConfig) {
 
   if (row.reason) {
     return row.reason
-  }
-
-  if (isCrypto) {
-    return `Asset scartato: RSI ${formatNumber(row.rsi)} in zona neutrale oppure liquidità/capitalizzazione non sufficienti per il pilota prudente.`
   }
 
   return `Titolo scartato: P/E non valido oppure RSI ${formatNumber(row.rsi)} fuori dalle zone operative richieste.`
@@ -474,30 +406,11 @@ export default function Scanner({ marketId }) {
   const routeKillSwitchEnabled = Boolean(routeMarketState?.killSwitchEnabled)
   const routeUsMarketContext = routeMarketState?.usMarketContext || null
   const scannerConfig = useMemo(() => {
-    if (effectiveMarket === 'crypto') {
-      const copy = getMarketCopy('crypto')
-      return {
-        copy,
-        provider: 'Kraken',
-        universe: CRYPTO_TICKERS,
-        fetcher: fetchCryptoMarketData,
-        isActionable: isCryptoActionableResult,
-        isAutoEligible: isCryptoAutoEligibleResult,
-        isRejected: isCryptoRejectedResult,
-        sortByScore: sortByCryptoAutoScore,
-        getScore: getCryptoAutoScore,
-        scanLabel: copy.assetPlural,
-        diagnosticLabel: copy.assetPlural,
-        errorLabel: 'Kraken',
-        contextFetcher: null,
-      }
-    }
-
-    const copy = getMarketCopy('equities')
+    const copy = getMarketCopy(effectiveMarket)
     return {
       copy,
-      provider: 'EODHD / Yahoo Finance',
-      universe: EUROPEAN_TICKERS,
+      provider: copy.provider,
+      universe: effectiveStrategy.universe,
       fetcher: fetchMarketData,
       isActionable: isActionableResult,
       isAutoEligible: isAutoEligibleResult,
@@ -506,10 +419,10 @@ export default function Scanner({ marketId }) {
       getScore: getAutoScore,
       scanLabel: copy.assetPlural,
       diagnosticLabel: copy.assetPlural,
-      errorLabel: 'EODHD / Yahoo Finance',
-      contextFetcher: fetchUsMarketContext,
+      errorLabel: copy.provider,
+      contextFetcher: effectiveMarket === 'equities' ? fetchUsMarketContext : null,
     }
-  }, [effectiveMarket])
+  }, [effectiveMarket, effectiveStrategy])
   const [results, setResults] = useState(
     routeLastScanResults || [],
   )
@@ -603,18 +516,6 @@ export default function Scanner({ marketId }) {
   const resultsByTicker = useMemo(
     () => new Map(results.map((row) => [row.ticker, row])),
     [results],
-  )
-  const cryptoMappingAlerts = useMemo(
-    () =>
-      effectiveMarket === 'crypto'
-        ? results.filter((row) => row.mappingWarning || row.mappingIssue)
-        : [],
-    [effectiveMarket, results],
-  )
-  const cryptoMappingIssues = useMemo(
-    () =>
-      cryptoMappingAlerts.filter((row) => row.mappingIssue),
-    [cryptoMappingAlerts],
   )
 
   useEffect(() => {
@@ -915,31 +816,6 @@ export default function Scanner({ marketId }) {
         <div className="rounded-lg border border-[#ef8f8f]/35 bg-[#ef8f8f]/10 p-4 text-sm leading-6 text-[#ef8f8f]">
           Kill switch attivo: lo Scanner può aggiornare i dati, ma non può
           aprire nuove posizioni finché il blocco resta attivo.
-        </div>
-      ) : null}
-
-      {effectiveMarket === 'crypto' && cryptoMappingAlerts.length > 0 ? (
-        <div className="rounded-lg border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-100">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-200" />
-            <div>
-              <p className="font-semibold">
-                Controllo mapping crypto: {cryptoMappingAlerts.length} simboli con
-                alias operativo
-              </p>
-              <p className="mt-1 leading-6 text-amber-100/75">
-                Alcuni asset hanno un codice visibile diverso dal codice usato da
-                Kraken. Spapple li segnala in diagnostica e blocca quelli non
-                confermati da CoinGecko.
-              </p>
-              {cryptoMappingIssues.length > 0 ? (
-                <p className="mt-2 text-[#ef8f8f]">
-                  {cryptoMappingIssues.length} asset esclusi per mapping
-                  CoinGecko non confermato.
-                </p>
-              ) : null}
-            </div>
-          </div>
         </div>
       ) : null}
 

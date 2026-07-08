@@ -15,7 +15,6 @@ import {
   CRYPTO_MIN_MARKET_CAP_EUR,
   CRYPTO_SHORT_RSI_LIMIT,
 } from '../src/services/cryptoRules.js'
-import { EUROPEAN_TICKERS } from '../src/services/marketUniverse.js'
 import {
   isActionableResult,
   isAutoEligibleResult,
@@ -34,7 +33,7 @@ import {
   calculatePositionSize,
   canOpenPosition,
 } from '../src/services/positionSizing.js'
-import { getEodhdSymbol } from '../src/services/eodhdSymbols.js'
+import { getEodhdSymbol, getYahooSymbol } from '../src/services/eodhdSymbols.js'
 import { mergeTickerProfile } from '../src/services/tickerMetadata.js'
 import {
   DEFAULT_MARKET_ID,
@@ -1365,8 +1364,9 @@ async function fetchChartHistory(ticker) {
     }
   }
 
+  const yahooSymbol = getYahooSymbol(ticker)
   const yahooUrl = new URL(
-    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}`,
+    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}`,
   )
   yahooUrl.searchParams.set('range', '3mo')
   yahooUrl.searchParams.set('interval', '1d')
@@ -1422,8 +1422,9 @@ async function fetchBackendUsMarketContext() {
 
 async function fetchSummaryData(ticker) {
   const { cookie, crumb } = await getYahooAuth()
+  const yahooSymbol = getYahooSymbol(ticker)
   const yahooUrl = new URL(
-    `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}`,
+    `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(yahooSymbol)}`,
   )
   yahooUrl.searchParams.set(
     'modules',
@@ -1713,6 +1714,8 @@ async function mapWithConcurrency(items, limit, mapper) {
 }
 
 async function fetchBackendMarketData(marketId = DEFAULT_MARKET_ID) {
+  const strategy = getTradingStrategy(marketId)
+
   if (marketId === 'crypto') {
     const coingeckoMarkets = await fetchCoinGeckoMarkets(CRYPTO_TICKERS)
 
@@ -1723,7 +1726,11 @@ async function fetchBackendMarketData(marketId = DEFAULT_MARKET_ID) {
     )
   }
 
-  return mapWithConcurrency(EUROPEAN_TICKERS, REQUEST_CONCURRENCY, fetchTickerDiagnostic)
+  return mapWithConcurrency(
+    strategy.universe || [],
+    REQUEST_CONCURRENCY,
+    fetchTickerDiagnostic,
+  )
 }
 
 function getSignalType(row, strategy) {

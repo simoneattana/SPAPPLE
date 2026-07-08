@@ -26,26 +26,38 @@ const relativeTimeFormatter = new Intl.RelativeTimeFormat('it-IT', {
 const marketNavigation = [
   {
     id: 'equities',
-    label: 'Area Azioni',
-    base: '/azioni',
+    label: 'Europa',
+    base: '/europa',
     items: [
-      { label: 'Dashboard Azioni', to: '/azioni/dashboard', icon: LayoutDashboard },
-      { label: 'Scanner Azioni', to: '/azioni/scanner', icon: Radar },
-      { label: 'Ordini Azioni', to: '/azioni/ordini', icon: ClipboardList },
-      { label: 'Utili Azioni', to: '/azioni/utili', icon: BadgeEuro },
-      { label: 'Storico Azioni', to: '/azioni/diario', icon: BookOpen },
+      { label: 'Dashboard Europa', to: '/europa/dashboard', icon: LayoutDashboard },
+      { label: 'Scanner Europa', to: '/europa/scanner', icon: Radar },
+      { label: 'Ordini Europa', to: '/europa/ordini', icon: ClipboardList },
+      { label: 'Utili Europa', to: '/europa/utili', icon: BadgeEuro },
+      { label: 'Storico Europa', to: '/europa/diario', icon: BookOpen },
     ],
   },
   {
-    id: 'crypto',
-    label: 'Area Crypto',
-    base: '/crypto',
+    id: 'usa',
+    label: 'USA',
+    base: '/usa',
     items: [
-      { label: 'Dashboard Crypto', to: '/crypto/dashboard', icon: LayoutDashboard },
-      { label: 'Scanner Crypto', to: '/crypto/scanner', icon: Radar },
-      { label: 'Ordini Crypto', to: '/crypto/ordini', icon: ClipboardList },
-      { label: 'Utili Crypto', to: '/crypto/utili', icon: BadgeEuro },
-      { label: 'Storico Crypto', to: '/crypto/diario', icon: BookOpen },
+      { label: 'Dashboard USA', to: '/usa/dashboard', icon: LayoutDashboard },
+      { label: 'Scanner USA', to: '/usa/scanner', icon: Radar },
+      { label: 'Ordini USA', to: '/usa/ordini', icon: ClipboardList },
+      { label: 'Utili USA', to: '/usa/utili', icon: BadgeEuro },
+      { label: 'Storico USA', to: '/usa/diario', icon: BookOpen },
+    ],
+  },
+  {
+    id: 'asia',
+    label: 'Asia',
+    base: '/asia',
+    items: [
+      { label: 'Dashboard Asia', to: '/asia/dashboard', icon: LayoutDashboard },
+      { label: 'Scanner Asia', to: '/asia/scanner', icon: Radar },
+      { label: 'Ordini Asia', to: '/asia/ordini', icon: ClipboardList },
+      { label: 'Utili Asia', to: '/asia/utili', icon: BadgeEuro },
+      { label: 'Storico Asia', to: '/asia/diario', icon: BookOpen },
     ],
   },
 ]
@@ -213,11 +225,14 @@ export default function MainLayout() {
   const { activeMarket } = useTrading()
   const location = useLocation()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-  const routeMarket = location.pathname.startsWith('/crypto')
-    ? 'crypto'
-    : location.pathname.startsWith('/azioni')
-      ? 'equities'
-      : activeMarket
+  const routeMarket = location.pathname.startsWith('/usa')
+    ? 'usa'
+    : location.pathname.startsWith('/asia')
+      ? 'asia'
+      : location.pathname.startsWith('/europa') ||
+          location.pathname.startsWith('/azioni')
+        ? 'equities'
+        : activeMarket
   const theme = getMarketTheme(routeMarket)
   const navigate = useNavigate()
   const styleVars = {

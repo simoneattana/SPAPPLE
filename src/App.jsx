@@ -74,62 +74,92 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<Navigate to="/azioni/dashboard" replace />} />
-        <Route path="dashboard" element={<Navigate to="/azioni/dashboard" replace />} />
-        <Route path="scanner" element={<Navigate to="/azioni/scanner" replace />} />
-        <Route path="portafoglio" element={<Navigate to="/azioni/scanner" replace />} />
-        <Route path="ordini" element={<Navigate to="/azioni/ordini" replace />} />
-        <Route path="utili" element={<Navigate to="/azioni/utili" replace />} />
-        <Route path="diario" element={<Navigate to="/azioni/diario" replace />} />
-        <Route path="storico" element={<Navigate to="/azioni/diario" replace />} />
+        <Route index element={<Navigate to="/europa/dashboard" replace />} />
+        <Route path="dashboard" element={<Navigate to="/europa/dashboard" replace />} />
+        <Route path="scanner" element={<Navigate to="/europa/scanner" replace />} />
+        <Route path="portafoglio" element={<Navigate to="/europa/scanner" replace />} />
+        <Route path="ordini" element={<Navigate to="/europa/ordini" replace />} />
+        <Route path="utili" element={<Navigate to="/europa/utili" replace />} />
+        <Route path="diario" element={<Navigate to="/europa/diario" replace />} />
+        <Route path="storico" element={<Navigate to="/europa/diario" replace />} />
+        <Route path="azioni/dashboard" element={<Navigate to="/europa/dashboard" replace />} />
+        <Route path="azioni/scanner" element={<Navigate to="/europa/scanner" replace />} />
+        <Route path="azioni/portafoglio" element={<Navigate to="/europa/scanner" replace />} />
+        <Route path="azioni/ordini" element={<Navigate to="/europa/ordini" replace />} />
+        <Route path="azioni/utili" element={<Navigate to="/europa/utili" replace />} />
+        <Route path="azioni/diario" element={<Navigate to="/europa/diario" replace />} />
+        <Route path="azioni/storico" element={<Navigate to="/europa/diario" replace />} />
         <Route
-          path="azioni/dashboard"
+          path="europa/dashboard"
           element={<MarketPage marketId="equities"><Dashboard /></MarketPage>}
         />
         <Route
-          path="azioni/scanner"
+          path="europa/scanner"
           element={<MarketPage marketId="equities"><Scanner /></MarketPage>}
         />
-        <Route path="azioni/portafoglio" element={<Navigate to="/azioni/scanner" replace />} />
+        <Route path="europa/portafoglio" element={<Navigate to="/europa/scanner" replace />} />
         <Route
-          path="azioni/ordini"
+          path="europa/ordini"
           element={<MarketPage marketId="equities"><Orders /></MarketPage>}
         />
         <Route
-          path="azioni/utili"
+          path="europa/utili"
           element={<MarketPage marketId="equities"><Profits /></MarketPage>}
         />
         <Route
-          path="azioni/diario"
+          path="europa/diario"
           element={<MarketPage marketId="equities"><Diary /></MarketPage>}
         />
-        <Route path="azioni/storico" element={<Navigate to="/azioni/diario" replace />} />
+        <Route path="europa/storico" element={<Navigate to="/europa/diario" replace />} />
         <Route
-          path="crypto/dashboard"
-          element={<MarketPage marketId="crypto"><Dashboard /></MarketPage>}
+          path="usa/dashboard"
+          element={<MarketPage marketId="usa"><Dashboard /></MarketPage>}
         />
         <Route
-          path="crypto/scanner"
-          element={<MarketPage marketId="crypto"><Scanner /></MarketPage>}
+          path="usa/scanner"
+          element={<MarketPage marketId="usa"><Scanner /></MarketPage>}
         />
-        <Route path="crypto/portafoglio" element={<Navigate to="/crypto/scanner" replace />} />
+        <Route path="usa/portafoglio" element={<Navigate to="/usa/scanner" replace />} />
         <Route
-          path="crypto/ordini"
-          element={<MarketPage marketId="crypto"><Orders /></MarketPage>}
-        />
-        <Route
-          path="crypto/utili"
-          element={<MarketPage marketId="crypto"><Profits /></MarketPage>}
+          path="usa/ordini"
+          element={<MarketPage marketId="usa"><Orders /></MarketPage>}
         />
         <Route
-          path="crypto/diario"
-          element={<MarketPage marketId="crypto"><Diary /></MarketPage>}
+          path="usa/utili"
+          element={<MarketPage marketId="usa"><Profits /></MarketPage>}
         />
-        <Route path="crypto/storico" element={<Navigate to="/crypto/diario" replace />} />
+        <Route
+          path="usa/diario"
+          element={<MarketPage marketId="usa"><Diary /></MarketPage>}
+        />
+        <Route path="usa/storico" element={<Navigate to="/usa/diario" replace />} />
+        <Route
+          path="asia/dashboard"
+          element={<MarketPage marketId="asia"><Dashboard /></MarketPage>}
+        />
+        <Route
+          path="asia/scanner"
+          element={<MarketPage marketId="asia"><Scanner /></MarketPage>}
+        />
+        <Route path="asia/portafoglio" element={<Navigate to="/asia/scanner" replace />} />
+        <Route
+          path="asia/ordini"
+          element={<MarketPage marketId="asia"><Orders /></MarketPage>}
+        />
+        <Route
+          path="asia/utili"
+          element={<MarketPage marketId="asia"><Profits /></MarketPage>}
+        />
+        <Route
+          path="asia/diario"
+          element={<MarketPage marketId="asia"><Diary /></MarketPage>}
+        />
+        <Route path="asia/storico" element={<Navigate to="/asia/diario" replace />} />
+        <Route path="crypto/*" element={<Navigate to="/usa/dashboard" replace />} />
         <Route path="spiegazione" element={<Explanation />} />
         <Route path="impostazioni" element={<Settings />} />
       </Route>
-      <Route path="*" element={<Navigate to="/azioni/dashboard" replace />} />
+      <Route path="*" element={<Navigate to="/europa/dashboard" replace />} />
     </Routes>
   )
 }
