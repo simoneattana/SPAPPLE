@@ -14,7 +14,6 @@ import {
   X,
 } from 'lucide-react'
 import { Button } from '../components/ui/Button'
-import { SystemSidebar } from '../components/SystemSidebar'
 import { useAuth } from '../services/useAuth'
 import { useTrading } from '../context/useTrading'
 import { getMarketTheme } from '../services/marketTheme'
@@ -191,7 +190,6 @@ function NavigationContent({ routeMarket, onNavigate }) {
         })}
       </div>
 
-      <SystemSidebar />
     </>
   )
 }
