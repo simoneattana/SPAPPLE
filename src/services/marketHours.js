@@ -19,6 +19,7 @@ const SESSION_GROUPS = {
       label: 'Europa',
       timezone: 'Europe/Rome',
       orderAcceptanceStart: { hour: 8, minute: 30 },
+      marketOpen: { hour: 9, minute: 0 },
       scanStart: { hour: 9, minute: 5 },
       blockNewEntries: { hour: 17, minute: 0 },
       riskReview: { hour: 17, minute: 10 },
@@ -32,6 +33,7 @@ const SESSION_GROUPS = {
       label: 'USA',
       timezone: 'America/New_York',
       orderAcceptanceStart: { hour: 9, minute: 0 },
+      marketOpen: { hour: 9, minute: 30 },
       scanStart: { hour: 9, minute: 35 },
       blockNewEntries: { hour: 15, minute: 30 },
       riskReview: { hour: 15, minute: 40 },
@@ -46,7 +48,18 @@ const SESSION_GROUPS = {
       timezone: 'Asia/Tokyo',
       tickerSuffixes: ['.TSE'],
       orderAcceptanceStart: { hour: 8, minute: 0 },
+      marketOpen: { hour: 9, minute: 0 },
       scanStart: { hour: 9, minute: 5 },
+      marketWindows: [
+        {
+          start: { hour: 9, minute: 0 },
+          end: { hour: 11, minute: 30 },
+        },
+        {
+          start: { hour: 12, minute: 30 },
+          end: { hour: 15, minute: 30 },
+        },
+      ],
       tradingWindows: [
         {
           start: { hour: 9, minute: 5 },
@@ -68,7 +81,18 @@ const SESSION_GROUPS = {
       timezone: 'Asia/Hong_Kong',
       tickerSuffixes: ['.HK'],
       orderAcceptanceStart: { hour: 9, minute: 0 },
+      marketOpen: { hour: 9, minute: 30 },
       scanStart: { hour: 9, minute: 35 },
+      marketWindows: [
+        {
+          start: { hour: 9, minute: 30 },
+          end: { hour: 12, minute: 0 },
+        },
+        {
+          start: { hour: 13, minute: 0 },
+          end: { hour: 16, minute: 8 },
+        },
+      ],
       tradingWindows: [
         {
           start: { hour: 9, minute: 35 },
@@ -230,6 +254,41 @@ function getSecondsUntilScanStart(session, date = new Date()) {
   return 24 * 3600 - currentSeconds + openingSeconds[0]
 }
 
+function getSessionMarketDisplayStatus(session, date = new Date()) {
+  const localTime = getTimeInTimezone(date, session.timezone)
+  const currentSeconds =
+    localTime.hour * 3600 + localTime.minute * 60 + localTime.second
+  const currentMinutes = localTime.hour * 60 + localTime.minute
+  const marketWindows = session.marketWindows || [
+    {
+      start: session.marketOpen || session.scanStart,
+      end: session.marketClose,
+    },
+  ]
+  const marketOpenSeconds = marketWindows
+    .map((window) => window.start.hour * 3600 + window.start.minute * 60)
+    .sort((left, right) => left - right)
+  const marketCloseMinutes = toMinutes(session.marketClose)
+  const isMarketOpen = marketWindows.some(
+    (window) =>
+      currentMinutes >= toMinutes(window.start) &&
+      currentMinutes < toMinutes(window.end),
+  )
+  const nextTodayOpening = marketOpenSeconds.find(
+    (openingSecond) => currentSeconds < openingSecond,
+  )
+  const secondsToOpen = Number.isFinite(nextTodayOpening)
+    ? nextTodayOpening - currentSeconds
+    : 24 * 3600 - currentSeconds + marketOpenSeconds[0]
+
+  return {
+    ...session,
+    isMarketOpen,
+    minutesToMarketClose: Math.max(0, marketCloseMinutes - currentMinutes),
+    secondsToOpen,
+  }
+}
+
 export function getMarketSessionStatus(strategy, date = new Date(), ticker = null) {
   const statuses = getSessions(strategy, ticker).map((session) =>
     getSessionStatus(session, date),
@@ -273,6 +332,45 @@ export function getMarketScanStartLabel(strategy) {
   return getSessions(strategy)
     .map((session) => `${session.label} ${formatTime(session.scanStart)}`)
     .join(' / ')
+}
+
+export function getMarketOpeningHoursLabel(strategy) {
+  return getSessions(strategy)
+    .map((session) => {
+      const windows = session.marketWindows || [
+        {
+          start: session.marketOpen || session.scanStart,
+          end: session.marketClose,
+        },
+      ]
+
+      return `${session.label} ${windows
+        .map((window) => `${formatTime(window.start)}-${formatTime(window.end)}`)
+        .join(' / ')}`
+    })
+    .join(' · ')
+}
+
+export function getMarketDisplayStatus(strategy, date = new Date(), ticker = null) {
+  const statuses = getSessions(strategy, ticker).map((session) =>
+    getSessionMarketDisplayStatus(session, date),
+  )
+  const openStatus = statuses.find((status) => status.isMarketOpen)
+  const preOpenStatus = statuses.find(
+    (status) => getSessionStatus(status, date).isPreOpen,
+  )
+  const selectedStatus = openStatus || preOpenStatus || statuses[0]
+  const secondsToOpen = Math.min(
+    ...statuses.map((status) => status.secondsToOpen),
+  )
+
+  return {
+    ...selectedStatus,
+    isAnyMarketOpen: Boolean(openStatus),
+    isAnyPreOpen: Boolean(preOpenStatus),
+    openingHoursLabel: getMarketOpeningHoursLabel(strategy),
+    secondsToOpen,
+  }
 }
 
 export function getNextMarketScanAt(strategy, from = new Date()) {

@@ -1,7 +1,9 @@
+import { useEffect, useState } from 'react'
 import {
   Activity,
   BadgeEuro,
   ChartNoAxesCombined,
+  Clock3,
   CircleSlash,
   PiggyBank,
   Radar,
@@ -20,6 +22,7 @@ import {
 } from '../components/ui/Table'
 import { useTrading } from '../context/useTrading'
 import { getMarketCopy } from '../services/marketCopy'
+import { getMarketDisplayStatus } from '../services/marketHours'
 import {
   calculateRealizedTotals,
   filterTradesByCurrentMonth,
@@ -59,6 +62,18 @@ function formatCurrency(value) {
 
 function formatDate(value) {
   return value ? dateTimeFormatter.format(new Date(value)) : 'N/D'
+}
+
+function formatDuration(seconds) {
+  const safeSeconds = Math.max(0, Math.floor(Number(seconds) || 0))
+  const hours = Math.floor(safeSeconds / 3600)
+  const minutes = Math.floor((safeSeconds % 3600) / 60)
+
+  if (hours > 0) {
+    return `${hours}h ${String(minutes).padStart(2, '0')}m`
+  }
+
+  return `${minutes}m ${String(safeSeconds % 60).padStart(2, '0')}s`
 }
 
 function getRecoveredCapital(trade, fallbackSlotSize) {
@@ -215,8 +230,53 @@ function StatusChip({ children, variant = 'default', icon: Icon }) {
   )
 }
 
+function MarketStatusBanner({ status }) {
+  const isOpen = status.isAnyMarketOpen
+  const isPreOpen = !isOpen && status.isAnyPreOpen
+  const title = isOpen
+    ? 'Mercato aperto'
+    : isPreOpen
+      ? 'Mercato in pre-apertura'
+      : 'Mercato chiuso'
+  const countdown = isOpen
+    ? `Mancano ${formatDuration(
+        Number(status.minutesToMarketClose || 0) * 60,
+      )} alla chiusura`
+    : `Mancano ${formatDuration(status.secondsToOpen)} all’apertura`
+  const colorClass = isOpen
+    ? 'border-[var(--market-accent-border)] bg-[var(--market-accent-soft)] text-[var(--market-accent)]'
+    : isPreOpen
+      ? 'border-amber-400/35 bg-amber-400/10 text-amber-200'
+      : 'border-[#ef8f8f]/35 bg-[#ef8f8f]/10 text-[#ef8f8f]'
+
+  return (
+    <div className={`mt-4 rounded-lg border p-4 ${colorClass}`}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-current/30 bg-black/20">
+            <Clock3 className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="text-lg font-semibold leading-tight text-white">
+              {title}
+            </p>
+            <p className="mt-1 text-sm leading-6 text-slate-300">
+              Orari di apertura: {status.openingHoursLabel}
+            </p>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-current/25 bg-black/25 px-4 py-3">
+          <p className="text-sm font-semibold text-white">{countdown}</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function Dashboard({ marketId }) {
   const { activeMarket, markets } = useTrading()
+  const [now, setNow] = useState(() => Date.now())
   const effectiveMarket = marketId || activeMarket
   const currentStrategy = getTradingStrategy(effectiveMarket)
   const routeMarketState = markets?.[effectiveMarket] || {}
@@ -270,6 +330,10 @@ export default function Dashboard({ marketId }) {
   const strategyStats = calculateStrategyStats(history)
   const currentMonthStats = calculateRealizedTotals(currentMonthTrades)
   const todayStats = calculateRealizedTotals(todayClosedTrades)
+  const marketDisplayStatus = getMarketDisplayStatus(
+    currentStrategy,
+    new Date(now),
+  )
   const expectancyColor =
     strategyStats.expectancy >= 0 ? 'text-[var(--market-accent)]' : 'text-[#ef8f8f]'
   const kpis = [
@@ -288,6 +352,14 @@ export default function Dashboard({ marketId }) {
       accent: 'text-white',
     },
   ]
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNow(Date.now())
+    }, 1000)
+
+    return () => window.clearInterval(timer)
+  }, [])
 
   return (
     <div className="flex flex-1 flex-col gap-5">
@@ -325,6 +397,8 @@ export default function Dashboard({ marketId }) {
             </StatusChip>
           </div>
         </div>
+
+        <MarketStatusBanner status={marketDisplayStatus} />
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <MiniMetric
