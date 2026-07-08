@@ -28,6 +28,7 @@ import {
   formatFxRate,
 } from '../services/currency'
 import { getMarketCopy } from '../services/marketCopy'
+import { getMarketDisplayStatus } from '../services/marketHours'
 import { getTradingStrategy } from '../strategies'
 import {
   MAX_AUTO_ATR_PCT,
@@ -458,6 +459,7 @@ export default function Scanner({ marketId }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [closingId, setClosingId] = useState(null)
+  const [now, setNow] = useState(() => Date.now())
   const [searchParams, setSearchParams] = useSearchParams()
   const autoScanStarted = useRef(false)
   const scanTokenRef = useRef(0)
@@ -637,6 +639,14 @@ export default function Scanner({ marketId }) {
   useEffect(() => {
     autoScanStarted.current = false
   }, [effectiveMarket])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNow(Date.now())
+    }, 1000)
+
+    return () => window.clearInterval(timer)
+  }, [])
 
   useEffect(() => {
     if (!isUnifiedScanner || requestedMarketIsValid) {
@@ -973,6 +983,11 @@ export default function Scanner({ marketId }) {
               {SCANNER_MARKET_FILTERS.map((item) => {
                 const active = item.id === effectiveMarket
                 const marketState = markets?.[item.id] || {}
+                const marketStatus = getMarketDisplayStatus(
+                  getTradingStrategy(item.id),
+                  new Date(now),
+                )
+                const marketIsOpen = marketStatus.isAnyMarketOpen
                 const openPositions = Array.isArray(marketState.positions)
                   ? marketState.positions.length
                   : 0
@@ -990,7 +1005,18 @@ export default function Scanner({ marketId }) {
                     }
                     onClick={() => handleMarketFilterChange(item.id)}
                   >
-                    <span className="font-semibold">{item.label}</span>
+                    <span>
+                      <span className="block font-semibold">{item.label}</span>
+                      <span
+                        className={
+                          marketIsOpen
+                            ? 'mt-1 block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--market-accent)]'
+                            : 'mt-1 block text-xs font-semibold uppercase tracking-[0.12em] text-[#ef8f8f]'
+                        }
+                      >
+                        {marketIsOpen ? 'Aperto' : 'Chiuso'}
+                      </span>
+                    </span>
                     <span className="rounded-md border border-current/20 bg-black/20 px-2 py-1 text-xs opacity-80">
                       {openPositions} pos. · {signalCount} segn.
                     </span>
