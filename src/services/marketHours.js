@@ -18,6 +18,7 @@ const SESSION_GROUPS = {
       id: 'europe',
       label: 'Europa',
       timezone: 'Europe/Rome',
+      orderAcceptanceStart: { hour: 8, minute: 30 },
       scanStart: { hour: 9, minute: 5 },
       blockNewEntries: { hour: 17, minute: 0 },
       riskReview: { hour: 17, minute: 10 },
@@ -30,6 +31,7 @@ const SESSION_GROUPS = {
       id: 'usa',
       label: 'USA',
       timezone: 'America/New_York',
+      orderAcceptanceStart: { hour: 9, minute: 0 },
       scanStart: { hour: 9, minute: 35 },
       blockNewEntries: { hour: 15, minute: 30 },
       riskReview: { hour: 15, minute: 40 },
@@ -43,7 +45,18 @@ const SESSION_GROUPS = {
       label: 'Tokyo',
       timezone: 'Asia/Tokyo',
       tickerSuffixes: ['.TSE'],
+      orderAcceptanceStart: { hour: 8, minute: 0 },
       scanStart: { hour: 9, minute: 5 },
+      tradingWindows: [
+        {
+          start: { hour: 9, minute: 5 },
+          end: { hour: 11, minute: 30 },
+        },
+        {
+          start: { hour: 12, minute: 30 },
+          end: { hour: 15, minute: 0 },
+        },
+      ],
       blockNewEntries: { hour: 15, minute: 0 },
       riskReview: { hour: 15, minute: 10 },
       protectiveClose: { hour: 15, minute: 20 },
@@ -54,7 +67,18 @@ const SESSION_GROUPS = {
       label: 'Hong Kong',
       timezone: 'Asia/Hong_Kong',
       tickerSuffixes: ['.HK'],
+      orderAcceptanceStart: { hour: 9, minute: 0 },
       scanStart: { hour: 9, minute: 35 },
+      tradingWindows: [
+        {
+          start: { hour: 9, minute: 35 },
+          end: { hour: 12, minute: 0 },
+        },
+        {
+          start: { hour: 13, minute: 0 },
+          end: { hour: 15, minute: 30 },
+        },
+      ],
       blockNewEntries: { hour: 15, minute: 30 },
       riskReview: { hour: 15, minute: 45 },
       protectiveClose: { hour: 16, minute: 0 },
@@ -109,6 +133,9 @@ function getSessions(strategy, ticker = null) {
 function getSessionStatus(session, date = new Date()) {
   const localTime = getTimeInTimezone(date, session.timezone)
   const currentMinutes = localTime.hour * 60 + localTime.minute
+  const orderAcceptanceStartMinutes = session.orderAcceptanceStart
+    ? toMinutes(session.orderAcceptanceStart)
+    : toMinutes(session.scanStart)
   const scanStartMinutes = toMinutes(session.scanStart)
   const blockMinutes = toMinutes(session.blockNewEntries)
   const riskReviewMinutes = toMinutes(session.riskReview)
@@ -130,16 +157,37 @@ function getSessionStatus(session, date = new Date()) {
     }
   }
 
+  const tradingWindows = session.tradingWindows || [
+    {
+      start: session.scanStart,
+      end: session.blockNewEntries,
+    },
+  ]
+  const isInTradingWindow = tradingWindows.some(
+    (window) =>
+      currentMinutes >= toMinutes(window.start) &&
+      currentMinutes < toMinutes(window.end),
+  )
+  const isPreOpen =
+    currentMinutes >= orderAcceptanceStartMinutes &&
+    currentMinutes < scanStartMinutes
+
   return {
     ...session,
     currentMinutes,
+    orderAcceptanceStartLabel: session.orderAcceptanceStart
+      ? formatTime(session.orderAcceptanceStart)
+      : formatTime(session.scanStart),
     scanStartLabel: formatTime(session.scanStart),
     blockNewEntriesLabel: formatTime(session.blockNewEntries),
     riskReviewLabel: formatTime(session.riskReview),
     protectiveCloseLabel: formatTime(session.protectiveClose),
     marketCloseLabel: formatTime(session.marketClose),
     isOpenForScan:
-      currentMinutes >= scanStartMinutes && currentMinutes < blockMinutes,
+      currentMinutes >= scanStartMinutes &&
+      currentMinutes < blockMinutes &&
+      isInTradingWindow,
+    isPreOpen,
     newEntriesBlocked:
       currentMinutes < scanStartMinutes || currentMinutes >= blockMinutes,
     riskReviewActive:
@@ -157,16 +205,29 @@ function getSecondsUntilScanStart(session, date = new Date()) {
   const localTime = getTimeInTimezone(date, session.timezone)
   const currentSeconds =
     localTime.hour * 3600 + localTime.minute * 60 + localTime.second
-  const scanStartSeconds =
-    session.scanStart.hour * 3600 + session.scanStart.minute * 60
+  const tradingWindows = session.tradingWindows || [
+    {
+      start: session.scanStart,
+      end: session.blockNewEntries,
+    },
+  ]
+  const openingSeconds = tradingWindows
+    .map((window) => window.start.hour * 3600 + window.start.minute * 60)
+    .sort((left, right) => left - right)
 
   if (!Number.isFinite(currentSeconds)) {
     return MARKET_SCAN_INTERVAL_MS / 1000
   }
 
-  return currentSeconds < scanStartSeconds
-    ? scanStartSeconds - currentSeconds
-    : 24 * 3600 - currentSeconds + scanStartSeconds
+  const nextTodayOpening = openingSeconds.find(
+    (openingSecond) => currentSeconds < openingSecond,
+  )
+
+  if (Number.isFinite(nextTodayOpening)) {
+    return nextTodayOpening - currentSeconds
+  }
+
+  return 24 * 3600 - currentSeconds + openingSeconds[0]
 }
 
 export function getMarketSessionStatus(strategy, date = new Date(), ticker = null) {
@@ -174,7 +235,12 @@ export function getMarketSessionStatus(strategy, date = new Date(), ticker = nul
     getSessionStatus(session, date),
   )
 
-  return statuses.find((status) => status.riskReviewActive) || statuses[0]
+  return (
+    statuses.find((status) => status.isOpenForScan) ||
+    statuses.find((status) => status.riskReviewActive) ||
+    statuses.find((status) => status.isPreOpen) ||
+    statuses[0]
+  )
 }
 
 export function isMarketCloseGuardActive(strategy, date = new Date(), ticker = null) {
@@ -186,6 +252,12 @@ export function isMarketCloseGuardActive(strategy, date = new Date(), ticker = n
 export function isMarketScanBlocked(strategy, date = new Date(), ticker = null) {
   return !getSessions(strategy, ticker).some(
     (session) => getSessionStatus(session, date).isOpenForScan,
+  )
+}
+
+export function isMarketPreOpen(strategy, date = new Date(), ticker = null) {
+  return getSessions(strategy, ticker).some(
+    (session) => getSessionStatus(session, date).isPreOpen,
   )
 }
 

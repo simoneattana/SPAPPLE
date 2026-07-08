@@ -15,6 +15,7 @@ import {
   getMarketScanStartLabel,
   getNextMarketScanAt,
   isMarketCloseGuardActive,
+  isMarketPreOpen,
   isMarketScanBlocked,
 } from '../services/marketHours'
 import { getTradingStrategy } from '../strategies'
@@ -66,6 +67,7 @@ function formatDuration(totalSeconds) {
 function getMarketOperatingWindowStatus(strategy, now = new Date()) {
   const scanBlocked = isMarketScanBlocked(strategy, now)
   const closeGuardActive = isMarketCloseGuardActive(strategy, now)
+  const preOpen = isMarketPreOpen(strategy, now)
   const nextScanAt = getNextMarketScanAt(strategy, now)
   const secondsUntilNextScan = Math.ceil((nextScanAt.getTime() - now.getTime()) / 1000)
 
@@ -78,6 +80,18 @@ function getMarketOperatingWindowStatus(strategy, now = new Date()) {
       countdownLabel: 'Ripartenza',
       countdown: formatDuration(secondsUntilNextScan),
       badge: 'Protezione',
+    }
+  }
+
+  if (preOpen) {
+    return {
+      isStopped: true,
+      title: `Pre-apertura: attendo ${getMarketScanStartLabel(strategy)}`,
+      detail:
+        'Il mercato può accettare ordini, ma Spapple apre solo quando parte la negoziazione reale e i prezzi sono più affidabili.',
+      countdownLabel: 'Partenza operativa',
+      countdown: formatDuration(secondsUntilNextScan),
+      badge: 'Pre-apertura',
     }
   }
 

@@ -10,6 +10,7 @@ import { getMarketCopy } from '../services/marketCopy'
 import {
   getMarketCloseGuardLabel,
   isMarketCloseGuardActive,
+  isMarketPreOpen,
   isMarketScanBlocked,
 } from '../services/marketHours'
 import { getTradingStrategy } from '../strategies'
@@ -129,6 +130,7 @@ export function MarketCountdownPanel({ marketId }) {
   const nextLiveCheckAt = marketState.nextLiveCheckAt || null
   const nextScanAt = marketState.nextScanAt || null
   const scanBlocked = isMarketScanBlocked(strategy)
+  const preOpen = isMarketPreOpen(strategy)
   const closeGuardActive = isMarketCloseGuardActive(strategy)
   const scanSummary = getScanSummary({
     lastScanAt,
@@ -164,7 +166,9 @@ export function MarketCountdownPanel({ marketId }) {
       <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <CountdownMetric
           detail={
-            scanBlocked
+            preOpen
+              ? 'Pre-apertura: attendo prezzi di negoziazione reali.'
+              : scanBlocked
               ? 'Nuove aperture bloccate fuori finestra operativa.'
               : 'Aggiorna dati esterni, RSI, ATR e segnali.'
           }
