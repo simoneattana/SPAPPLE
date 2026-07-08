@@ -33,6 +33,8 @@ import {
   MAX_AUTO_ATR_PCT,
   getAtrPct,
   getAutoScore,
+  getEquitySignalThresholds,
+  getEquitySignalType,
   isActionableResult,
   isAutoEligibleResult,
   isRejectedResult,
@@ -249,11 +251,13 @@ function calculatePositionPnlPct(position, pnl) {
 }
 
 function StrategyBadge({ rsi }) {
-  if (rsi < 30) {
+  const thresholds = getEquitySignalThresholds({ rsi })
+
+  if (rsi < thresholds.long) {
     return <Badge variant="positive">LONG / RIALZO</Badge>
   }
 
-  if (rsi > 70) {
+  if (rsi > thresholds.short) {
     return <Badge variant="negative">SHORT / RIBASSO</Badge>
   }
 
@@ -261,15 +265,7 @@ function StrategyBadge({ rsi }) {
 }
 
 function getRowTradeType(row) {
-  if (row.rsi < 30) {
-    return 'LONG'
-  }
-
-  if (row.rsi > 70) {
-    return 'SHORT'
-  }
-
-  return null
+  return getEquitySignalType(row)
 }
 
 function StrategyCell({ row, marketCopy }) {
@@ -291,6 +287,7 @@ function StrategyCell({ row, marketCopy }) {
 
 function ReasonCell({ row }) {
   const assetLabel = 'titolo'
+  const thresholds = getEquitySignalThresholds(row)
 
   if (row.status !== 'ok') {
     return (
@@ -300,16 +297,16 @@ function ReasonCell({ row }) {
     )
   }
 
-  if (row.rsi < 30) {
+  if (row.rsi < thresholds.long) {
     return (
       <p className="min-w-56 text-sm leading-6 text-slate-400">
-        RSI sotto 30: l’{assetLabel} risulta molto venduto e il sistema cerca
-        un possibile rimbalzo.
+        RSI sotto {thresholds.long}: l’{assetLabel} risulta molto venduto e il
+        sistema cerca un possibile rimbalzo.
       </p>
     )
   }
 
-  if (row.rsi <= 70) {
+  if (row.rsi <= thresholds.short) {
     return (
       <p className="min-w-56 text-sm leading-6 text-slate-400">
         {row.reason || 'RSI in zona neutrale: nessun segnale operativo.'}
@@ -319,8 +316,8 @@ function ReasonCell({ row }) {
 
   return (
     <p className="min-w-56 text-sm leading-6 text-slate-400">
-      RSI sopra 70: l’{assetLabel} risulta molto comprato e il sistema cerca una
-      possibile discesa.
+      RSI sopra {thresholds.short}: l’{assetLabel} risulta molto comprato e il
+      sistema cerca una possibile discesa.
     </p>
   )
 }
@@ -371,7 +368,8 @@ function TechnicalTooltip({ row }) {
 
 function AutoRuleCell({ row }) {
   const atrPct = getAtrPct(row)
-  const maxAtrPct = MAX_AUTO_ATR_PCT
+  const thresholds = getEquitySignalThresholds(row)
+  const maxAtrPct = thresholds.maxAtrPct || MAX_AUTO_ATR_PCT
   const eligible = isAutoEligibleResult(row)
   const score = getAutoScore(row)
 
@@ -380,7 +378,8 @@ function AutoRuleCell({ row }) {
       <div className="min-w-52">
         <Badge variant="positive">AUTO OK</Badge>
         <p className="mt-2 text-xs leading-5 text-slate-500">
-          RSI forte e ATR sotto {maxAtrPct}%. Priorità: {formatNumber(score)}
+          RSI forte ({thresholds.autoLong}/{thresholds.autoShort}) e ATR sotto{' '}
+          {maxAtrPct}%. Priorità: {formatNumber(score)}
         </p>
       </div>
     )

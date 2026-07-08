@@ -16,6 +16,7 @@ import {
   sortByCryptoAutoScore,
 } from '../services/cryptoRules'
 import {
+  getEquitySignalType,
   isActionableResult,
   isAutoEligibleResult,
   sortByAutoScore,
@@ -1337,15 +1338,7 @@ function getSignalType(row, strategy) {
     return getCryptoSignalType(row)
   }
 
-  if (row.rsi < 30) {
-    return 'LONG'
-  }
-
-  if (row.rsi > 70) {
-    return 'SHORT'
-  }
-
-  return null
+  return getEquitySignalType(row)
 }
 
 function evaluatePositions(

@@ -1,9 +1,61 @@
+export const DEFAULT_LONG_RSI_LIMIT = 30
+export const DEFAULT_SHORT_RSI_LIMIT = 70
 export const AUTO_LONG_RSI_LIMIT = 28
 export const AUTO_SHORT_RSI_LIMIT = 72
 export const MAX_AUTO_ATR_PCT = 6
 
+export const ASIA_LONG_RSI_LIMIT = 35
+export const ASIA_SHORT_RSI_LIMIT = 65
+export const ASIA_AUTO_LONG_RSI_LIMIT = 32
+export const ASIA_AUTO_SHORT_RSI_LIMIT = 68
+
+function getTickerFromRow(rowOrTicker) {
+  if (typeof rowOrTicker === 'string') {
+    return rowOrTicker
+  }
+
+  return rowOrTicker?.ticker || ''
+}
+
+export function getEquitySignalThresholds(rowOrTicker) {
+  const ticker = getTickerFromRow(rowOrTicker).toUpperCase()
+  const isAsiaTicker = ticker.endsWith('.TSE') || ticker.endsWith('.HK')
+
+  if (isAsiaTicker) {
+    return {
+      long: ASIA_LONG_RSI_LIMIT,
+      short: ASIA_SHORT_RSI_LIMIT,
+      autoLong: ASIA_AUTO_LONG_RSI_LIMIT,
+      autoShort: ASIA_AUTO_SHORT_RSI_LIMIT,
+      maxAtrPct: MAX_AUTO_ATR_PCT,
+    }
+  }
+
+  return {
+    long: DEFAULT_LONG_RSI_LIMIT,
+    short: DEFAULT_SHORT_RSI_LIMIT,
+    autoLong: AUTO_LONG_RSI_LIMIT,
+    autoShort: AUTO_SHORT_RSI_LIMIT,
+    maxAtrPct: MAX_AUTO_ATR_PCT,
+  }
+}
+
+export function getEquitySignalType(row) {
+  const thresholds = getEquitySignalThresholds(row)
+
+  if (row.rsi < thresholds.long) {
+    return 'LONG'
+  }
+
+  if (row.rsi > thresholds.short) {
+    return 'SHORT'
+  }
+
+  return null
+}
+
 export function isActionableResult(row) {
-  return row.status === 'ok' && row.pe > 0 && (row.rsi < 30 || row.rsi > 70)
+  return row.status === 'ok' && row.pe > 0 && Boolean(getEquitySignalType(row))
 }
 
 export function getAtrPct(row) {
@@ -15,7 +67,11 @@ export function getAtrPct(row) {
 }
 
 export function getAutoScore(row) {
-  const rsiDistance = row.rsi < 30 ? 30 - row.rsi : row.rsi - 70
+  const thresholds = getEquitySignalThresholds(row)
+  const rsiDistance =
+    row.rsi < thresholds.long
+      ? thresholds.long - row.rsi
+      : row.rsi - thresholds.short
   const atrPct = getAtrPct(row) || 0
 
   return rsiDistance * 10 - atrPct
@@ -27,10 +83,15 @@ export function isAutoEligibleResult(row) {
   }
 
   const atrPct = getAtrPct(row)
+  const thresholds = getEquitySignalThresholds(row)
   const hasStrongRsi =
-    row.rsi <= AUTO_LONG_RSI_LIMIT || row.rsi >= AUTO_SHORT_RSI_LIMIT
+    row.rsi <= thresholds.autoLong || row.rsi >= thresholds.autoShort
 
-  return hasStrongRsi && Number.isFinite(atrPct) && atrPct <= MAX_AUTO_ATR_PCT
+  return (
+    hasStrongRsi &&
+    Number.isFinite(atrPct) &&
+    atrPct <= thresholds.maxAtrPct
+  )
 }
 
 export function sortByAutoScore(rows) {

@@ -25,8 +25,8 @@ export const asiaStrategy = {
   },
   rules: {
     profitabilityFilter: 'P/E positivo',
-    signalFilter: 'RSI sotto 30 o sopra 70',
-    volatilityFilter: 'ATR massimo per pilota automatico',
+    signalFilter: 'RSI sotto 35 o sopra 65',
+    volatilityFilter: 'Pilota automatico solo con RSI sotto 32 o sopra 68 e ATR controllato',
     currencyPolicy: 'Prezzi in valuta locale con controvalore EUR da EODHD Forex',
   },
 }

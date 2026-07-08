@@ -9,6 +9,10 @@ import {
 import { getTickerCurrency } from './marketUniverse'
 import { mergeTickerProfile } from './tickerMetadata'
 import {
+  getEquitySignalThresholds,
+  getEquitySignalType,
+} from './tradingRules'
+import {
   US_MARKET_CONTEXT_SYMBOL,
   buildUsMarketContextFromHistory,
   createUnavailableUsMarketContext,
@@ -226,19 +230,22 @@ function getDiagnostic(row) {
     return row.reason || 'Dati non disponibili'
   }
 
+  const thresholds = getEquitySignalThresholds(row)
+  const signalType = getEquitySignalType(row)
+
   if (row.pe <= 0) {
     return 'Scartato: P/E assente, nullo o negativo'
   }
 
-  if (row.rsi >= 30 && row.rsi <= 70) {
-    return 'Scartato: RSI in zona neutrale'
+  if (!signalType) {
+    return `Scartato: RSI in zona neutrale (${thresholds.long}-${thresholds.short})`
   }
 
-  if (row.rsi < 30) {
-    return 'Ammesso: società profittevole e RSI sotto 30'
+  if (signalType === 'LONG') {
+    return `Ammesso: società profittevole e RSI sotto ${thresholds.long}`
   }
 
-  return 'Ammesso: società profittevole e RSI sopra 70'
+  return `Ammesso: società profittevole e RSI sopra ${thresholds.short}`
 }
 
 function calculateIndicators(history, ticker) {

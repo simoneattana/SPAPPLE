@@ -124,7 +124,7 @@ const marketCopies = {
       {
         term: 'RSI',
         description:
-          'Indicatore di temperatura: sotto 30 segnala possibile rimbalzo, sopra 70 possibile eccesso.',
+          'Indicatore di temperatura: su Tokyo e Hong Kong sotto 35 segnala possibile rimbalzo, sopra 65 possibile eccesso. Il pilota automatico resta più selettivo.',
       },
       {
         term: 'ATR',
