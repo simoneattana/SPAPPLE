@@ -460,6 +460,25 @@ export function getPreCloseProtectionDecision({
   sessionStatus,
 }) {
   if (!sessionStatus?.riskReviewActive) {
+    const currentMinutes = Number(sessionStatus?.currentMinutes)
+    const marketCloseMinutes = sessionStatus?.marketClose
+      ? toMinutes(sessionStatus.marketClose)
+      : null
+    const isAfterMarketClose =
+      Number.isFinite(currentMinutes) &&
+      Number.isFinite(marketCloseMinutes) &&
+      currentMinutes >= marketCloseMinutes
+
+    if (isAfterMarketClose) {
+      return {
+        shouldClose: true,
+        exitReason: 'SESSION_PROTECTION',
+        riskScore: 100,
+        message:
+          'Seduta chiusa o fuori finestra operativa: posizione residua liquidata.',
+      }
+    }
+
     return {
       shouldClose: false,
       exitReason: null,
@@ -480,6 +499,16 @@ export function getPreCloseProtectionDecision({
     sessionStatus,
   })
   const minutesToClose = Number(sessionStatus.minutesToClose)
+
+  if (sessionStatus.protectiveCloseActive) {
+    return {
+      shouldClose: true,
+      exitReason: 'SESSION_PROTECTION',
+      riskScore: Math.max(riskScore, 100),
+      message:
+        'Finestra finale della seduta attiva: posizione liquidata per evitare esposizione overnight.',
+    }
+  }
 
   if (pnlPct >= 0.05) {
     return {
