@@ -3,6 +3,7 @@ import { ClipboardList, PlugZap } from 'lucide-react'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card'
+import { InfoTip } from '../components/ui/InfoTip'
 import {
   Table,
   TableBody,
@@ -90,6 +91,28 @@ function orderVariant(order) {
   }
 
   return 'default'
+}
+
+function OrderCostTip({ order }) {
+  const costs = order.executionCosts
+
+  if (!costs) {
+    return null
+  }
+
+  return (
+    <InfoTip label="Dettaglio costi ordine">
+      <div className="space-y-2">
+        <p className="font-semibold text-white">Prezzo eseguito realistico</p>
+        <p>Prezzo segnale: {costs.marketPrice}</p>
+        <p>Prezzo eseguito: {costs.effectivePrice}</p>
+        <p>Spread: {formatCurrency(costs.spreadEur)}</p>
+        <p>Slippage: {formatCurrency(costs.slippageEur)}</p>
+        <p>Commissione broker: {formatCurrency(costs.commissionEur)}</p>
+        <p className="text-slate-500">{costs.commissionNote}</p>
+      </div>
+    </InfoTip>
+  )
 }
 
 export default function Orders({ marketId }) {
@@ -257,7 +280,12 @@ export default function Orders({ marketId }) {
                       ) : null}
                     </div>
                   </TableCell>
-                  <TableCell>{formatCurrency(order.executedPrice)}</TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <span>{formatNumber(order.executedPrice)}</span>
+                      <OrderCostTip order={order} />
+                    </div>
+                  </TableCell>
                   <TableCell>{formatNumber(order.quantity)}</TableCell>
                   <TableCell>{formatCurrency(order.notional)}</TableCell>
                   <TableCell>

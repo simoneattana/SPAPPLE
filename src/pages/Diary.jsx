@@ -13,6 +13,7 @@ import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card'
 import { Input } from '../components/ui/Input'
+import { InfoTip } from '../components/ui/InfoTip'
 import {
   Table,
   TableBody,
@@ -104,6 +105,45 @@ function formatCurrency(value) {
   return Number.isFinite(Number(value))
     ? currencyFormatter.format(Number(value))
     : 'N/D'
+}
+
+function TradeCostTip({ trade }) {
+  const openCosts = trade.executionCosts?.open
+  const closeCosts = trade.executionCosts?.close
+
+  if (!openCosts && !closeCosts && !Number.isFinite(Number(trade.totalCostsEur))) {
+    return null
+  }
+
+  return (
+    <InfoTip label="Dettaglio costi operazione">
+      <div className="space-y-2">
+        <p className="font-semibold text-white">P/L netto dopo costi</p>
+        <p>P/L lordo: {formatCurrency(trade.grossPnlEur ?? trade.pnlEur)}</p>
+        <p>Costi totali: {formatCurrency(trade.totalCostsEur || 0)}</p>
+        {openCosts ? (
+          <div>
+            <p className="text-slate-400">Apertura</p>
+            <p>Segnale: {openCosts.marketPrice}</p>
+            <p>Eseguito: {openCosts.effectivePrice}</p>
+            <p>Spread: {formatCurrency(openCosts.spreadEur)}</p>
+            <p>Slippage: {formatCurrency(openCosts.slippageEur)}</p>
+            <p>Commissione: {formatCurrency(openCosts.commissionEur)}</p>
+          </div>
+        ) : null}
+        {closeCosts ? (
+          <div>
+            <p className="text-slate-400">Chiusura</p>
+            <p>Segnale: {closeCosts.marketPrice}</p>
+            <p>Eseguito: {closeCosts.effectivePrice}</p>
+            <p>Spread: {formatCurrency(closeCosts.spreadEur)}</p>
+            <p>Slippage: {formatCurrency(closeCosts.slippageEur)}</p>
+            <p>Commissione: {formatCurrency(closeCosts.commissionEur)}</p>
+          </div>
+        ) : null}
+      </div>
+    </InfoTip>
+  )
 }
 
 function calculateRealizedTotals(history = []) {
@@ -542,7 +582,10 @@ export default function Diary({ marketId }) {
                     {exitReasonLabel(trade.exitReason)}
                   </TableCell>
                   <TableCell className={resultTextColor(trade.result)}>
-                    {formatCurrency(trade.pnlEur)}
+                    <div className="flex items-center gap-2">
+                      <span>{formatCurrency(trade.pnlEur)}</span>
+                      <TradeCostTip trade={trade} />
+                    </div>
                   </TableCell>
                   <TableCell>
                     <ResultBadge result={trade.result} />

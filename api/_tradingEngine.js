@@ -34,6 +34,10 @@ import {
   canOpenPosition,
 } from '../src/services/positionSizing.js'
 import {
+  applyExecutionCosts,
+  getPositionOpenCommissionEur,
+} from '../src/services/executionCosts.js'
+import {
   getEodhdSymbol,
   getYahooSymbol,
   shouldUseEodhdForTicker,
@@ -319,6 +323,8 @@ function compactOrder(order) {
     executedPriceEur: Number.isFinite(Number(order.executedPriceEur))
       ? roundPrice(Number(order.executedPriceEur))
       : null,
+    executionCosts: order.executionCosts || null,
+    fee: Number.isFinite(Number(order.fee)) ? roundPrice(Number(order.fee)) : null,
     reason: order.reason || null,
     dataQuality: order.dataQuality || null,
     createdAt: order.createdAt || order.executedAt || new Date().toISOString(),
@@ -389,8 +395,9 @@ function calculateNetPnlFromHistory(history = []) {
 function calculateInvestedInPositions(positions = []) {
   return positions.reduce((total, position) => {
     const invested = Number(position?.invested)
+    const openCommission = getPositionOpenCommissionEur(position)
 
-    return Number.isFinite(invested) ? total + invested : total
+    return Number.isFinite(invested) ? total + invested + openCommission : total
   }, 0)
 }
 
@@ -982,6 +989,9 @@ function createSimulationOrder({
   action,
   direction,
   executedPrice = null,
+  executedPriceEur = null,
+  executionCosts = null,
+  fee = 0,
   marketId,
   marketLabel,
   notional = 0,
@@ -1027,7 +1037,11 @@ function createSimulationOrder({
     executedPrice: Number.isFinite(Number(executedPrice))
       ? roundPrice(Number(executedPrice))
       : null,
-    fee: 0,
+    executedPriceEur: Number.isFinite(Number(executedPriceEur))
+      ? roundPrice(Number(executedPriceEur))
+      : null,
+    executionCosts,
+    fee,
     slippagePct: 0,
     reason,
     createdAt: now,
@@ -1843,7 +1857,22 @@ function buildTrade(row, invested, strategy = getTradingStrategy(), order = null
     Number.isFinite(Number(row.fxToEur)) && Number(row.fxToEur) > 0
       ? Number(row.fxToEur)
       : 1
-  const entryPriceEur = Number(row.currentPriceEur) || convertToEur(row.currentPrice, entryFxToEur)
+  const openExecutionCosts = applyExecutionCosts({
+    atr: row.atr,
+    currency,
+    fxToEur: entryFxToEur,
+    marketId: strategy.id,
+    notionalEur: invested,
+    phase: 'OPEN',
+    price: row.currentPrice,
+    type,
+  })
+  const entryPrice = openExecutionCosts.effectivePrice
+  const entryPriceEur =
+    Number(openExecutionCosts.effectivePriceEur) ||
+    convertToEur(entryPrice, entryFxToEur)
+  const entrySignalPriceEur =
+    Number(row.currentPriceEur) || convertToEur(row.currentPrice, entryFxToEur)
   const atrAtEntryEur = Number(row.atrEur) || convertToEur(row.atr, entryFxToEur)
   const quantity = roundQuantity(invested / entryPriceEur)
 
@@ -1859,33 +1888,38 @@ function buildTrade(row, invested, strategy = getTradingStrategy(), order = null
     currency,
     entryFxToEur,
     entryPriceEur: roundPrice(entryPriceEur),
+    entrySignalPrice: roundPrice(row.currentPrice),
+    entrySignalPriceEur: roundPrice(entrySignalPriceEur),
     atrAtEntryEur: roundPrice(atrAtEntryEur),
     fxPair: row.fxPair || null,
     fxProvider: row.fxProvider || null,
-    entryPrice: roundPrice(row.currentPrice),
+    entryPrice: roundPrice(entryPrice),
+    executionCosts: {
+      open: openExecutionCosts,
+    },
     atrAtEntry: roundPrice(row.atr),
     takeProfit: roundPrice(
       long
-        ? row.currentPrice * (1 + targetPct / 100)
-        : row.currentPrice * (1 - targetPct / 100),
+        ? entryPrice * (1 + targetPct / 100)
+        : entryPrice * (1 - targetPct / 100),
     ),
     finalTakeProfit: roundPrice(
       long
-        ? row.currentPrice * (1 + maxTargetPct / 100)
-        : row.currentPrice * (1 - maxTargetPct / 100),
+        ? entryPrice * (1 + maxTargetPct / 100)
+        : entryPrice * (1 - maxTargetPct / 100),
     ),
     stopLoss: roundPrice(
       long
-        ? row.currentPrice - row.atr * stopMultiplier
-        : row.currentPrice + row.atr * stopMultiplier,
+        ? entryPrice - row.atr * stopMultiplier
+        : entryPrice + row.atr * stopMultiplier,
     ),
     initialStopLoss: roundPrice(
       long
-        ? row.currentPrice - row.atr * stopMultiplier
-        : row.currentPrice + row.atr * stopMultiplier,
+        ? entryPrice - row.atr * stopMultiplier
+        : entryPrice + row.atr * stopMultiplier,
     ),
     profitLockArmed: false,
-    favorablePrice: roundPrice(row.currentPrice),
+    favorablePrice: roundPrice(entryPrice),
     daysHeld: 0,
     invested: roundPrice(invested),
     quantity,
@@ -2083,15 +2117,39 @@ async function refillOpenSlots(state, excludedTickers = []) {
       ticker: row.ticker,
     })
     const trade = buildTrade(row, positionSize, strategy, order)
+    const openCommissionEur = Number(trade.executionCosts?.open?.commissionEur) || 0
+
+    if (capital < positionSize + openCommissionEur) {
+      const rejectedOrder = createSimulationOrder({
+        action: 'OPEN',
+        direction: type,
+        marketId: strategy.id,
+        marketLabel: strategy.label,
+        notional: positionSize,
+        requestedPrice: row.currentPrice,
+        reason: 'Capitale insufficiente per coprire importo e commissione di apertura.',
+        side: getOpenOrderSide(type),
+        source: 'backend-monitor',
+        status: 'RIFIUTATO',
+        ticker: row.ticker,
+      })
+      orders = appendOrders({ orders }, rejectedOrder)
+      rejectedOrders.push(rejectedOrder)
+      return
+    }
+
     order = {
       ...order,
+      executedPrice: trade.entryPrice,
+      executedPriceEur: trade.entryPriceEur,
+      executionCosts: trade.executionCosts.open,
+      fee: openCommissionEur,
       positionId: trade.id,
       quantity: trade.quantity,
-      executedPriceEur: trade.entryPriceEur,
     }
     orders = appendOrders({ orders }, order)
     positions.push(trade)
-    capital = roundPrice(capital - positionSize)
+    capital = roundPrice(capital - positionSize - openCommissionEur)
     openedTrades.push(trade)
   })
 
@@ -2122,18 +2180,40 @@ function evaluatePosition(
     position.latestFxToEur ||
     position.entryFxToEur ||
     1
-  const latestPriceEur = convertToEur(
-    latestPrice,
-    latestFxToEur,
-  )
+  const entryCommissionEur = getPositionOpenCommissionEur(position)
+  const estimatedQuantity =
+    Number.isFinite(Number(position.quantity)) && Number(position.quantity) > 0
+      ? Number(position.quantity)
+      : invested / entryPriceEur
+  const theoreticalLatestPriceEur = convertToEur(latestPrice, latestFxToEur)
+  const estimatedExitNotionalEur =
+    Number.isFinite(Number(theoreticalLatestPriceEur)) && estimatedQuantity > 0
+      ? theoreticalLatestPriceEur * estimatedQuantity
+      : invested
+  const closeExecutionCosts = applyExecutionCosts({
+    atr: position.atrAtEntry,
+    currency: position.currency || getTickerCurrency(position.ticker),
+    fxToEur: latestFxToEur,
+    marketId: position.marketId || DEFAULT_MARKET_ID,
+    notionalEur: estimatedExitNotionalEur,
+    phase: 'CLOSE',
+    price: latestPrice,
+    type: position.type,
+  })
+  const effectiveLatestPrice = Number(closeExecutionCosts.effectivePrice)
+  const latestPriceEur =
+    Number(closeExecutionCosts.effectivePriceEur) ||
+    convertToEur(effectiveLatestPrice, latestFxToEur)
   const quantity =
     Number.isFinite(Number(position.quantity)) && Number(position.quantity) > 0
       ? Number(position.quantity)
       : invested / entryPriceEur
   const long = position.type === 'LONG'
-  const pnlEur = long
+  const pricePnlEur = long
     ? (latestPriceEur - entryPriceEur) * quantity
     : (entryPriceEur - latestPriceEur) * quantity
+  const exitCommissionEur = Number(closeExecutionCosts.commissionEur) || 0
+  const pnlEur = pricePnlEur - entryCommissionEur - exitCommissionEur
   const roundedPnl = roundPrice(pnlEur)
   const positionStrategy = getTradingStrategy(position.marketId)
   const sessionStatus = getMarketSessionStatus(
@@ -2153,7 +2233,7 @@ function evaluatePosition(
     Number.isFinite(Number(effectiveStopLoss)) &&
     roundPrice(effectiveStopLoss) === roundPrice(position.entryPrice) &&
     Boolean(position.profitLockArmed || profitExit.monitoredFields?.profitLockArmed)
-  const recoveredCapital = Math.max(invested + roundedPnl, 0)
+  const recoveredCapital = Math.max(invested + pricePnlEur - exitCommissionEur, 0)
   const isProfitableExit = profitExit.isWin && roundedPnl > 0
   const isLoss = long
     ? latestPrice <= effectiveStopLoss
@@ -2171,14 +2251,17 @@ function evaluatePosition(
           : 'STOP_LOSS'
   const result = roundedPnl >= 0 ? 'WIN' : 'LOSS'
   const pnlOriginal = long
-    ? (latestPrice - position.entryPrice) * quantity
-    : (position.entryPrice - latestPrice) * quantity
+    ? (effectiveLatestPrice - position.entryPrice) * quantity
+    : (position.entryPrice - effectiveLatestPrice) * quantity
   const closeOrder =
     isForcedClose || isPreCloseClose || isProfitableExit || profitExit.isWin || isLoss
       ? createSimulationOrder({
           action: 'CLOSE',
           direction: position.type,
-          executedPrice: latestPrice,
+          executedPrice: effectiveLatestPrice,
+          executedPriceEur: latestPriceEur,
+          executionCosts: closeExecutionCosts,
+          fee: exitCommissionEur,
           marketId: position.marketId,
           marketLabel: position.marketLabel,
           notional: recoveredCapital,
@@ -2197,10 +2280,15 @@ function evaluatePosition(
     monitoredPosition: {
       ...position,
       ...profitExit.monitoredFields,
+      executionCosts: {
+        ...(position.executionCosts || {}),
+        latestClose: closeExecutionCosts,
+      },
       stopLoss: Number.isFinite(Number(effectiveStopLoss))
         ? roundPrice(effectiveStopLoss)
         : position.stopLoss,
-      latestPrice: roundPrice(latestPrice),
+      latestMarketPrice: roundPrice(latestPrice),
+      latestPrice: roundPrice(effectiveLatestPrice),
       latestFxToEur,
       latestPriceEur: roundPrice(latestPriceEur),
       latestPriceAt: new Date().toISOString(),
@@ -2221,12 +2309,22 @@ function evaluatePosition(
             entryPriceEur: roundPrice(entryPriceEur),
             currency: position.currency || getTickerCurrency(position.ticker),
             entryFxToEur: position.entryFxToEur || 1,
+            entrySignalPrice: position.entrySignalPrice || position.entryPrice,
+            entrySignalPriceEur: position.entrySignalPriceEur || entryPriceEur,
             invested,
+            executionCosts: {
+              ...(position.executionCosts || {}),
+              close: closeExecutionCosts,
+            },
+            grossPnlEur: roundPrice(pricePnlEur),
+            totalCostsEur: roundPrice(entryCommissionEur + exitCommissionEur),
             pnlOriginal: roundPrice(pnlOriginal),
             pnlEur: roundedPnl,
             result,
             exitDate: new Date().toISOString(),
-            exitPrice: roundPrice(latestPrice),
+            exitSignalPrice: roundPrice(latestPrice),
+            exitSignalPriceEur: roundPrice(theoreticalLatestPriceEur),
+            exitPrice: roundPrice(effectiveLatestPrice),
             exitPriceEur: roundPrice(latestPriceEur),
             exitFxToEur: latestFxToEur,
             preCloseRiskScore: preCloseDecision.riskScore,

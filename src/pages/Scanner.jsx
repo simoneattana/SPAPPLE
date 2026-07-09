@@ -9,6 +9,7 @@ import {
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card'
+import { InfoTip } from '../components/ui/InfoTip'
 import { Skeleton } from '../components/ui/Skeleton'
 import { TickerInfo } from '../components/TickerInfo'
 import { MarketCountdownPanel } from '../components/MarketCountdownPanel'
@@ -27,6 +28,10 @@ import {
   formatCurrencyAmount,
   formatFxRate,
 } from '../services/currency'
+import {
+  applyExecutionCosts,
+  getPositionOpenCommissionEur,
+} from '../services/executionCosts'
 import { getMarketCopy } from '../services/marketCopy'
 import { getMarketDisplayStatus } from '../services/marketHours'
 import { getTradingStrategy } from '../strategies'
@@ -130,6 +135,12 @@ function getPositionOpenedAt(position) {
 }
 
 function getPositionLivePrice(position, scanRow) {
+  const execution = getPositionCloseExecution(position, scanRow)
+
+  if (execution) {
+    return execution.effectivePrice
+  }
+
   const latestPrice = Number(position.latestPrice)
   const scanPrice = Number(scanRow?.currentPrice)
 
@@ -162,6 +173,12 @@ function getPositionEntryPriceEur(position) {
 }
 
 function getPositionLivePriceEur(position, scanRow) {
+  const execution = getPositionCloseExecution(position, scanRow)
+
+  if (execution) {
+    return execution.effectivePriceEur
+  }
+
   const explicitPrice = Number(position.latestPriceEur)
 
   if (Number.isFinite(explicitPrice) && explicitPrice > 0) {
@@ -195,35 +212,93 @@ function getPositionPriceSource(position, scanRow) {
 }
 
 function calculatePositionPnl(position, scanRow) {
-  const livePrice = getPositionLivePrice(position, scanRow)
+  const execution = getPositionCloseExecution(position, scanRow)
 
-  if (!Number.isFinite(Number(livePrice))) {
+  if (!execution) {
     return null
   }
 
   const invested = Number(position.invested)
   const entryPrice = getPositionEntryPriceEur(position)
-  const livePriceEur = getPositionLivePriceEur(position, scanRow)
 
   if (
     !Number.isFinite(invested) ||
     !Number.isFinite(entryPrice) ||
-    entryPrice <= 0 ||
-    !Number.isFinite(Number(livePriceEur))
+    entryPrice <= 0
   ) {
     return null
   }
 
-  const quantity =
-    Number.isFinite(Number(position.quantity)) && Number(position.quantity) > 0
-      ? Number(position.quantity)
-      : invested / entryPrice
+  const quantity = getPositionQuantity(position)
   const pnl =
     position.type === 'LONG'
-      ? (livePriceEur - entryPrice) * quantity
-      : (entryPrice - livePriceEur) * quantity
+      ? (execution.effectivePriceEur - entryPrice) * quantity
+      : (entryPrice - execution.effectivePriceEur) * quantity
 
-  return pnl
+  return (
+    pnl -
+    getPositionOpenCommissionEur(position) -
+    (Number(execution.commissionEur) || 0)
+  )
+}
+
+function getPositionQuantity(position) {
+  if (Number.isFinite(Number(position.quantity)) && Number(position.quantity) > 0) {
+    return Number(position.quantity)
+  }
+
+  const invested = Number(position.invested)
+  const entryPrice = getPositionEntryPriceEur(position)
+
+  return Number.isFinite(invested) && Number.isFinite(entryPrice) && entryPrice > 0
+    ? invested / entryPrice
+    : null
+}
+
+function getPositionCloseExecution(position, scanRow) {
+  const marketPrice = Number(position.latestMarketPrice || scanRow?.currentPrice)
+
+  if (!Number.isFinite(marketPrice) || marketPrice <= 0) {
+    const latestEffectivePrice = Number(position.latestPrice)
+
+    if (Number.isFinite(latestEffectivePrice) && latestEffectivePrice > 0) {
+      return {
+        ...(position.executionCosts?.latestClose || {}),
+        effectivePrice: latestEffectivePrice,
+        effectivePriceEur: Number(position.latestPriceEur),
+      }
+    }
+
+    return null
+  }
+
+  const fxToEur = Number(
+    scanRow?.fxToEur ||
+      position.latestFxToEur ||
+      position.entryFxToEur ||
+      position.fxToEur ||
+      1,
+  )
+  const quantity = getPositionQuantity(position)
+  const notionalEur =
+    Number.isFinite(quantity) && quantity > 0
+      ? marketPrice * (Number.isFinite(fxToEur) && fxToEur > 0 ? fxToEur : 1) * quantity
+      : Number(position.invested)
+
+  try {
+    return applyExecutionCosts({
+      atr: position.atrAtEntry,
+      currency: getPositionCurrency(position, scanRow),
+      fxToEur,
+      marketId: position.marketId || 'equities',
+      notionalEur,
+      phase: 'CLOSE',
+      price: marketPrice,
+      type: position.type,
+    })
+  } catch {
+    return null
+  }
 }
 
 function PriceStack({ price, currency = 'EUR', eurValue = null, fxToEur = null }) {
@@ -249,6 +324,51 @@ function calculatePositionPnlPct(position, pnl) {
   }
 
   return (Number(pnl) / invested) * 100
+}
+
+function ExecutionCostTip({ closeExecution, position }) {
+  const openCosts = position.executionCosts?.open
+
+  if (!openCosts && !closeExecution) {
+    return null
+  }
+
+  const totalCosts =
+    Number(openCosts?.commissionEur || 0) +
+    Number(closeExecution?.commissionEur || 0) +
+    Number(openCosts?.pricePenaltyEur || 0) +
+    Number(closeExecution?.pricePenaltyEur || 0)
+
+  return (
+    <InfoTip label="Dettaglio costi esecuzione">
+      <div className="space-y-2">
+        <p className="font-semibold text-white">Costi già inclusi nel P/L</p>
+        {openCosts ? (
+          <div>
+            <p className="text-slate-400">Apertura</p>
+            <p>Prezzo segnale: {formatMarketCurrency(openCosts.marketPrice, openCosts.currency)}</p>
+            <p>Prezzo eseguito: {formatMarketCurrency(openCosts.effectivePrice, openCosts.currency)}</p>
+            <p>Spread: {formatCurrency(openCosts.spreadEur)}</p>
+            <p>Slippage: {formatCurrency(openCosts.slippageEur)}</p>
+            <p>Commissione: {formatCurrency(openCosts.commissionEur)}</p>
+          </div>
+        ) : null}
+        {closeExecution ? (
+          <div>
+            <p className="text-slate-400">Chiusura stimata</p>
+            <p>Prezzo mercato: {formatMarketCurrency(closeExecution.marketPrice, closeExecution.currency)}</p>
+            <p>Prezzo eseguito: {formatMarketCurrency(closeExecution.effectivePrice, closeExecution.currency)}</p>
+            <p>Spread: {formatCurrency(closeExecution.spreadEur)}</p>
+            <p>Slippage: {formatCurrency(closeExecution.slippageEur)}</p>
+            <p>Commissione: {formatCurrency(closeExecution.commissionEur)}</p>
+          </div>
+        ) : null}
+        <p className="border-t border-slate-800 pt-2 font-semibold text-[var(--market-accent)]">
+          Impatto stimato totale: {formatCurrency(totalCosts)}
+        </p>
+      </div>
+    </InfoTip>
+  )
 }
 
 function StrategyBadge({ rsi }) {
@@ -1089,6 +1209,7 @@ export default function Scanner({ marketId }) {
                   const scanRow = resultsByTicker.get(position.ticker)
                   const livePrice = getPositionLivePrice(position, scanRow)
                   const positionCurrency = getPositionCurrency(position, scanRow)
+                  const closeExecution = getPositionCloseExecution(position, scanRow)
                   const livePnl = calculatePositionPnl(position, scanRow)
                   const livePnlPct = calculatePositionPnlPct(position, livePnl)
                   const pnlPositive = Number(livePnl) >= 0
@@ -1136,17 +1257,23 @@ export default function Scanner({ marketId }) {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <p
-                          className={
-                            Number.isFinite(Number(livePnl))
-                              ? pnlPositive
-                                ? 'font-semibold text-[var(--market-accent)]'
-                                : 'font-semibold text-[#ef8f8f]'
-                              : 'text-slate-400'
-                          }
-                        >
-                          {formatCurrency(livePnl)}
-                        </p>
+                        <div className="flex items-center gap-2">
+                          <p
+                            className={
+                              Number.isFinite(Number(livePnl))
+                                ? pnlPositive
+                                  ? 'font-semibold text-[var(--market-accent)]'
+                                  : 'font-semibold text-[#ef8f8f]'
+                                : 'text-slate-400'
+                            }
+                          >
+                            {formatCurrency(livePnl)}
+                          </p>
+                          <ExecutionCostTip
+                            closeExecution={closeExecution}
+                            position={position}
+                          />
+                        </div>
                       </TableCell>
                       <TableCell>
                         <p
