@@ -72,6 +72,7 @@ const CRYPTO_SCAN_INTERVAL_MS = 5 * 60_000
 const ORDER_RETENTION_MS = 60 * 24 * 60 * 60 * 1000
 const STATE_EVENT_RETENTION_MS = 60 * 24 * 60 * 60 * 1000
 const MAX_ORDER_AUDIT_RECORDS = 180
+const SUPABASE_QUERY_TIMEOUT_MS = 8_000
 const backendFxRateCache = new Map()
 const DEFAULT_RISK_LIMITS = {
   maxDailyOrders: 20,
@@ -2616,11 +2617,16 @@ export async function runBackendMonitor(state) {
 }
 
 export async function readTradingState(supabase) {
-  const { data, error } = await supabase
-    .from('spapple_state')
-    .select('payload, updated_at')
-    .eq('id', STATE_ID)
-    .maybeSingle()
+  const { data, error } = await runSupabaseQuery(
+    'Lettura stato Supabase',
+    (signal) =>
+      supabase
+        .from('spapple_state')
+        .select('payload, updated_at')
+        .eq('id', STATE_ID)
+        .maybeSingle()
+        .abortSignal(signal),
+  )
 
   if (error) {
     throw error
@@ -2632,21 +2638,50 @@ export async function readTradingState(supabase) {
   }
 }
 
+async function runSupabaseQuery(label, queryFactory) {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => {
+    controller.abort()
+  }, SUPABASE_QUERY_TIMEOUT_MS)
+
+  try {
+    return await queryFactory(controller.signal)
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error(
+        `${label} non ha risposto entro ${SUPABASE_QUERY_TIMEOUT_MS / 1000} secondi.`,
+      )
+    }
+
+    throw error
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
 async function writeStateEvent(supabase, payload) {
   const deleteBefore = new Date(Date.now() - STATE_EVENT_RETENTION_MS).toISOString()
 
-  await supabase
-    .from('spapple_state_events')
-    .delete()
-    .eq('state_id', STATE_ID)
-    .lt('created_at', deleteBefore)
+  await runSupabaseQuery('Pulizia eventi Supabase', (signal) =>
+    supabase
+      .from('spapple_state_events')
+      .delete()
+      .eq('state_id', STATE_ID)
+      .lt('created_at', deleteBefore)
+      .abortSignal(signal),
+  )
 
-  const { error } = await supabase.from('spapple_state_events').insert({
-    state_id: STATE_ID,
-    revision: payload.stateRevision,
-    source: payload.lastStateMutationSource || 'server',
-    summary: payload.lastStateMutationSummary || 'Stato Spapple aggiornato',
-  })
+  const { error } = await runSupabaseQuery('Scrittura evento Supabase', (signal) =>
+    supabase
+      .from('spapple_state_events')
+      .insert({
+        state_id: STATE_ID,
+        revision: payload.stateRevision,
+        source: payload.lastStateMutationSource || 'server',
+        summary: payload.lastStateMutationSummary || 'Stato Spapple aggiornato',
+      })
+      .abortSignal(signal),
+  )
 
   if (!error) {
     return
@@ -2679,11 +2714,16 @@ export async function writeTradingState(
     lastStateMutationSource: source,
     lastStateMutationSummary: summary,
   })
-  const { error } = await supabase.from('spapple_state').upsert({
-    id: STATE_ID,
-    payload: nextPayload,
-    updated_at: updatedAt,
-  })
+  const { error } = await runSupabaseQuery('Scrittura stato Supabase', (signal) =>
+    supabase
+      .from('spapple_state')
+      .upsert({
+        id: STATE_ID,
+        payload: nextPayload,
+        updated_at: updatedAt,
+      })
+      .abortSignal(signal),
+  )
 
   if (error) {
     throw error
