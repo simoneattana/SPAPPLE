@@ -3073,6 +3073,7 @@ export function TradingProvider({ children }) {
 
   useEffect(() => {
     const marketIdsToMonitor = Object.values(TRADING_STRATEGIES)
+      .filter((strategy) => strategy.enabled !== false)
       .map((strategy) => strategy.id)
       .filter((marketId) => {
         const marketState = normalizeMarketState(
@@ -3151,7 +3152,9 @@ export function TradingProvider({ children }) {
       return undefined
     }
 
-    const marketIds = Object.values(TRADING_STRATEGIES).map((strategy) => strategy.id)
+    const marketIds = Object.values(TRADING_STRATEGIES)
+      .filter((strategy) => strategy.enabled !== false)
+      .map((strategy) => strategy.id)
 
     const missingNextScanIds = marketIds.filter((marketId) => {
       const marketState = normalizeMarketState(marketId, state.markets?.[marketId])

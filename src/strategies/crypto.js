@@ -13,7 +13,7 @@ export const cryptoStrategy = {
   reentryCooldownMs: 60 * 60 * 1000,
   reentryCooldownAfterWinMs: 60 * 60 * 1000,
   reentryCooldownAfterLossMs: 6 * 60 * 60 * 1000,
-  enabled: true,
+  enabled: false,
   riskLimits: {
     maxDailyOrders: 12,
     maxDailyCapitalPct: 1,
