@@ -8,6 +8,7 @@ import {
 } from '../_tradingEngine.js'
 
 const MONITORED_MARKETS = ['equities', 'usa', 'asia']
+const DEFAULT_MARKETS_PER_RUN = 1
 
 function isAuthorized(request) {
   const cronSecret = process.env.CRON_SECRET
@@ -17,6 +18,59 @@ function isAuthorized(request) {
   }
 
   return request.headers.authorization === `Bearer ${cronSecret}`
+}
+
+function timestamp(value) {
+  const time = new Date(value || 0).getTime()
+  return Number.isFinite(time) ? time : 0
+}
+
+function getRequestUrl(request) {
+  const host = request.headers.host || 'localhost'
+
+  return new URL(request.url || '/api/cron/monitor', `https://${host}`)
+}
+
+function getRequestedMarkets(request) {
+  const url = getRequestUrl(request)
+  const requestedMarket = url.searchParams.get('market')
+  const allMarketsRequested = url.searchParams.get('all') === '1'
+
+  if (requestedMarket && MONITORED_MARKETS.includes(requestedMarket)) {
+    return [requestedMarket]
+  }
+
+  if (allMarketsRequested) {
+    return MONITORED_MARKETS
+  }
+
+  return null
+}
+
+function selectMarketsForRun(payload) {
+  const now = Date.now()
+
+  return MONITORED_MARKETS.map((marketId, index) => {
+    const marketState = payload.markets?.[marketId] || {}
+    const hasOpenPositions = (marketState.positions || []).length > 0
+    const nextScanAt = timestamp(marketState.nextScanAt)
+    const scanOverdueMs = nextScanAt > 0 ? Math.max(0, now - nextScanAt) : 0
+    const lastBackendCheckAt = timestamp(marketState.lastBackendCheckAt)
+    const backendStaleMs =
+      lastBackendCheckAt > 0 ? now - lastBackendCheckAt : Number.MAX_SAFE_INTEGER
+
+    return {
+      marketId,
+      score:
+        (hasOpenPositions ? 1_000_000_000 : 0) +
+        Math.min(scanOverdueMs, 120 * 60_000) +
+        Math.min(backendStaleMs, 120 * 60_000) +
+        (MONITORED_MARKETS.length - index),
+    }
+  })
+    .sort((left, right) => right.score - left.score)
+    .slice(0, DEFAULT_MARKETS_PER_RUN)
+    .map((item) => item.marketId)
 }
 
 export default async function handler(request, response) {
@@ -43,7 +97,10 @@ export default async function handler(request, response) {
     let nextPayload = payload
     const results = []
 
-    for (const marketId of MONITORED_MARKETS) {
+    const requestedMarkets = getRequestedMarkets(request)
+    const marketsToMonitor = requestedMarkets || selectMarketsForRun(payload)
+
+    for (const marketId of marketsToMonitor) {
       const marketState = nextPayload.markets?.[marketId] || {}
       const result = await runBackendMonitor({
         ...nextPayload,
@@ -83,7 +140,7 @@ export default async function handler(request, response) {
 
     const writeResult = await writeTradingState(supabase, nextPayload, {
       source: 'backend-monitor',
-      summary: 'Monitor backend eseguito su Europa, USA e Asia.',
+      summary: `Monitor backend eseguito su ${marketsToMonitor.join(', ')}.`,
     })
 
     sendJson(response, 200, {
@@ -107,6 +164,7 @@ export default async function handler(request, response) {
         openedCount: result.openedTrades?.length || 0,
         errors: result.errors || [],
       })),
+      monitoredMarkets: marketsToMonitor,
       errors: results.flatMap((result) => result.errors || []),
       updatedAt: writeResult.updatedAt,
       stateRevision: writeResult.stateRevision,
