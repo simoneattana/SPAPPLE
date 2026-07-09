@@ -28,7 +28,6 @@ import {
   filterTradesByCurrentMonth,
   filterTradesByToday,
 } from '../services/profitStats'
-import { LEGACY_POSITION_SIZE } from '../services/positionSizing'
 import {
   getUsMarketContextDetail,
   getUsMarketContextLabel,
@@ -74,19 +73,6 @@ function formatDuration(seconds) {
   }
 
   return `${minutes}m ${String(safeSeconds % 60).padStart(2, '0')}s`
-}
-
-function getRecoveredCapital(trade, fallbackSlotSize) {
-  if (Number.isFinite(Number(trade.recoveredCapital))) {
-    return Number(trade.recoveredCapital)
-  }
-
-  const invested = Number.isFinite(Number(trade.invested))
-    ? Number(trade.invested)
-    : fallbackSlotSize
-  const pnl = Number.isFinite(Number(trade.pnlEur)) ? Number(trade.pnlEur) : 0
-
-  return Math.max(invested + pnl, 0)
 }
 
 function exitReasonLabel(reason) {
@@ -306,10 +292,8 @@ export default function Dashboard({ marketId }) {
   const executionMode = routeMarketState.executionMode || 'simulation'
   const killSwitchEnabled = Boolean(routeMarketState.killSwitchEnabled)
   const executedOrders = orders.filter((order) => order.status === 'ESEGUITO')
-  const recentClosedTrades = history.slice(0, 5)
   const currentMonthTrades = filterTradesByCurrentMonth(history)
   const todayClosedTrades = filterTradesByToday(history)
-  const latestClosedTrade = recentClosedTrades[0] || null
   const ordersById = new Map(orders.map((order) => [order.id, order]))
   const lastScanAt = routeMarketState.lastScanAt || null
   const lastScanCount = Number(routeMarketState.lastScanCount || 0)
@@ -430,24 +414,6 @@ export default function Dashboard({ marketId }) {
             label="Ordini"
             value={`${executedOrders.length}/${orders.length}`}
             info="Ordini simulati eseguiti rispetto al totale degli ordini registrati."
-          />
-          <MiniMetric
-            label="Ultima chiusura"
-            value={
-              latestClosedTrade
-                ? `${latestClosedTrade.ticker} ${formatCurrency(latestClosedTrade.pnlEur)}`
-                : 'N/D'
-            }
-            info={
-              latestClosedTrade
-                ? `${exitReasonLabel(latestClosedTrade.exitReason)} del ${formatDate(latestClosedTrade.exitDate)}.`
-                : 'Nessuna operazione chiusa nel mercato selezionato.'
-            }
-            accent={
-              latestClosedTrade?.result === 'LOSS'
-                ? 'text-[#ef8f8f]'
-                : 'text-[var(--market-accent)]'
-            }
           />
         </div>
       </header>
@@ -573,81 +539,6 @@ export default function Dashboard({ marketId }) {
             </CardContent>
           </Card>
 
-          <Card className="overflow-hidden">
-            <CardHeader className="items-center justify-between gap-4 border-b border-slate-800 p-4">
-              <div className="flex items-center gap-2">
-                <CardTitle className="text-white">Ultime vendite</CardTitle>
-                <InfoTip>
-                  Vista rapida delle ultime chiusure del mercato selezionato:
-                  investimento, ricavato, P/L ed esito.
-                </InfoTip>
-              </div>
-              <Badge>{recentClosedTrades.length} recenti</Badge>
-            </CardHeader>
-            <CardContent className="p-0">
-              {recentClosedTrades.length > 0 ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow className="hover:bg-transparent">
-                      <TableHead>Ticker</TableHead>
-                      <TableHead>Investito il</TableHead>
-                      <TableHead>Venduto il</TableHead>
-                      <TableHead>Investito</TableHead>
-                      <TableHead>Ricavato</TableHead>
-                      <TableHead>P/L</TableHead>
-                      <TableHead>Esito</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {recentClosedTrades.map((trade, index) => {
-                      const recovered = getRecoveredCapital(trade, LEGACY_POSITION_SIZE)
-                      const pnlPositive = Number(trade.pnlEur) >= 0
-
-                      return (
-                        <TableRow key={`${trade.ticker}-${trade.exitDate}-${index}`}>
-                          <TableCell className="font-semibold text-white">
-                            {trade.ticker}
-                          </TableCell>
-                          <TableCell>{formatDate(trade.openedAt)}</TableCell>
-                          <TableCell>{formatDate(trade.exitDate)}</TableCell>
-                          <TableCell>
-                            {formatCurrency(trade.invested || LEGACY_POSITION_SIZE)}
-                          </TableCell>
-                          <TableCell className="font-semibold text-white">
-                            {formatCurrency(recovered)}
-                          </TableCell>
-                          <TableCell
-                            className={
-                              pnlPositive
-                                ? 'font-semibold text-[var(--market-accent)]'
-                                : 'font-semibold text-[#ef8f8f]'
-                            }
-                          >
-                            {formatCurrency(trade.pnlEur)}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={trade.result === 'WIN' ? 'positive' : 'negative'}>
-                              {trade.result === 'WIN' ? 'Utile' : 'Perdita'}
-                            </Badge>
-                          </TableCell>
-                        </TableRow>
-                      )
-                    })}
-                  </TableBody>
-                </Table>
-              ) : (
-                <div className="flex min-h-36 items-center justify-center p-5 text-center">
-                  <div>
-                    <p className="font-medium text-white">Nessuna vendita registrata</p>
-                    <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
-                      Quando una posizione viene chiusa, apparirà qui con
-                      ricavato e risultato.
-                    </p>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
         </div>
 
         <Card>
