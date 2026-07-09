@@ -2647,7 +2647,9 @@ async function runSupabaseQuery(label, queryFactory) {
   try {
     return await queryFactory(controller.signal)
   } catch (error) {
-    if (error?.name === 'AbortError') {
+    const rawMessage = String(error?.message || error || '')
+
+    if (error?.name === 'AbortError' || rawMessage.includes('AbortError')) {
       throw new Error(
         `${label} non ha risposto entro ${SUPABASE_QUERY_TIMEOUT_MS / 1000} secondi.`,
       )
