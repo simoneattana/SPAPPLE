@@ -2607,6 +2607,7 @@ export function TradingProvider({ children }) {
 
     const strategy = getTradingStrategy(marketId)
     const scannerConfig = getMarketScannerConfig(marketId)
+    const marketCopy = getMarketCopy(marketId)
 
     if (isMarketScanBlocked(strategy)) {
       const closeGuardActive = isMarketCloseGuardActive(strategy)
@@ -2622,11 +2623,11 @@ export function TradingProvider({ children }) {
           isScanning: false,
           nextScanAt: getNextScanAt(marketId),
           engineStatus: closeGuardActive
-            ? `Protezione azioni ${getMarketCloseGuardLabel(strategy)} attiva`
-            : `Azioni in attesa delle ${getMarketScanStartLabel(strategy)}`,
+            ? `Protezione ${marketCopy.label} ${getMarketCloseGuardLabel(strategy)} attiva`
+            : `${marketCopy.label} in attesa delle ${getMarketScanStartLabel(strategy)}`,
           lastAutomationMessage: closeGuardActive
-            ? `Mondo azionario fermo: nessuna scansione o apertura prima delle ${getMarketScanStartLabel(strategy)}.`
-            : `Mondo azionario in attesa: prima scansione automatica alle ${getMarketScanStartLabel(strategy)}, dopo la lettura del contesto USA.`,
+            ? `${marketCopy.label} fermo: nessuna scansione o apertura prima delle ${getMarketScanStartLabel(strategy)}.`
+            : `${marketCopy.label} in attesa: prossima scansione automatica alle ${getMarketScanStartLabel(strategy)}.`,
         })
       })
 

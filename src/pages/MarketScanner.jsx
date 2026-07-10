@@ -26,19 +26,10 @@ const currencyFormatter = new Intl.NumberFormat('it-IT', {
   currency: 'EUR',
 })
 
-const dateFormatter = new Intl.DateTimeFormat('it-IT', {
-  dateStyle: 'short',
-  timeStyle: 'short',
-})
-
 function formatCurrency(value) {
   return Number.isFinite(Number(value))
     ? currencyFormatter.format(Number(value))
     : 'N/D'
-}
-
-function formatDate(value) {
-  return value ? dateFormatter.format(new Date(value)) : 'Mai'
 }
 
 function formatDuration(seconds) {
@@ -71,13 +62,14 @@ function getMarketStatusSummary(strategy) {
   }
 }
 
-function SummaryMetric({ label, value, accent = 'text-white' }) {
+function SummaryMetric({ detail, label, value, accent = 'text-white' }) {
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
       <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
         {label}
       </p>
       <p className={`mt-2 text-lg font-semibold ${accent}`}>{value}</p>
+      {detail ? <p className="mt-1 text-xs text-slate-500">{detail}</p> : null}
     </div>
   )
 }
@@ -87,7 +79,6 @@ function MarketSummaryCard({ marketId, marketState }) {
   const copy = getMarketCopy(marketId)
   const theme = getMarketTheme(marketId)
   const history = Array.isArray(marketState.history) ? marketState.history : []
-  const orders = Array.isArray(marketState.orders) ? marketState.orders : []
   const positions = Array.isArray(marketState.positions) ? marketState.positions : []
   const monthStats = calculateRealizedTotals(filterTradesByCurrentMonth(history))
   const capital = Number.isFinite(Number(marketState.capital))
@@ -102,7 +93,6 @@ function MarketSummaryCard({ marketId, marketState }) {
   const status = getMarketStatusSummary(strategy)
   const lastScanCount = Number(marketState.lastScanCount || 0)
   const lastSignalCount = Number(marketState.lastSignalCount || 0)
-  const executedOrders = orders.filter((order) => order.status === 'ESEGUITO')
   const maxPositions = strategy.maxPositions || 5
   const netPnlAccent =
     monthStats.netPnl >= 0 ? 'text-[var(--market-accent)]' : 'text-[#ef8f8f]'
@@ -150,20 +140,13 @@ function MarketSummaryCard({ marketId, marketState }) {
           />
           <SummaryMetric
             accent={netPnlAccent}
+            detail="al netto delle commissioni"
             label="P/L mese"
             value={formatCurrency(monthStats.netPnl)}
           />
           <SummaryMetric
-            label="Ultima scansione"
-            value={formatDate(marketState.lastScanAt)}
-          />
-          <SummaryMetric
             label="Segnali"
             value={`${lastSignalCount}/${lastScanCount || 0}`}
-          />
-          <SummaryMetric
-            label="Ordini"
-            value={`${executedOrders.length}/${orders.length}`}
           />
           <SummaryMetric
             label="Slot"
@@ -231,8 +214,7 @@ export default function MarketScanner() {
               </InfoTip>
             </div>
             <p className="mt-1 text-sm leading-6 text-slate-500">
-              Capitale, P/L mensile, scansioni, ordini e slot restano separati
-              per mercato.
+              Capitale, P/L mensile, segnali e slot restano separati per mercato.
             </p>
           </div>
         </div>

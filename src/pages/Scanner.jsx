@@ -33,7 +33,11 @@ import {
   getPositionOpenCommissionEur,
 } from '../services/executionCosts'
 import { getMarketCopy } from '../services/marketCopy'
-import { getMarketDisplayStatus } from '../services/marketHours'
+import {
+  getMarketDisplayStatus,
+  getMarketScanStartLabel,
+  isMarketScanBlocked,
+} from '../services/marketHours'
 import { getTradingStrategy } from '../strategies'
 import {
   MAX_AUTO_ATR_PCT,
@@ -657,6 +661,7 @@ export default function Scanner({ marketId }) {
       contextFetcher: effectiveMarket === 'equities' ? fetchUsMarketContext : null,
     }
   }, [effectiveMarket, effectiveStrategy])
+  const scanBlocked = isMarketScanBlocked(effectiveStrategy, new Date(now))
   const [results, setResults] = useState(
     routeLastScanResults || [],
   )
@@ -810,6 +815,21 @@ export default function Scanner({ marketId }) {
     Number(routeMarketState?.lastScanCount || 0) === scannerConfig.universe.length
 
   const handleScan = useCallback(async ({ automatic = false } = {}) => {
+    if (isMarketScanBlocked(effectiveStrategy)) {
+      setLoading(false)
+
+      if (!automatic) {
+        toast({
+          title: 'Mercato chiuso: scansione sospesa',
+          description: `Prossima finestra operativa: ${getMarketScanStartLabel(
+            effectiveStrategy,
+          )}.`,
+        })
+      }
+
+      return
+    }
+
     const scanToken = scanTokenRef.current + 1
     scanTokenRef.current = scanToken
     setLoading(true)
@@ -901,6 +921,7 @@ export default function Scanner({ marketId }) {
     toast,
     effectiveMarket,
     routeAutomationEnabled,
+    effectiveStrategy,
   ])
 
   useEffect(() => {
@@ -912,12 +933,17 @@ export default function Scanner({ marketId }) {
       return
     }
 
+    if (scanBlocked) {
+      return
+    }
+
     autoScanStarted.current = true
     handleScan({ automatic: true })
   }, [
     handleScan,
     scanIsFromToday,
     scanUniverseIsCurrent,
+    scanBlocked,
     visibleLastScanResults?.length,
   ])
 
@@ -1077,13 +1103,15 @@ export default function Scanner({ marketId }) {
           </p>
         </div>
 
-        <Button onClick={() => handleScan()} disabled={loading}>
+        <Button onClick={() => handleScan()} disabled={loading || scanBlocked}>
           {loading ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
             <Play className="h-4 w-4" />
           )}
-          Aggiorna Scansione {scannerConfig.copy.scanMode}
+          {scanBlocked
+            ? 'Scansione sospesa: mercato chiuso'
+            : `Aggiorna Scansione ${scannerConfig.copy.scanMode}`}
         </Button>
       </header>
 
