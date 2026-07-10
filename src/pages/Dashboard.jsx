@@ -1,13 +1,9 @@
 import { useEffect, useState } from 'react'
 import {
   Activity,
-  BadgeEuro,
   ChartNoAxesCombined,
-  Clock3,
   CircleSlash,
-  PiggyBank,
   Radar,
-  ShieldCheck,
 } from 'lucide-react'
 import { Badge } from '../components/ui/Badge'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card'
@@ -29,10 +25,6 @@ import {
   filterTradesByToday,
 } from '../services/profitStats'
 import { LEGACY_POSITION_SIZE } from '../services/positionSizing'
-import {
-  getUsMarketContextDetail,
-  getUsMarketContextLabel,
-} from '../services/usMarketContext'
 import { getTradingStrategy } from '../strategies'
 
 const currencyFormatter = new Intl.NumberFormat('it-IT', {
@@ -145,57 +137,50 @@ function calculateStrategyStats(history) {
   }
 }
 
-function MiniMetric({ label, value, info, accent = 'text-white' }) {
+function DashboardBox({ detail, info, label, value, accent = 'text-white' }) {
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+    <div className="rounded-lg border border-slate-800 bg-[#090b10] p-4 shadow-xl shadow-black/20">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">
+        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
           {label}
         </p>
         {info ? <InfoTip>{info}</InfoTip> : null}
       </div>
-      <p className={`mt-2 text-lg font-semibold leading-tight ${accent}`}>
+      <p className={`mt-3 text-xl font-semibold leading-tight ${accent}`}>
         {value}
       </p>
+      {detail ? (
+        <p className="mt-2 text-sm leading-6 text-slate-500">{detail}</p>
+      ) : null}
     </div>
   )
 }
 
-function ProfitWindowCard({ info, title, totals }) {
-  const netAccent =
-    totals.netPnl >= 0 ? 'text-[var(--market-accent)]' : 'text-[#ef8f8f]'
-
+function CapitalTrendPanel({ sampleCount }) {
   return (
     <Card>
-      <CardHeader className="flex-row items-center justify-between gap-3 p-4 pb-2">
-        <div className="flex items-center gap-2">
-          <CardTitle>{title}</CardTitle>
-          <InfoTip>{info}</InfoTip>
+      <CardContent className="p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-800 bg-slate-950">
+              <ChartNoAxesCombined className="h-5 w-5 text-[var(--market-accent)]" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <p className="text-lg font-semibold text-white">Andamento capitale</p>
+                <InfoTip>
+                  Il grafico storico diventerà utile quando avremo un campione
+                  sufficiente di operazioni comparabili con il nuovo calcolo costi.
+                </InfoTip>
+              </div>
+              <p className="mt-1 text-sm text-slate-500">
+                Grafico in preparazione. Ora il dato operativo resta nei box capitale,
+                utili e P/L netto.
+              </p>
+            </div>
+          </div>
+          <Badge>{Math.min(sampleCount, MINIMUM_SAMPLE)} / {MINIMUM_SAMPLE}</Badge>
         </div>
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-800 bg-slate-950">
-          <PiggyBank className="h-4 w-4 text-[var(--market-accent)]" />
-        </div>
-      </CardHeader>
-      <CardContent className="grid gap-3 p-4 pt-2">
-        <div>
-          <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">
-            Utili realizzati
-          </p>
-          <p className="mt-1 text-xl font-semibold text-[var(--market-accent)]">
-            {currencyFormatter.format(totals.grossWins)}
-          </p>
-        </div>
-        <div className="border-t border-slate-800 pt-3">
-          <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">
-            P/L netto
-          </p>
-          <p className={`mt-1 text-xl font-semibold ${netAccent}`}>
-            {currencyFormatter.format(totals.netPnl)}
-          </p>
-        </div>
-        <p className="text-xs text-slate-500">
-          {totals.closed} chiusure · {totals.wins} utili · {totals.losses} perdite
-        </p>
       </CardContent>
     </Card>
   )
@@ -219,7 +204,7 @@ function StatusChip({ children, variant = 'default', icon: Icon }) {
   )
 }
 
-function MarketStatusBanner({ status }) {
+function getMarketStatusContent(status) {
   const isOpen = status.isAnyMarketOpen
   const isPreOpen = !isOpen && status.isAnyPreOpen
   const title = isOpen
@@ -232,35 +217,16 @@ function MarketStatusBanner({ status }) {
         Number(status.minutesToMarketClose || 0) * 60,
       )} alla chiusura`
     : `Mancano ${formatDuration(status.secondsToOpen)} all’apertura`
-  const colorClass = isOpen
-    ? 'border-[var(--market-accent-border)] bg-[var(--market-accent-soft)] text-[var(--market-accent)]'
-    : isPreOpen
-      ? 'border-amber-400/35 bg-amber-400/10 text-amber-200'
-      : 'border-[#ef8f8f]/35 bg-[#ef8f8f]/10 text-[#ef8f8f]'
 
-  return (
-    <div className={`mt-4 rounded-lg border p-4 ${colorClass}`}>
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-current/30 bg-black/20">
-            <Clock3 className="h-5 w-5" />
-          </div>
-          <div>
-            <p className="text-lg font-semibold leading-tight text-white">
-              {title}
-            </p>
-            <p className="mt-1 text-sm leading-6 text-slate-300">
-              Orari di apertura: {status.openingHoursLabel}
-            </p>
-          </div>
-        </div>
-
-        <div className="rounded-lg border border-current/25 bg-black/25 px-4 py-3">
-          <p className="text-sm font-semibold text-white">{countdown}</p>
-        </div>
-      </div>
-    </div>
-  )
+  return {
+    accent: isOpen
+      ? 'text-[var(--market-accent)]'
+      : isPreOpen
+        ? 'text-amber-200'
+        : 'text-[#ef8f8f]',
+    countdown,
+    title,
+  }
 }
 
 export default function Dashboard({ marketId }) {
@@ -301,7 +267,6 @@ export default function Dashboard({ marketId }) {
   const lastScanAt = routeMarketState.lastScanAt || null
   const lastScanCount = Number(routeMarketState.lastScanCount || 0)
   const lastSignalCount = Number(routeMarketState.lastSignalCount || 0)
-  const usMarketContext = routeMarketState.usMarketContext || null
   const marketLabel = routeMarketState.marketLabel || currentStrategy.label
   const maxPositions = currentStrategy.maxPositions || 5
   const marketCopy = getMarketCopy(effectiveMarket)
@@ -321,24 +286,23 @@ export default function Dashboard({ marketId }) {
     currentStrategy,
     new Date(now),
   )
+  const marketStatusContent = getMarketStatusContent(marketDisplayStatus)
+  const lastLiveCheckText = routeMarketState.lastLiveCheckAt
+    ? formatDate(routeMarketState.lastLiveCheckAt)
+    : 'In attesa'
+  const lastBackendCheckText = routeMarketState.lastBackendCheckAt
+    ? formatDate(routeMarketState.lastBackendCheckAt)
+    : 'In attesa'
+  const liveDataDetail =
+    positions.length > 0
+      ? `Prezzi posizioni: ${lastLiveCheckText}`
+      : `Monitor live sospeso: nessuna posizione aperta. Backend: ${lastBackendCheckText}`
+  const profitsInfo =
+    'Somma dei soli trade chiusi in utile. Il dato è netto perché i costi di esecuzione vengono applicati già al prezzo reale e alle commissioni.'
+  const netPnlInfo =
+    'Somma di utili e perdite realizzate. Include spread, slippage e commissioni broker applicati a apertura e chiusura.'
   const expectancyColor =
     strategyStats.expectancy >= 0 ? 'text-[var(--market-accent)]' : 'text-[#ef8f8f]'
-  const kpis = [
-    {
-      title: 'Capitale',
-      value: currencyFormatter.format(totalCapital),
-      info: `Capitale totale simulato: include ${currencyFormatter.format(capital)} di liquidità disponibile e ${currencyFormatter.format(investedInOpenPositions)} già investiti in posizioni aperte.`,
-      icon: BadgeEuro,
-      accent: 'text-[var(--market-accent)]',
-    },
-    {
-      title: 'Slot',
-      value: `${positions.length}/${maxPositions}`,
-      info: `Stato motore: ${engineStatus}. Numero di posizioni aperte rispetto al limite massimo del mercato.`,
-      icon: ShieldCheck,
-      accent: 'text-white',
-    },
-  ]
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -350,8 +314,8 @@ export default function Dashboard({ marketId }) {
 
   return (
     <div className="flex flex-1 flex-col gap-5">
-      <header className="rounded-lg border border-slate-800 bg-[#090b10] p-4 shadow-xl shadow-black/20">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+      <header className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">
               Dashboard · {marketCopy.eyebrow}
@@ -385,79 +349,118 @@ export default function Dashboard({ marketId }) {
           </div>
         </div>
 
-        <MarketStatusBanner status={marketDisplayStatus} />
-
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <MiniMetric
+        <div className="grid gap-4 lg:grid-cols-3">
+          <DashboardBox
+            accent={marketStatusContent.accent}
+            detail={marketStatusContent.countdown}
+            info={`Orari di apertura: ${marketDisplayStatus.openingHoursLabel}`}
+            label="Mercato aperto/chiuso"
+            value={marketStatusContent.title}
+          />
+          <DashboardBox
+            detail={liveDataDetail}
+            info="Indica quando il sistema ha aggiornato prezzi live e monitor backend."
+            label="Dati live"
+            value={positions.length > 0 ? 'Monitor attivo' : 'Nessuna posizione'}
+          />
+          <DashboardBox
+            detail={`${lastScanCount || 0} analizzati · ${lastSignalCount || 0} segnali`}
+            info="Momento dell’ultima scansione completata con dati reali."
             label="Ultima scansione"
             value={lastScanText}
-            info="Momento dell’ultima scansione completata con dati reali."
-          />
-          <MiniMetric
-            label="Segnali"
-            value={
-              scanUniverseIsCurrent
-                ? `${lastSignalCount}/${lastScanCount}`
-                : `${lastSignalCount}/${lastScanCount || 0} · universo ${currentUniverseCount}`
-            }
-            info={
-              scanUniverseIsCurrent
-                ? `Segnali validi trovati sugli ${marketCopy.assetPlural} analizzati.`
-                : `L’ultima scansione è stata fatta su ${lastScanCount || 0} ${marketCopy.assetPlural}; l’universo attuale è di ${currentUniverseCount}. La prossima scansione aggiornerà il dato.`
-            }
-          />
-          {effectiveMarket === 'equities' ? (
-            <MiniMetric
-              label="Contesto USA"
-              value={getUsMarketContextLabel(usMarketContext)}
-              info={getUsMarketContextDetail(usMarketContext)}
-            />
-          ) : null}
-          <MiniMetric
-            label="Ordini"
-            value={`${executedOrders.length}/${orders.length}`}
-            info="Ordini simulati eseguiti rispetto al totale degli ordini registrati."
           />
         </div>
       </header>
 
-      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        {kpis.map((kpi) => {
-          const Icon = kpi.icon
+      <CapitalTrendPanel sampleCount={strategyStats.total} />
 
-          return (
-            <Card key={kpi.title}>
-              <CardHeader className="flex-row items-center justify-between gap-3 p-4 pb-2">
-                <div className="flex items-center gap-2">
-                  <CardTitle>{kpi.title}</CardTitle>
-                  <InfoTip>{kpi.info}</InfoTip>
-                </div>
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-800 bg-slate-950">
-                  <Icon className={`h-4 w-4 ${kpi.accent}`} />
-                </div>
-              </CardHeader>
-              <CardContent className="p-4 pt-1">
-                <p className={`break-words text-xl font-semibold leading-tight ${kpi.accent}`}>
-                  {kpi.value}
-                </p>
-              </CardContent>
-            </Card>
-          )
-        })}
-        <ProfitWindowCard
-          title="Mese corrente"
-          totals={currentMonthStats}
-          info="Dati calcolati dalle chiusure registrate dal primo giorno del mese corrente a oggi."
+      <section className="grid gap-4 xl:grid-cols-3">
+        <DashboardBox
+          accent="text-[var(--market-accent)]"
+          detail={`${formatCurrency(capital)} liquidi · ${formatCurrency(investedInOpenPositions)} investiti`}
+          info="Capitale totale simulato: somma liquidità disponibile e capitale già allocato nelle posizioni aperte."
+          label="Capitale"
+          value={formatCurrency(totalCapital)}
         />
-        <ProfitWindowCard
-          title="Oggi"
-          totals={todayStats}
-          info="Dati calcolati solo dalle chiusure registrate nella giornata attuale."
+        <DashboardBox
+          accent="text-[var(--market-accent)]"
+          detail={`${formatCurrency(todayStats.grossWins)} oggi · ${formatCurrency(currentMonthStats.grossWins)} questo mese`}
+          info={profitsInfo}
+          label="Utili realizzati"
+          value={formatCurrency(todayStats.grossWins)}
+        />
+        <DashboardBox
+          accent={todayStats.netPnl >= 0 ? 'text-[var(--market-accent)]' : 'text-[#ef8f8f]'}
+          detail={`${formatCurrency(todayStats.netPnl)} oggi · ${formatCurrency(currentMonthStats.netPnl)} questo mese`}
+          info={netPnlInfo}
+          label="P/L netto"
+          value={formatCurrency(todayStats.netPnl)}
         />
       </section>
 
       <section className="grid gap-5 2xl:grid-cols-[minmax(0,1fr)_24rem]">
         <div className="grid gap-5">
+          <Card className="overflow-hidden">
+            <CardHeader className="items-center justify-between gap-4 border-b border-slate-800 p-4">
+              <div className="flex items-center gap-2">
+                <CardTitle className="text-white">Posizioni aperte</CardTitle>
+                <InfoTip>
+                  Posizioni ancora monitorate dal pilota automatico. Il P/L è
+                  stimato sui dati live disponibili.
+                </InfoTip>
+              </div>
+              <Badge>{positions.length}/{maxPositions}</Badge>
+            </CardHeader>
+            <CardContent className="p-0">
+              {positions.length > 0 ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead>Ticker</TableHead>
+                      <TableHead>Direzione</TableHead>
+                      <TableHead>Investito</TableHead>
+                      <TableHead>P/L live</TableHead>
+                      <TableHead>Giorni</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {positions.map((position) => {
+                      const pnl = Number(position.unrealizedPnl)
+                      const pnlAccent =
+                        Number.isFinite(pnl) && pnl < 0
+                          ? 'font-semibold text-[#ef8f8f]'
+                          : 'font-semibold text-[var(--market-accent)]'
+
+                      return (
+                        <TableRow key={position.id || position.ticker}>
+                          <TableCell className="font-semibold text-white">
+                            {position.ticker}
+                          </TableCell>
+                          <TableCell>{position.type === 'LONG' ? 'Long' : 'Short'}</TableCell>
+                          <TableCell>{formatCurrency(position.invested)}</TableCell>
+                          <TableCell className={pnlAccent}>
+                            {Number.isFinite(pnl) ? formatCurrency(pnl) : 'In attesa'}
+                          </TableCell>
+                          <TableCell>{position.daysHeld || 0}</TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              ) : (
+                <div className="flex min-h-32 items-center justify-center p-5 text-center">
+                  <div>
+                    <p className="font-medium text-white">Nessuna posizione aperta</p>
+                    <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
+                      Il pilota aprirà posizioni quando scansione, orario, rischio
+                      e capitale lo permetteranno.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           <Card className="overflow-hidden">
             <CardHeader className="items-center justify-between gap-4 border-b border-slate-800 p-4">
               <div className="flex items-center gap-2">
@@ -542,7 +545,6 @@ export default function Dashboard({ marketId }) {
               )}
             </CardContent>
           </Card>
-
         </div>
 
         <Card>
@@ -559,7 +561,7 @@ export default function Dashboard({ marketId }) {
             </Badge>
           </CardHeader>
           <CardContent className="grid gap-3 p-4">
-            <MiniMetric
+            <DashboardBox
               label="Win rate"
               value={
                 strategyStats.total > 0
@@ -569,7 +571,7 @@ export default function Dashboard({ marketId }) {
               info="Percentuale di operazioni chiuse in profitto."
               accent="text-[var(--market-accent)]"
             />
-            <MiniMetric
+            <DashboardBox
               label="Expectancy"
               value={
                 strategyStats.total > 0
@@ -579,12 +581,12 @@ export default function Dashboard({ marketId }) {
               info="Profitto medio atteso per operazione chiusa, calcolato solo dallo storico reale."
               accent={expectancyColor}
             />
-            <MiniMetric
+            <DashboardBox
               label="Chiusure"
               value={`${strategyStats.total}`}
               info={`${strategyStats.wins} operazioni in utile e ${strategyStats.losses} in perdita.`}
             />
-            <MiniMetric
+            <DashboardBox
               label="Perdite"
               value={currencyFormatter.format(strategyStats.grossLosses)}
               info="Somma delle perdite realizzate. Il capitale operativo riflette sia utili reinvestiti sia perdite."
@@ -592,7 +594,7 @@ export default function Dashboard({ marketId }) {
                 strategyStats.grossLosses > 0 ? 'text-[#ef8f8f]' : 'text-white'
               }
             />
-            <MiniMetric
+            <DashboardBox
               label="Size"
               value={`${positionPercent}%`}
               info={`Ogni nuova posizione usa circa il ${positionPercent}% del capitale operativo di ${marketLabel}.`}
@@ -601,28 +603,34 @@ export default function Dashboard({ marketId }) {
         </Card>
       </section>
 
-      <Card>
-        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-800 bg-slate-950">
-              <ChartNoAxesCombined className="h-5 w-5 text-[var(--market-accent)]" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <p className="font-semibold text-white">Andamento capitale</p>
-                <InfoTip>
-                  Il grafico storico sarà utile quando avremo più punti dati
-                  consolidati. Per ora il dato principale resta il capitale operativo.
-                </InfoTip>
-              </div>
-              <p className="mt-1 text-sm text-slate-500">
-                Grafico in preparazione, senza occupare spazio operativo.
-              </p>
-            </div>
-          </div>
-          <Badge>{Math.min(strategyStats.total, MINIMUM_SAMPLE)} / {MINIMUM_SAMPLE}</Badge>
-        </CardContent>
-      </Card>
+      <section className="grid gap-4 md:grid-cols-3">
+        <DashboardBox
+          label="Segnali"
+          value={
+            scanUniverseIsCurrent
+              ? `${lastSignalCount}/${lastScanCount}`
+              : `${lastSignalCount}/${lastScanCount || 0}`
+          }
+          detail={
+            scanUniverseIsCurrent
+              ? `${marketCopy.assetPlural} aggiornati`
+              : `Universo attuale: ${currentUniverseCount}`
+          }
+          info="Segnali validi trovati nell’ultima scansione completata."
+        />
+        <DashboardBox
+          label="Ordini"
+          value={`${executedOrders.length}/${orders.length}`}
+          detail="Eseguiti / totali"
+          info="Ordini simulati registrati dal sistema."
+        />
+        <DashboardBox
+          label="Slot"
+          value={`${positions.length}/${maxPositions}`}
+          detail={`Motore: ${engineStatus}`}
+          info="Numero di posizioni aperte rispetto al limite massimo del mercato."
+        />
+      </section>
     </div>
   )
 }
