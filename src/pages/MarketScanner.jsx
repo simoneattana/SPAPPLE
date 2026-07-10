@@ -154,16 +154,18 @@ function MarketSummaryCard({ marketId, marketState }) {
           />
         </div>
 
-        <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-            Stato operativo
-          </p>
-          <p className="mt-2 text-sm leading-6 text-slate-300">
-            {marketState.lastAutomationMessage ||
-              marketState.engineStatus ||
-              'Pilota automatico pronto.'}
-          </p>
-        </div>
+        {status.label === 'Aperto' ? (
+          <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+              Stato operativo
+            </p>
+            <p className="mt-2 text-sm leading-6 text-slate-300">
+              {marketState.lastAutomationMessage ||
+                marketState.engineStatus ||
+                'Pilota automatico pronto.'}
+            </p>
+          </div>
+        ) : null}
 
         <Link
           to={marketRoutes[marketId]}
