@@ -107,17 +107,6 @@ function calculateCommissionTotal(trades = []) {
   return trades.reduce((total, trade) => total + getTradeCommissionEur(trade), 0)
 }
 
-function getTradePriceImpactEur(trade) {
-  return (
-    Number(trade?.executionCosts?.open?.pricePenaltyEur || 0) +
-    Number(trade?.executionCosts?.close?.pricePenaltyEur || 0)
-  )
-}
-
-function calculatePriceImpactTotal(trades = []) {
-  return trades.reduce((total, trade) => total + getTradePriceImpactEur(trade), 0)
-}
-
 function calculateGrossPnlTotal(trades = []) {
   return trades.reduce((total, trade) => {
     if (Number.isFinite(Number(trade?.grossPnlEur))) {
@@ -129,14 +118,6 @@ function calculateGrossPnlTotal(trades = []) {
     }
 
     return total
-  }, 0)
-}
-
-function calculateInvestedTotal(trades = []) {
-  return trades.reduce((total, trade) => {
-    const invested = Number(trade?.invested)
-
-    return Number.isFinite(invested) ? total + invested : total
   }, 0)
 }
 
@@ -481,22 +462,12 @@ export default function Dashboard({ marketId }) {
   const todayStats = calculateRealizedTotals(todayClosedTrades)
   const todayCommissions = calculateCommissionTotal(todayClosedTrades)
   const currentMonthCommissions = calculateCommissionTotal(currentMonthTrades)
-  const todayPriceImpact = calculatePriceImpactTotal(todayClosedTrades)
-  const currentMonthPriceImpact = calculatePriceImpactTotal(currentMonthTrades)
   const todayGrossPnl = calculateGrossPnlTotal(todayClosedTrades)
   const currentMonthGrossPnl = calculateGrossPnlTotal(currentMonthTrades)
-  const todayUsedCapital = calculateInvestedTotal(todayClosedTrades)
-  const currentMonthUsedCapital = calculateInvestedTotal(currentMonthTrades)
   const openPositionCommissions = calculateOpenPositionCommissions(positions)
   const openPositionLivePnl = calculateOpenPositionLivePnl(positions)
   const openPositionRealtimeValue = calculateOpenPositionRealtimeValue(positions)
   const realtimeCapital = capital + openPositionRealtimeValue
-  const todayCommissionPct =
-    todayUsedCapital > 0 ? todayCommissions / todayUsedCapital : 0
-  const monthCommissionPct =
-    currentMonthUsedCapital > 0
-      ? currentMonthCommissions / currentMonthUsedCapital
-      : 0
   const marketDisplayStatus = getMarketDisplayStatus(
     currentStrategy,
     new Date(now),
@@ -728,28 +699,18 @@ export default function Dashboard({ marketId }) {
           detail={
             <>
               <p className="font-semibold text-slate-300">
-                Netto finale: {formatCurrency(todayStats.netPnl)} oggi ·{' '}
-                {formatCurrency(currentMonthStats.netPnl)} mese
+                Oggi: {formatCurrency(todayStats.netPnl)} netti
               </p>
               <p>
-                Lordo prima commissioni: {formatCurrency(todayGrossPnl)} oggi ·{' '}
-                {formatCurrency(currentMonthGrossPnl)} mese
-              </p>
-              <p>
-                Commissioni broker: {formatCurrency(todayCommissions)} oggi ·{' '}
-                {formatCurrency(currentMonthCommissions)} mese
-              </p>
-              <p>
-                Peggioramento prezzo stimato: {formatCurrency(todayPriceImpact)} oggi ·{' '}
-                {formatCurrency(currentMonthPriceImpact)} mese
-              </p>
-              <p>
-                Capitale usato: {formatCurrency(todayUsedCapital)} oggi ·{' '}
-                {formatCurrency(currentMonthUsedCapital)} mese
+                Mese: {formatCurrency(currentMonthStats.netPnl)} netti
               </p>
               <p className="text-xs text-slate-500">
-                Incidenza commissioni: {percentFormatter.format(todayCommissionPct)} oggi ·{' '}
-                {percentFormatter.format(monthCommissionPct)} mese
+                Oggi: {formatCurrency(todayGrossPnl)} lordi -{' '}
+                {formatCurrency(todayCommissions)} commissioni.
+              </p>
+              <p className="text-xs text-slate-500">
+                Mese: {formatCurrency(currentMonthGrossPnl)} lordi -{' '}
+                {formatCurrency(currentMonthCommissions)} commissioni.
               </p>
             </>
           }
