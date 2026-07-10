@@ -103,6 +103,14 @@ function calculateCommissionTotal(trades = []) {
   return trades.reduce((total, trade) => total + getTradeCommissionEur(trade), 0)
 }
 
+function calculateInvestedTotal(trades = []) {
+  return trades.reduce((total, trade) => {
+    const invested = Number(trade?.invested)
+
+    return Number.isFinite(invested) ? total + invested : total
+  }, 0)
+}
+
 function getOpenPositionEstimatedCosts(position) {
   return (
     getExecutionImpact(position.executionCosts?.open) +
@@ -362,6 +370,14 @@ export default function Dashboard({ marketId }) {
   const todayStats = calculateRealizedTotals(todayClosedTrades)
   const todayCommissions = calculateCommissionTotal(todayClosedTrades)
   const currentMonthCommissions = calculateCommissionTotal(currentMonthTrades)
+  const todayUsedCapital = calculateInvestedTotal(todayClosedTrades)
+  const currentMonthUsedCapital = calculateInvestedTotal(currentMonthTrades)
+  const todayCommissionPct =
+    todayUsedCapital > 0 ? todayCommissions / todayUsedCapital : 0
+  const monthCommissionPct =
+    currentMonthUsedCapital > 0
+      ? currentMonthCommissions / currentMonthUsedCapital
+      : 0
   const marketDisplayStatus = getMarketDisplayStatus(
     currentStrategy,
     new Date(now),
@@ -532,10 +548,6 @@ export default function Dashboard({ marketId }) {
                 {formatCurrency(todayStats.grossWins)} oggi ·{' '}
                 {formatCurrency(currentMonthStats.grossWins)} questo mese
               </p>
-              <p className="font-semibold text-slate-300">
-                Commissioni: {formatCurrency(todayCommissions)} oggi ·{' '}
-                {formatCurrency(currentMonthCommissions)} mese
-              </p>
             </>
           }
           info={profitsInfo}
@@ -550,9 +562,17 @@ export default function Dashboard({ marketId }) {
                 {formatCurrency(todayStats.netPnl)} oggi ·{' '}
                 {formatCurrency(currentMonthStats.netPnl)} questo mese
               </p>
+              <p>
+                Capitale usato: {formatCurrency(todayUsedCapital)} oggi ·{' '}
+                {formatCurrency(currentMonthUsedCapital)} mese
+              </p>
               <p className="font-semibold text-slate-300">
                 Commissioni: {formatCurrency(todayCommissions)} oggi ·{' '}
                 {formatCurrency(currentMonthCommissions)} mese
+              </p>
+              <p className="text-xs text-slate-500">
+                Incidenza commissioni: {percentFormatter.format(todayCommissionPct)} oggi ·{' '}
+                {percentFormatter.format(monthCommissionPct)} mese
               </p>
             </>
           }
