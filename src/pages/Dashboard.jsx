@@ -341,6 +341,23 @@ function CostAssumptionsPanel() {
                   {item.commission}
                 </span>
               </p>
+              <p className="border-t border-slate-800 pt-2 text-xs">
+                <span className="text-slate-500">Fonte:</span>{' '}
+                {item.sourceUrl ? (
+                  <a
+                    className="font-semibold text-[var(--market-accent)] underline-offset-4 hover:underline"
+                    href={item.sourceUrl}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    {item.sourceLabel}
+                  </a>
+                ) : (
+                  <span className="font-semibold text-slate-300">
+                    {item.sourceLabel}
+                  </span>
+                )}
+              </p>
             </div>
           </div>
         ))}

@@ -11,18 +11,23 @@ export const EXECUTION_COST_ASSUMPTIONS = [
     commission: '1,9 per mille, min 1,50 EUR, max 18 EUR',
     id: 'equities',
     label: 'Europa',
+    sourceLabel: 'Directa, pagina commissioni',
+    sourceUrl: 'https://www.directa.it/commissioni',
     spread: '0,03% per lato',
   },
   {
     commission: '9 USD per ordine',
     id: 'usa',
     label: 'USA',
+    sourceLabel: 'Directa, pagina commissioni',
+    sourceUrl: 'https://www.directa.it/commissioni',
     spread: '0,02% per lato',
   },
   {
     commission: '0,15% del controvalore, min 10 EUR',
     id: 'asia',
     label: 'Asia',
+    sourceLabel: 'Stima prudenziale interna Spapple',
     spread: '0,05% per lato',
   },
 ]
