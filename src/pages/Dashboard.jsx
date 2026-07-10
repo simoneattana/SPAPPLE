@@ -3,9 +3,11 @@ import {
   Activity,
   ChartNoAxesCombined,
   CircleSlash,
+  Loader2,
   Radar,
 } from 'lucide-react'
 import { Badge } from '../components/ui/Badge'
+import { Button } from '../components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card'
 import { InfoTip } from '../components/ui/InfoTip'
 import {
@@ -16,6 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from '../components/ui/Table'
+import { useToast } from '../components/ui/useToast'
 import { useTrading } from '../context/useTrading'
 import { getMarketCopy } from '../services/marketCopy'
 import { getMarketDisplayStatus } from '../services/marketHours'
@@ -230,8 +233,15 @@ function getMarketStatusContent(status) {
 }
 
 export default function Dashboard({ marketId }) {
-  const { activeMarket, markets } = useTrading()
+  const {
+    activeMarket,
+    closePositionManually,
+    markets,
+    syncMeta,
+  } = useTrading()
+  const { toast } = useToast()
   const [now, setNow] = useState(() => Date.now())
+  const [closingId, setClosingId] = useState(null)
   const effectiveMarket = marketId || activeMarket
   const currentStrategy = getTradingStrategy(effectiveMarket)
   const routeMarketState = markets?.[effectiveMarket] || {}
@@ -311,6 +321,25 @@ export default function Dashboard({ marketId }) {
 
     return () => window.clearInterval(timer)
   }, [])
+
+  const handleManualClose = async (position) => {
+    setClosingId(position.id)
+
+    try {
+      const closedTrade = await closePositionManually(position.id, effectiveMarket)
+
+      toast({
+        title: `${position.ticker} chiuso manualmente: P/L ${formatCurrency(closedTrade.pnlEur)}`,
+      })
+    } catch (error) {
+      toast({
+        title: error.message || 'Chiusura manuale non riuscita',
+        variant: 'destructive',
+      })
+    } finally {
+      setClosingId(null)
+    }
+  }
 
   return (
     <div className="flex flex-1 flex-col gap-5">
@@ -417,10 +446,12 @@ export default function Dashboard({ marketId }) {
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
                       <TableHead>Ticker</TableHead>
+                      <TableHead>Apertura</TableHead>
                       <TableHead>Direzione</TableHead>
                       <TableHead>Investito</TableHead>
                       <TableHead>P/L live</TableHead>
                       <TableHead>Giorni</TableHead>
+                      <TableHead>Azione</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -436,12 +467,26 @@ export default function Dashboard({ marketId }) {
                           <TableCell className="font-semibold text-white">
                             {position.ticker}
                           </TableCell>
+                          <TableCell>{formatDate(position.openedAt)}</TableCell>
                           <TableCell>{position.type === 'LONG' ? 'Long' : 'Short'}</TableCell>
                           <TableCell>{formatCurrency(position.invested)}</TableCell>
                           <TableCell className={pnlAccent}>
                             {Number.isFinite(pnl) ? formatCurrency(pnl) : 'In attesa'}
                           </TableCell>
                           <TableCell>{position.daysHeld || 0}</TableCell>
+                          <TableCell>
+                            <Button
+                              size="sm"
+                              disabled={syncMeta?.isStale || closingId === position.id}
+                              onClick={() => handleManualClose(position)}
+                              className="min-w-36"
+                            >
+                              {closingId === position.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : null}
+                              {syncMeta?.isStale ? 'Sync richiesta' : 'Chiudi ora'}
+                            </Button>
+                          </TableCell>
                         </TableRow>
                       )
                     })}
