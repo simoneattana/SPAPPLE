@@ -85,6 +85,58 @@ function getRecoveredCapital(trade, fallbackSlotSize) {
   return Math.max(invested + pnl, 0)
 }
 
+function getExecutionImpact(costs) {
+  return (
+    Number(costs?.commissionEur || 0) +
+    Number(costs?.pricePenaltyEur || 0)
+  )
+}
+
+function getOpenPositionEstimatedCosts(position) {
+  return (
+    getExecutionImpact(position.executionCosts?.open) +
+    getExecutionImpact(position.executionCosts?.latestClose)
+  )
+}
+
+function CostSummaryTip({ closeLabel = 'Chiusura', closeCosts, grossPnl, netPnl, openCosts, totalCosts }) {
+  const resolvedTotal =
+    Number.isFinite(Number(totalCosts))
+      ? Number(totalCosts)
+      : getExecutionImpact(openCosts) + getExecutionImpact(closeCosts)
+
+  return (
+    <InfoTip label="Dettaglio costi">
+      <div className="space-y-2">
+        <p className="font-semibold text-white">Come leggere il risultato</p>
+        {Number.isFinite(Number(grossPnl)) ? (
+          <p>P/L prima dei costi: {formatCurrency(grossPnl)}</p>
+        ) : null}
+        {Number.isFinite(Number(netPnl)) ? (
+          <p>P/L netto visibile: {formatCurrency(netPnl)}</p>
+        ) : null}
+        <p>Costi totali inclusi: {formatCurrency(resolvedTotal)}</p>
+        {openCosts ? (
+          <div className="border-t border-slate-800 pt-2">
+            <p className="font-semibold text-slate-300">Apertura</p>
+            <p>Spread: {formatCurrency(openCosts.spreadEur)}</p>
+            <p>Slippage: {formatCurrency(openCosts.slippageEur)}</p>
+            <p>Commissione: {formatCurrency(openCosts.commissionEur)}</p>
+          </div>
+        ) : null}
+        {closeCosts ? (
+          <div className="border-t border-slate-800 pt-2">
+            <p className="font-semibold text-slate-300">{closeLabel}</p>
+            <p>Spread: {formatCurrency(closeCosts.spreadEur)}</p>
+            <p>Slippage: {formatCurrency(closeCosts.slippageEur)}</p>
+            <p>Commissione: {formatCurrency(closeCosts.commissionEur)}</p>
+          </div>
+        ) : null}
+      </div>
+    </InfoTip>
+  )
+}
+
 function exitReasonLabel(reason) {
   const labels = {
     MANUALE: 'Manuale',
@@ -496,6 +548,7 @@ export default function Dashboard({ marketId }) {
                       <TableHead>Direzione</TableHead>
                       <TableHead>Investito</TableHead>
                       <TableHead>P/L live</TableHead>
+                      <TableHead>Costi</TableHead>
                       <TableHead>Giorni</TableHead>
                       <TableHead>Azione</TableHead>
                     </TableRow>
@@ -507,6 +560,7 @@ export default function Dashboard({ marketId }) {
                         Number.isFinite(pnl) && pnl < 0
                           ? 'font-semibold text-[#ef8f8f]'
                           : 'font-semibold text-[var(--market-accent)]'
+                      const estimatedCosts = getOpenPositionEstimatedCosts(position)
 
                       return (
                         <TableRow key={position.id || position.ticker}>
@@ -518,6 +572,22 @@ export default function Dashboard({ marketId }) {
                           <TableCell>{formatCurrency(position.invested)}</TableCell>
                           <TableCell className={pnlAccent}>
                             {Number.isFinite(pnl) ? formatCurrency(pnl) : 'In attesa'}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-slate-300">
+                                {estimatedCosts > 0
+                                  ? formatCurrency(estimatedCosts)
+                                  : 'In attesa'}
+                              </span>
+                              <CostSummaryTip
+                                closeLabel="Chiusura stimata"
+                                closeCosts={position.executionCosts?.latestClose}
+                                netPnl={pnl}
+                                openCosts={position.executionCosts?.open}
+                                totalCosts={estimatedCosts}
+                              />
+                            </div>
                           </TableCell>
                           <TableCell>{position.daysHeld || 0}</TableCell>
                           <TableCell>
@@ -573,6 +643,7 @@ export default function Dashboard({ marketId }) {
                       <TableHead>Direzione</TableHead>
                       <TableHead>Motivo</TableHead>
                       <TableHead>Ricavato</TableHead>
+                      <TableHead>Costi</TableHead>
                       <TableHead>P/L</TableHead>
                       <TableHead>Esito</TableHead>
                     </TableRow>
@@ -581,6 +652,11 @@ export default function Dashboard({ marketId }) {
                     {recentClosedTrades.map((trade, index) => {
                       const isWin = trade.result === 'WIN'
                       const recovered = getRecoveredCapital(trade, LEGACY_POSITION_SIZE)
+                      const totalCosts =
+                        Number.isFinite(Number(trade.totalCostsEur))
+                          ? Number(trade.totalCostsEur)
+                          : getExecutionImpact(trade.executionCosts?.open) +
+                            getExecutionImpact(trade.executionCosts?.close)
 
                       return (
                         <TableRow key={`${trade.ticker}-${trade.exitDate}-${index}`}>
@@ -603,6 +679,20 @@ export default function Dashboard({ marketId }) {
                           </TableCell>
                           <TableCell className="font-semibold text-white">
                             {formatCurrency(recovered)}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-slate-300">
+                                {formatCurrency(totalCosts)}
+                              </span>
+                              <CostSummaryTip
+                                closeCosts={trade.executionCosts?.close}
+                                grossPnl={trade.grossPnlEur}
+                                netPnl={trade.pnlEur}
+                                openCosts={trade.executionCosts?.open}
+                                totalCosts={totalCosts}
+                              />
+                            </div>
                           </TableCell>
                           <TableCell
                             className={

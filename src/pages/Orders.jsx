@@ -57,6 +57,15 @@ function formatDate(value) {
   return value ? dateTimeFormatter.format(new Date(value)) : 'N/D'
 }
 
+function getOrderCostEur(order) {
+  const costs = order.executionCosts
+
+  return (
+    Number(costs?.commissionEur || 0) +
+    Number(costs?.pricePenaltyEur || 0)
+  )
+}
+
 function sideLabel(side) {
   const labels = {
     BUY: 'Compra',
@@ -246,6 +255,7 @@ export default function Orders({ marketId }) {
                 <TableHead>Stato</TableHead>
                 <TableHead>Fonte</TableHead>
                 <TableHead>Prezzo</TableHead>
+                <TableHead>Costi</TableHead>
                 <TableHead>Quantità</TableHead>
                 <TableHead>Importo</TableHead>
                 <TableHead>Motivo</TableHead>
@@ -285,6 +295,11 @@ export default function Orders({ marketId }) {
                       <span>{formatNumber(order.executedPrice)}</span>
                       <OrderCostTip order={order} />
                     </div>
+                  </TableCell>
+                  <TableCell className="font-semibold text-slate-300">
+                    {order.executionCosts
+                      ? formatCurrency(getOrderCostEur(order))
+                      : 'N/D'}
                   </TableCell>
                   <TableCell>{formatNumber(order.quantity)}</TableCell>
                   <TableCell>{formatCurrency(order.notional)}</TableCell>
