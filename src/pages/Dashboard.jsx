@@ -651,8 +651,6 @@ export default function Dashboard({ marketId }) {
 
       <CapitalTrendPanel sampleCount={strategyStats.total} />
 
-      <CostAssumptionsPanel />
-
       <section className="grid gap-4 xl:grid-cols-3">
         <div className="grid gap-4">
           <DashboardBox
@@ -1048,6 +1046,8 @@ export default function Dashboard({ marketId }) {
           info="Numero di posizioni aperte rispetto al limite massimo del mercato."
         />
       </section>
+
+      <CostAssumptionsPanel />
     </div>
   )
 }
