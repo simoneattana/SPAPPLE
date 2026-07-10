@@ -432,13 +432,9 @@ export default function Dashboard({ marketId }) {
   const history = Array.isArray(routeMarketState.history)
     ? routeMarketState.history
     : []
-  const orders = Array.isArray(routeMarketState.orders)
-    ? routeMarketState.orders
-    : []
   const engineStatus = routeMarketState.engineStatus || 'In attesa'
   const executionMode = routeMarketState.executionMode || 'simulation'
   const killSwitchEnabled = Boolean(routeMarketState.killSwitchEnabled)
-  const executedOrders = orders.filter((order) => order.status === 'ESEGUITO')
   const recentClosedTrades = history.slice(0, 5)
   const currentMonthTrades = filterTradesByCurrentMonth(history)
   const todayClosedTrades = filterTradesByToday(history)
@@ -979,7 +975,7 @@ export default function Dashboard({ marketId }) {
         </Card>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-3">
+      <section className="grid gap-4 md:grid-cols-2">
         <DashboardBox
           label="Segnali"
           value={
@@ -993,12 +989,6 @@ export default function Dashboard({ marketId }) {
               : `Universo attuale: ${currentUniverseCount}`
           }
           info="Segnali validi trovati nell’ultima scansione completata."
-        />
-        <DashboardBox
-          label="Ordini"
-          value={`${executedOrders.length}/${orders.length}`}
-          detail="Eseguiti / totali"
-          info="Ordini simulati registrati dal sistema."
         />
         <DashboardBox
           label="Slot"
