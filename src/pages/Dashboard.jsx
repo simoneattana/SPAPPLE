@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   Activity,
+  AlertTriangle,
   ChartNoAxesCombined,
   CircleSlash,
   Loader2,
@@ -154,6 +155,29 @@ function calculateOpenPositionRealtimeValue(positions = []) {
       (Number.isFinite(openCommission) ? openCommission : 0)
     )
   }, 0)
+}
+
+function getPositionClosePreview(position) {
+  const invested = Number(position?.invested)
+  const pnl = Number(position?.unrealizedPnl)
+  const openCommission = Number(position?.executionCosts?.open?.commissionEur)
+  const pnlPct =
+    Number.isFinite(pnl) && Number.isFinite(invested) && invested > 0
+      ? pnl / invested
+      : null
+  const recoverableCapital = Number.isFinite(invested)
+    ? invested +
+      (Number.isFinite(pnl) ? pnl : 0) +
+      (Number.isFinite(openCommission) ? openCommission : 0)
+    : null
+
+  return {
+    invested,
+    isLoss: Number.isFinite(pnl) && pnl < 0,
+    pnl,
+    pnlPct,
+    recoverableCapital,
+  }
 }
 
 function getOpenPositionEstimatedCosts(position) {
@@ -325,6 +349,87 @@ function CostAssumptionsPanel() {
   )
 }
 
+function ClosePositionDialog({
+  closing,
+  onCancel,
+  onConfirm,
+  position,
+}) {
+  if (!position) {
+    return null
+  }
+
+  const preview = getPositionClosePreview(position)
+  const resultLabel = preview.isLoss ? 'perdi' : 'guadagni'
+  const resultAccent = preview.isLoss ? 'text-[#ef8f8f]' : 'text-[var(--market-accent)]'
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-lg rounded-lg border border-slate-800 bg-[#090b10] p-5 shadow-2xl shadow-black">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[var(--market-accent-border)] bg-[var(--market-accent-soft)]">
+            <AlertTriangle className="h-5 w-5 text-[var(--market-accent)]" />
+          </div>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+              Conferma chiusura manuale
+            </p>
+            <h3 className="mt-2 text-xl font-semibold text-white">
+              Chiudere {position.ticker} ora?
+            </h3>
+          </div>
+        </div>
+
+        <div className="mt-5 rounded-lg border border-slate-800 bg-slate-950 p-4">
+          <p className="text-sm text-slate-400">Se confermi, in base all’ultimo prezzo live stimato:</p>
+          <p className={`mt-3 text-2xl font-semibold ${resultAccent}`}>
+            {resultLabel} {formatCurrency(preview.pnl)}
+          </p>
+          <p className="mt-1 text-sm text-slate-500">
+            {Number.isFinite(preview.pnlPct)
+              ? `${percentFormatter.format(preview.pnlPct)} sull’importo investito`
+              : 'Percentuale non disponibile'}
+          </p>
+        </div>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+            <p className="text-xs uppercase tracking-[0.12em] text-slate-500">
+              Investito
+            </p>
+            <p className="mt-2 font-semibold text-white">
+              {formatCurrency(preview.invested)}
+            </p>
+          </div>
+          <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+            <p className="text-xs uppercase tracking-[0.12em] text-slate-500">
+              Capitale stimato recuperato
+            </p>
+            <p className="mt-2 font-semibold text-white">
+              {formatCurrency(preview.recoverableCapital)}
+            </p>
+          </div>
+        </div>
+
+        <p className="mt-4 text-sm leading-6 text-slate-500">
+          La chiusura userà il prezzo disponibile al momento della conferma.
+          Il risultato finale può cambiare leggermente se il dato live si aggiorna.
+        </p>
+
+        <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <Button variant="ghost" onClick={onCancel} disabled={closing}>
+            Annulla
+          </Button>
+          <Button onClick={onConfirm} disabled={closing}>
+            {closing ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Conferma chiusura
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function CapitalTrendPanel({ sampleCount }) {
   return (
     <Card>
@@ -409,6 +514,7 @@ export default function Dashboard({ marketId }) {
   const { toast } = useToast()
   const [now, setNow] = useState(() => Date.now())
   const [closingId, setClosingId] = useState(null)
+  const [positionToClose, setPositionToClose] = useState(null)
   const [scanLoading, setScanLoading] = useState(false)
   const effectiveMarket = marketId || activeMarket
   const currentStrategy = getTradingStrategy(effectiveMarket)
@@ -495,11 +601,16 @@ export default function Dashboard({ marketId }) {
   }, [])
 
   const handleManualClose = async (position) => {
+    if (!position) {
+      return
+    }
+
     setClosingId(position.id)
 
     try {
       const closedTrade = await closePositionManually(position.id, effectiveMarket)
 
+      setPositionToClose(null)
       toast({
         title: `${position.ticker} chiuso manualmente: P/L ${formatCurrency(closedTrade.pnlEur)}`,
       })
@@ -510,6 +621,16 @@ export default function Dashboard({ marketId }) {
       })
     } finally {
       setClosingId(null)
+    }
+  }
+
+  const handleRequestManualClose = (position) => {
+    setPositionToClose(position)
+  }
+
+  const handleCancelManualClose = () => {
+    if (!closingId) {
+      setPositionToClose(null)
     }
   }
 
@@ -796,7 +917,7 @@ export default function Dashboard({ marketId }) {
                             <Button
                               size="sm"
                               disabled={syncMeta?.isStale || closingId === position.id}
-                              onClick={() => handleManualClose(position)}
+                              onClick={() => handleRequestManualClose(position)}
                               className="min-w-36"
                             >
                               {closingId === position.id ? (
@@ -1010,6 +1131,13 @@ export default function Dashboard({ marketId }) {
       </section>
 
       <CostAssumptionsPanel />
+
+      <ClosePositionDialog
+        closing={Boolean(closingId)}
+        onCancel={handleCancelManualClose}
+        onConfirm={() => handleManualClose(positionToClose)}
+        position={positionToClose}
+      />
     </div>
   )
 }
