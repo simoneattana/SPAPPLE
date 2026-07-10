@@ -11,7 +11,7 @@ export function InfoTip({ children, className, label = 'Informazione' }) {
       >
         <Info className="h-3.5 w-3.5" />
       </button>
-      <span className="pointer-events-none fixed bottom-5 left-4 right-4 z-50 hidden rounded-lg border border-slate-800 bg-[#080a0e] p-3 text-left text-xs normal-case leading-5 tracking-normal text-slate-300 shadow-2xl shadow-black/50 group-hover:block group-focus-within:block sm:absolute sm:bottom-auto sm:left-auto sm:right-0 sm:top-8 sm:w-72">
+      <span className="pointer-events-none fixed bottom-5 left-4 right-4 z-[9999] hidden rounded-lg border border-slate-800 bg-[#080a0e] p-3 text-left text-xs normal-case leading-5 tracking-normal text-slate-300 shadow-2xl shadow-black/50 group-hover:block group-focus-within:block sm:left-auto sm:right-6 sm:w-96">
         {children}
       </span>
     </span>

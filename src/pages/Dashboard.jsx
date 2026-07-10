@@ -28,6 +28,7 @@ import {
   filterTradesByCurrentMonth,
   filterTradesByToday,
 } from '../services/profitStats'
+import { LEGACY_POSITION_SIZE } from '../services/positionSizing'
 import {
   getUsMarketContextDetail,
   getUsMarketContextLabel,
@@ -75,6 +76,19 @@ function formatDuration(seconds) {
   return `${minutes}m ${String(safeSeconds % 60).padStart(2, '0')}s`
 }
 
+function getRecoveredCapital(trade, fallbackSlotSize) {
+  if (Number.isFinite(Number(trade.recoveredCapital))) {
+    return Number(trade.recoveredCapital)
+  }
+
+  const invested = Number.isFinite(Number(trade.invested))
+    ? Number(trade.invested)
+    : fallbackSlotSize
+  const pnl = Number.isFinite(Number(trade.pnlEur)) ? Number(trade.pnlEur) : 0
+
+  return Math.max(invested + pnl, 0)
+}
+
 function exitReasonLabel(reason) {
   const labels = {
     MANUALE: 'Manuale',
@@ -90,17 +104,6 @@ function exitReasonLabel(reason) {
   }
 
   return labels[reason] || reason || 'N/D'
-}
-
-function closeSourceLabel(source) {
-  const labels = {
-    'backend-monitor': 'Backend',
-    'legacy-backfill': 'Storico ricostruito',
-    'live-monitor': 'Monitor live',
-    manual: 'Manuale',
-  }
-
-  return labels[source] || 'Motore automatico'
 }
 
 function calculateStrategyStats(history) {
@@ -292,9 +295,9 @@ export default function Dashboard({ marketId }) {
   const executionMode = routeMarketState.executionMode || 'simulation'
   const killSwitchEnabled = Boolean(routeMarketState.killSwitchEnabled)
   const executedOrders = orders.filter((order) => order.status === 'ESEGUITO')
+  const recentClosedTrades = history.slice(0, 5)
   const currentMonthTrades = filterTradesByCurrentMonth(history)
   const todayClosedTrades = filterTradesByToday(history)
-  const ordersById = new Map(orders.map((order) => [order.id, order]))
   const lastScanAt = routeMarketState.lastScanAt || null
   const lastScanCount = Number(routeMarketState.lastScanCount || 0)
   const lastSignalCount = Number(routeMarketState.lastSignalCount || 0)
@@ -458,16 +461,16 @@ export default function Dashboard({ marketId }) {
           <Card className="overflow-hidden">
             <CardHeader className="items-center justify-between gap-4 border-b border-slate-800 p-4">
               <div className="flex items-center gap-2">
-                <CardTitle className="text-white">Chiusure di oggi</CardTitle>
+                <CardTitle className="text-white">Ultime vendite</CardTitle>
                 <InfoTip>
-                  Mostra solo le operazioni chiuse oggi dal monitor live, dal
-                  backend o manualmente. Per il dettaglio completo usa lo Storico.
+                  Mostra le ultime posizioni chiuse nel mercato selezionato. I
+                  valori P/L sono netti dopo spread, slippage e commissioni.
                 </InfoTip>
               </div>
-              <Badge>{todayClosedTrades.length} oggi</Badge>
+              <Badge>{recentClosedTrades.length} recenti</Badge>
             </CardHeader>
             <CardContent className="p-0">
-              {todayClosedTrades.length > 0 ? (
+              {recentClosedTrades.length > 0 ? (
                 <Table>
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
@@ -475,14 +478,15 @@ export default function Dashboard({ marketId }) {
                       <TableHead>Ticker</TableHead>
                       <TableHead>Direzione</TableHead>
                       <TableHead>Motivo</TableHead>
+                      <TableHead>Ricavato</TableHead>
                       <TableHead>P/L</TableHead>
                       <TableHead>Esito</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {todayClosedTrades.map((trade, index) => {
-                      const closeOrder = ordersById.get(trade.closeOrderId)
+                    {recentClosedTrades.map((trade, index) => {
                       const isWin = trade.result === 'WIN'
+                      const recovered = getRecoveredCapital(trade, LEGACY_POSITION_SIZE)
 
                       return (
                         <TableRow key={`${trade.ticker}-${trade.exitDate}-${index}`}>
@@ -496,15 +500,15 @@ export default function Dashboard({ marketId }) {
                           <TableCell>
                             <div>
                               <p>{exitReasonLabel(trade.exitReason)}</p>
-                              <p className="mt-1 text-xs text-slate-500">
-                                {closeSourceLabel(closeOrder?.source)}
-                              </p>
                               {trade.dataQuality === 'incomplete' ? (
                                 <p className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-[#ef8f8f]">
                                   Dato incompleto
                                 </p>
                               ) : null}
                             </div>
+                          </TableCell>
+                          <TableCell className="font-semibold text-white">
+                            {formatCurrency(recovered)}
                           </TableCell>
                           <TableCell
                             className={
@@ -528,10 +532,10 @@ export default function Dashboard({ marketId }) {
               ) : (
                 <div className="flex min-h-36 items-center justify-center p-5 text-center">
                   <div>
-                    <p className="font-medium text-white">Nessuna chiusura oggi</p>
+                    <p className="font-medium text-white">Nessuna vendita registrata</p>
                     <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
-                      Le chiusure automatiche o manuali della giornata appariranno
-                      qui.
+                      Quando una posizione verrà chiusa, apparirà qui con ricavato
+                      e risultato netto.
                     </p>
                   </div>
                 </div>
