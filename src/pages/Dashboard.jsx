@@ -21,6 +21,10 @@ import {
 } from '../components/ui/Table'
 import { useToast } from '../components/ui/useToast'
 import { useTrading } from '../context/useTrading'
+import {
+  EXECUTION_COST_ASSUMPTIONS,
+  SLIPPAGE_ATR_RATIO,
+} from '../services/executionCosts'
 import { getMarketCopy } from '../services/marketCopy'
 import { getMarketDisplayStatus } from '../services/marketHours'
 import {
@@ -144,6 +148,33 @@ function calculateOpenPositionCommissions(positions = []) {
   }, 0)
 }
 
+function calculateOpenPositionLivePnl(positions = []) {
+  return positions.reduce((total, position) => {
+    const pnl = Number(position?.unrealizedPnl)
+
+    return Number.isFinite(pnl) ? total + pnl : total
+  }, 0)
+}
+
+function calculateOpenPositionRealtimeValue(positions = []) {
+  return positions.reduce((total, position) => {
+    const invested = Number(position?.invested)
+    const pnl = Number(position?.unrealizedPnl)
+    const openCommission = Number(position?.executionCosts?.open?.commissionEur)
+
+    if (!Number.isFinite(invested)) {
+      return total
+    }
+
+    return (
+      total +
+      invested +
+      (Number.isFinite(pnl) ? pnl : 0) +
+      (Number.isFinite(openCommission) ? openCommission : 0)
+    )
+  }, 0)
+}
+
 function getOpenPositionEstimatedCosts(position) {
   return (
     getExecutionImpact(position.executionCosts?.open) +
@@ -263,6 +294,53 @@ function DashboardBox({ detail, info, label, value, accent = 'text-white' }) {
         <div className="mt-2 text-sm leading-6 text-slate-500">{detail}</div>
       ) : null}
     </div>
+  )
+}
+
+function CostAssumptionsPanel() {
+  return (
+    <Card>
+      <CardHeader className="items-center justify-between gap-4 border-b border-slate-800 p-4">
+        <div className="flex items-center gap-2">
+          <CardTitle className="text-white">Percentuali commissioni e costi</CardTitle>
+          <InfoTip>
+            Sono le assunzioni statiche usate per rendere la simulazione più
+            realistica. Spread e slippage peggiorano il prezzo; le commissioni
+            broker vengono sottratte dal risultato.
+          </InfoTip>
+        </div>
+      </CardHeader>
+      <CardContent className="grid gap-3 p-4 lg:grid-cols-3">
+        {EXECUTION_COST_ASSUMPTIONS.map((item) => (
+          <div
+            className="rounded-lg border border-slate-800 bg-[#07090d] p-4"
+            key={item.id}
+          >
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+              {item.label}
+            </p>
+            <div className="mt-3 space-y-2 text-sm text-slate-400">
+              <p>
+                <span className="text-slate-500">Spread:</span>{' '}
+                <span className="font-semibold text-slate-200">{item.spread}</span>
+              </p>
+              <p>
+                <span className="text-slate-500">Slippage:</span>{' '}
+                <span className="font-semibold text-slate-200">
+                  {Math.round(SLIPPAGE_ATR_RATIO * 100)}% dell’ATR per lato
+                </span>
+              </p>
+              <p>
+                <span className="text-slate-500">Broker:</span>{' '}
+                <span className="font-semibold text-slate-200">
+                  {item.commission}
+                </span>
+              </p>
+            </div>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
   )
 }
 
@@ -410,6 +488,9 @@ export default function Dashboard({ marketId }) {
   const todayUsedCapital = calculateInvestedTotal(todayClosedTrades)
   const currentMonthUsedCapital = calculateInvestedTotal(currentMonthTrades)
   const openPositionCommissions = calculateOpenPositionCommissions(positions)
+  const openPositionLivePnl = calculateOpenPositionLivePnl(positions)
+  const openPositionRealtimeValue = calculateOpenPositionRealtimeValue(positions)
+  const realtimeCapital = capital + openPositionRealtimeValue
   const todayCommissionPct =
     todayUsedCapital > 0 ? todayCommissions / todayUsedCapital : 0
   const monthCommissionPct =
@@ -570,27 +651,63 @@ export default function Dashboard({ marketId }) {
 
       <CapitalTrendPanel sampleCount={strategyStats.total} />
 
+      <CostAssumptionsPanel />
+
       <section className="grid gap-4 xl:grid-cols-3">
-        <DashboardBox
-          accent="text-[var(--market-accent)]"
-          detail={
-            <>
-              <p>
-                {formatCurrency(capital)} liquidi ·{' '}
-                {formatCurrency(investedInOpenPositions)} investiti
-              </p>
-              {openPositionCommissions > 0 ? (
-                <p className="text-xs text-slate-500">
-                  Commissioni apertura già pagate:{' '}
-                  {formatCurrency(openPositionCommissions)}
+        <div className="grid gap-4">
+          <DashboardBox
+            accent="text-[var(--market-accent)]"
+            detail={
+              <>
+                <p>
+                  {formatCurrency(capital)} liquidi ·{' '}
+                  {formatCurrency(investedInOpenPositions)} investiti
                 </p>
-              ) : null}
-            </>
-          }
-          info="Capitale contabile simulato: liquidità disponibile più capitale allocato nelle posizioni aperte. Le commissioni di apertura delle posizioni aperte sono già state pagate e quindi riducono il capitale."
-          label="Capitale"
-          value={formatCurrency(totalCapital)}
-        />
+                {openPositionCommissions > 0 ? (
+                  <p className="text-xs text-slate-500">
+                    Commissioni apertura già pagate:{' '}
+                    {formatCurrency(openPositionCommissions)}
+                  </p>
+                ) : null}
+              </>
+            }
+            info="Capitale contabile simulato: liquidità disponibile più capitale allocato nelle posizioni aperte. Le commissioni di apertura delle posizioni aperte sono già state pagate e quindi riducono il capitale."
+            label="Capitale"
+            value={formatCurrency(totalCapital)}
+          />
+          <DashboardBox
+            accent={
+              openPositionLivePnl >= 0 ? 'text-[var(--market-accent)]' : 'text-[#ef8f8f]'
+            }
+            detail={
+              positions.length > 0 ? (
+                <>
+                  <p>
+                    Valore liquidabile stimato:{' '}
+                    {formatCurrency(openPositionRealtimeValue)}
+                  </p>
+                  <p>
+                    P/L live netto posizioni aperte:{' '}
+                    {formatCurrency(openPositionLivePnl)}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Capitale stimato se chiudessi ora:{' '}
+                    {formatCurrency(realtimeCapital)}
+                  </p>
+                </>
+              ) : (
+                'Nessun titolo acquistato o venduto short in portafoglio.'
+              )
+            }
+            info="Stima in tempo reale delle posizioni aperte: investito più P/L live netto, considerando i costi di chiusura stimati. Serve a capire quanto capitale recupereresti se chiudessi ora."
+            label="Capitale live su titoli acquistati"
+            value={
+              positions.length > 0
+                ? formatCurrency(openPositionRealtimeValue)
+                : formatCurrency(0)
+            }
+          />
+        </div>
         <DashboardBox
           accent="text-[var(--market-accent)]"
           detail={
