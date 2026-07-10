@@ -8,9 +8,9 @@ import Dashboard from './pages/Dashboard'
 import Diary from './pages/Diary'
 import Explanation from './pages/Explanation'
 import Login from './pages/Login'
+import MarketScanner from './pages/MarketScanner'
 import Orders from './pages/Orders'
 import Profits from './pages/Profits'
-import Scanner from './pages/Scanner'
 import Settings from './pages/Settings'
 import { useAuth } from './services/useAuth'
 import { useTrading } from './context/useTrading'
@@ -76,7 +76,7 @@ function AppRoutes() {
       >
         <Route index element={<Navigate to="/europa/dashboard" replace />} />
         <Route path="dashboard" element={<Navigate to="/europa/dashboard" replace />} />
-        <Route path="scanner" element={<Scanner />} />
+        <Route path="scanner" element={<MarketScanner />} />
         <Route path="portafoglio" element={<Navigate to="/scanner" replace />} />
         <Route path="ordini" element={<Navigate to="/europa/ordini" replace />} />
         <Route path="utili" element={<Navigate to="/europa/utili" replace />} />

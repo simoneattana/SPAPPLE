@@ -5,6 +5,7 @@ import {
   CircleSlash,
   Loader2,
   Radar,
+  RefreshCw,
 } from 'lucide-react'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
@@ -237,11 +238,13 @@ export default function Dashboard({ marketId }) {
     activeMarket,
     closePositionManually,
     markets,
+    runAutomatedScan,
     syncMeta,
   } = useTrading()
   const { toast } = useToast()
   const [now, setNow] = useState(() => Date.now())
   const [closingId, setClosingId] = useState(null)
+  const [scanLoading, setScanLoading] = useState(false)
   const effectiveMarket = marketId || activeMarket
   const currentStrategy = getTradingStrategy(effectiveMarket)
   const routeMarketState = markets?.[effectiveMarket] || {}
@@ -341,6 +344,37 @@ export default function Dashboard({ marketId }) {
     }
   }
 
+  const handleDashboardScan = async () => {
+    setScanLoading(true)
+
+    try {
+      const result = await runAutomatedScan(effectiveMarket)
+
+      if (result?.error) {
+        toast({
+          title: result.error.message || 'Scansione non riuscita',
+          variant: 'destructive',
+        })
+        return
+      }
+
+      toast({
+        title: result?.skipped
+          ? 'Scansione non disponibile ora'
+          : result?.openedTrades?.length > 0
+            ? `Scansione completata: ${result.openedTrades.length} posizioni aperte`
+            : 'Scansione completata: nessuna nuova apertura',
+      })
+    } catch (error) {
+      toast({
+        title: error.message || 'Scansione non riuscita',
+        variant: 'destructive',
+      })
+    } finally {
+      setScanLoading(false)
+    }
+  }
+
   return (
     <div className="flex flex-1 flex-col gap-5">
       <header className="flex flex-col gap-4">
@@ -360,6 +394,18 @@ export default function Dashboard({ marketId }) {
           </div>
 
           <div className="flex flex-wrap gap-2">
+            <Button
+              disabled={scanLoading || syncMeta?.isStale}
+              onClick={handleDashboardScan}
+              className="min-w-36"
+            >
+              {scanLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              Scansione
+            </Button>
             <StatusChip
               icon={automationEnabled ? Activity : Radar}
               variant={automationEnabled ? 'positive' : 'default'}
