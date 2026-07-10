@@ -92,6 +92,17 @@ function getExecutionImpact(costs) {
   )
 }
 
+function getTradeCommissionEur(trade) {
+  return (
+    Number(trade?.executionCosts?.open?.commissionEur || 0) +
+    Number(trade?.executionCosts?.close?.commissionEur || 0)
+  )
+}
+
+function calculateCommissionTotal(trades = []) {
+  return trades.reduce((total, trade) => total + getTradeCommissionEur(trade), 0)
+}
+
 function getOpenPositionEstimatedCosts(position) {
   return (
     getExecutionImpact(position.executionCosts?.open) +
@@ -205,8 +216,10 @@ function DashboardBox({ detail, info, label, value, accent = 'text-white' }) {
       <p className={`mt-3 text-xl font-semibold leading-tight ${accent}`}>
         {value}
       </p>
-      {detail ? (
+      {detail && typeof detail === 'string' ? (
         <p className="mt-2 text-sm leading-6 text-slate-500">{detail}</p>
+      ) : detail ? (
+        <div className="mt-2 text-sm leading-6 text-slate-500">{detail}</div>
       ) : null}
     </div>
   )
@@ -347,6 +360,8 @@ export default function Dashboard({ marketId }) {
   const strategyStats = calculateStrategyStats(history)
   const currentMonthStats = calculateRealizedTotals(currentMonthTrades)
   const todayStats = calculateRealizedTotals(todayClosedTrades)
+  const todayCommissions = calculateCommissionTotal(todayClosedTrades)
+  const currentMonthCommissions = calculateCommissionTotal(currentMonthTrades)
   const marketDisplayStatus = getMarketDisplayStatus(
     currentStrategy,
     new Date(now),
@@ -511,14 +526,36 @@ export default function Dashboard({ marketId }) {
         />
         <DashboardBox
           accent="text-[var(--market-accent)]"
-          detail={`${formatCurrency(todayStats.grossWins)} oggi · ${formatCurrency(currentMonthStats.grossWins)} questo mese`}
+          detail={
+            <>
+              <p>
+                {formatCurrency(todayStats.grossWins)} oggi ·{' '}
+                {formatCurrency(currentMonthStats.grossWins)} questo mese
+              </p>
+              <p className="font-semibold text-slate-300">
+                Commissioni: {formatCurrency(todayCommissions)} oggi ·{' '}
+                {formatCurrency(currentMonthCommissions)} mese
+              </p>
+            </>
+          }
           info={profitsInfo}
           label="Utili realizzati"
           value={formatCurrency(todayStats.grossWins)}
         />
         <DashboardBox
           accent={todayStats.netPnl >= 0 ? 'text-[var(--market-accent)]' : 'text-[#ef8f8f]'}
-          detail={`${formatCurrency(todayStats.netPnl)} oggi · ${formatCurrency(currentMonthStats.netPnl)} questo mese`}
+          detail={
+            <>
+              <p>
+                {formatCurrency(todayStats.netPnl)} oggi ·{' '}
+                {formatCurrency(currentMonthStats.netPnl)} questo mese
+              </p>
+              <p className="font-semibold text-slate-300">
+                Commissioni: {formatCurrency(todayCommissions)} oggi ·{' '}
+                {formatCurrency(currentMonthCommissions)} mese
+              </p>
+            </>
+          }
           info={netPnlInfo}
           label="P/L netto"
           value={formatCurrency(todayStats.netPnl)}
