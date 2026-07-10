@@ -739,7 +739,8 @@ export default function Dashboard({ marketId }) {
                       <TableHead>Direzione</TableHead>
                       <TableHead>Investito</TableHead>
                       <TableHead>P/L live</TableHead>
-                      <TableHead>Costi</TableHead>
+                      <TableHead>P/L %</TableHead>
+                      <TableHead>Costi stimati</TableHead>
                       <TableHead>Giorni</TableHead>
                       <TableHead>Azione</TableHead>
                     </TableRow>
@@ -747,6 +748,11 @@ export default function Dashboard({ marketId }) {
                   <TableBody>
                     {positions.map((position) => {
                       const pnl = Number(position.unrealizedPnl)
+                      const invested = Number(position.invested)
+                      const pnlPct =
+                        Number.isFinite(pnl) && Number.isFinite(invested) && invested > 0
+                          ? pnl / invested
+                          : null
                       const pnlAccent =
                         Number.isFinite(pnl) && pnl < 0
                           ? 'font-semibold text-[#ef8f8f]'
@@ -763,6 +769,11 @@ export default function Dashboard({ marketId }) {
                           <TableCell>{formatCurrency(position.invested)}</TableCell>
                           <TableCell className={pnlAccent}>
                             {Number.isFinite(pnl) ? formatCurrency(pnl) : 'In attesa'}
+                          </TableCell>
+                          <TableCell className={pnlAccent}>
+                            {Number.isFinite(pnlPct)
+                              ? percentFormatter.format(pnlPct)
+                              : 'In attesa'}
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">
