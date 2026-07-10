@@ -103,11 +103,44 @@ function calculateCommissionTotal(trades = []) {
   return trades.reduce((total, trade) => total + getTradeCommissionEur(trade), 0)
 }
 
+function getTradePriceImpactEur(trade) {
+  return (
+    Number(trade?.executionCosts?.open?.pricePenaltyEur || 0) +
+    Number(trade?.executionCosts?.close?.pricePenaltyEur || 0)
+  )
+}
+
+function calculatePriceImpactTotal(trades = []) {
+  return trades.reduce((total, trade) => total + getTradePriceImpactEur(trade), 0)
+}
+
+function calculateGrossPnlTotal(trades = []) {
+  return trades.reduce((total, trade) => {
+    if (Number.isFinite(Number(trade?.grossPnlEur))) {
+      return total + Number(trade.grossPnlEur)
+    }
+
+    if (Number.isFinite(Number(trade?.pnlEur))) {
+      return total + Number(trade.pnlEur)
+    }
+
+    return total
+  }, 0)
+}
+
 function calculateInvestedTotal(trades = []) {
   return trades.reduce((total, trade) => {
     const invested = Number(trade?.invested)
 
     return Number.isFinite(invested) ? total + invested : total
+  }, 0)
+}
+
+function calculateOpenPositionCommissions(positions = []) {
+  return positions.reduce((total, position) => {
+    const openCommission = Number(position?.executionCosts?.open?.commissionEur)
+
+    return Number.isFinite(openCommission) ? total + openCommission : total
   }, 0)
 }
 
@@ -370,8 +403,13 @@ export default function Dashboard({ marketId }) {
   const todayStats = calculateRealizedTotals(todayClosedTrades)
   const todayCommissions = calculateCommissionTotal(todayClosedTrades)
   const currentMonthCommissions = calculateCommissionTotal(currentMonthTrades)
+  const todayPriceImpact = calculatePriceImpactTotal(todayClosedTrades)
+  const currentMonthPriceImpact = calculatePriceImpactTotal(currentMonthTrades)
+  const todayGrossPnl = calculateGrossPnlTotal(todayClosedTrades)
+  const currentMonthGrossPnl = calculateGrossPnlTotal(currentMonthTrades)
   const todayUsedCapital = calculateInvestedTotal(todayClosedTrades)
   const currentMonthUsedCapital = calculateInvestedTotal(currentMonthTrades)
+  const openPositionCommissions = calculateOpenPositionCommissions(positions)
   const todayCommissionPct =
     todayUsedCapital > 0 ? todayCommissions / todayUsedCapital : 0
   const monthCommissionPct =
@@ -394,9 +432,9 @@ export default function Dashboard({ marketId }) {
       ? `Prezzi posizioni: ${lastLiveCheckText}`
       : `Monitor live sospeso: nessuna posizione aperta. Backend: ${lastBackendCheckText}`
   const profitsInfo =
-    'Somma dei soli trade chiusi in utile. Il dato è netto perché i costi di esecuzione vengono applicati già al prezzo reale e alle commissioni.'
+    'Somma dei soli trade chiusi con risultato positivo. È un dato già netto dalle commissioni broker salvate per ogni operazione.'
   const netPnlInfo =
-    'Somma di utili e perdite realizzate. Include spread, slippage e commissioni broker applicati a apertura e chiusura.'
+    'Risultato finale delle operazioni chiuse: P/L lordo calcolato sui prezzi peggiorati meno commissioni broker di apertura e chiusura.'
   const expectancyColor =
     strategyStats.expectancy >= 0 ? 'text-[var(--market-accent)]' : 'text-[#ef8f8f]'
 
@@ -535,8 +573,21 @@ export default function Dashboard({ marketId }) {
       <section className="grid gap-4 xl:grid-cols-3">
         <DashboardBox
           accent="text-[var(--market-accent)]"
-          detail={`${formatCurrency(capital)} liquidi · ${formatCurrency(investedInOpenPositions)} investiti`}
-          info="Capitale totale simulato: somma liquidità disponibile e capitale già allocato nelle posizioni aperte."
+          detail={
+            <>
+              <p>
+                {formatCurrency(capital)} liquidi ·{' '}
+                {formatCurrency(investedInOpenPositions)} investiti
+              </p>
+              {openPositionCommissions > 0 ? (
+                <p className="text-xs text-slate-500">
+                  Commissioni apertura già pagate:{' '}
+                  {formatCurrency(openPositionCommissions)}
+                </p>
+              ) : null}
+            </>
+          }
+          info="Capitale contabile simulato: liquidità disponibile più capitale allocato nelle posizioni aperte. Le commissioni di apertura delle posizioni aperte sono già state pagate e quindi riducono il capitale."
           label="Capitale"
           value={formatCurrency(totalCapital)}
         />
@@ -548,6 +599,9 @@ export default function Dashboard({ marketId }) {
                 {formatCurrency(todayStats.grossWins)} oggi ·{' '}
                 {formatCurrency(currentMonthStats.grossWins)} questo mese
               </p>
+              <p className="text-xs text-slate-500">
+                Solo operazioni chiuse in positivo, già al netto delle commissioni.
+              </p>
             </>
           }
           info={profitsInfo}
@@ -558,17 +612,25 @@ export default function Dashboard({ marketId }) {
           accent={todayStats.netPnl >= 0 ? 'text-[var(--market-accent)]' : 'text-[#ef8f8f]'}
           detail={
             <>
+              <p className="font-semibold text-slate-300">
+                Netto finale: {formatCurrency(todayStats.netPnl)} oggi ·{' '}
+                {formatCurrency(currentMonthStats.netPnl)} mese
+              </p>
               <p>
-                {formatCurrency(todayStats.netPnl)} oggi ·{' '}
-                {formatCurrency(currentMonthStats.netPnl)} questo mese
+                Lordo prima commissioni: {formatCurrency(todayGrossPnl)} oggi ·{' '}
+                {formatCurrency(currentMonthGrossPnl)} mese
+              </p>
+              <p>
+                Commissioni broker: {formatCurrency(todayCommissions)} oggi ·{' '}
+                {formatCurrency(currentMonthCommissions)} mese
+              </p>
+              <p>
+                Peggioramento prezzo stimato: {formatCurrency(todayPriceImpact)} oggi ·{' '}
+                {formatCurrency(currentMonthPriceImpact)} mese
               </p>
               <p>
                 Capitale usato: {formatCurrency(todayUsedCapital)} oggi ·{' '}
                 {formatCurrency(currentMonthUsedCapital)} mese
-              </p>
-              <p className="font-semibold text-slate-300">
-                Commissioni: {formatCurrency(todayCommissions)} oggi ·{' '}
-                {formatCurrency(currentMonthCommissions)} mese
               </p>
               <p className="text-xs text-slate-500">
                 Incidenza commissioni: {percentFormatter.format(todayCommissionPct)} oggi ·{' '}
