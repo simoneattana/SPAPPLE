@@ -69,6 +69,12 @@ const CRYPTO_SCAN_INTERVAL_MS = 5 * 60_000
 const ORDER_RETENTION_MS = 60 * 24 * 60 * 60 * 1000
 const MAX_ORDER_AUDIT_RECORDS = 180
 const EXECUTION_MODE = 'simulation'
+const RISK_CAUTION_LOSSES = 2
+const RISK_RECOVERY_LOSSES = 3
+const RISK_HARD_STOP_LOSSES = 5
+const RISK_CAUTION_SIZE_MULTIPLIER = 0.75
+const RISK_RECOVERY_SIZE_MULTIPLIER = 0.5
+const RISK_RECOVERY_MAX_OPENINGS = 1
 const DEFAULT_RISK_LIMITS = {
   maxDailyOrders: 20,
   maxDailyCapitalPct: 1,
@@ -770,8 +776,106 @@ function getTickerCooldownReason(marketState, ticker, strategy) {
   )}.`
 }
 
+function getLatestClosedLoss(history = []) {
+  return history.find((trade) => {
+    const pnl = Number(trade?.pnlEur)
+
+    return (
+      trade?.exitDate &&
+      (trade.result === 'LOSS' || (Number.isFinite(pnl) && pnl < 0))
+    )
+  })
+}
+
+function getRiskGovernorState(marketState, strategy, date = new Date()) {
+  const history = marketState.history || []
+  const consecutiveLosses = getConsecutiveLosses(history)
+  const latestLoss = getLatestClosedLoss(history)
+  const maxConsecutiveLosses =
+    getRiskLimits(strategy, marketState.riskLimits).maxConsecutiveLosses ||
+    RISK_RECOVERY_LOSSES
+
+  if (consecutiveLosses < RISK_CAUTION_LOSSES || !latestLoss) {
+    return {
+      consecutiveLosses,
+      maxOpenings: Infinity,
+      mode: 'normal',
+      sizeMultiplier: 1,
+    }
+  }
+
+  const latestLossDate = new Date(latestLoss.exitDate)
+
+  if (!Number.isFinite(latestLossDate.getTime())) {
+    return {
+      consecutiveLosses,
+      maxOpenings: Infinity,
+      mode: 'normal',
+      sizeMultiplier: 1,
+    }
+  }
+
+  if (consecutiveLosses >= RISK_HARD_STOP_LOSSES) {
+    const firstRestart = getNextMarketScanAt(strategy, latestLossDate)
+    const restartAt = getNextMarketScanAt(
+      strategy,
+      new Date(firstRestart.getTime() + 60_000),
+    )
+
+    if (date < restartAt) {
+      return {
+        consecutiveLosses,
+        message: `Blocco forte rischio: ${consecutiveLosses} perdite consecutive. Ripartenza prevista alla seconda sessione utile.`,
+        mode: 'hard_stop',
+        pauseUntil: restartAt,
+        sizeMultiplier: 0,
+      }
+    }
+  }
+
+  if (consecutiveLosses >= maxConsecutiveLosses) {
+    const restartAt = getNextMarketScanAt(strategy, latestLossDate)
+
+    if (date < restartAt) {
+      return {
+        consecutiveLosses,
+        message: `Pausa rischio attiva: ${consecutiveLosses} perdite consecutive. Ripartenza alla prossima sessione utile.`,
+        mode: 'paused',
+        pauseUntil: restartAt,
+        sizeMultiplier: 0,
+      }
+    }
+
+    return {
+      consecutiveLosses,
+      maxOpenings: RISK_RECOVERY_MAX_OPENINGS,
+      message: `Modalità recupero: ${consecutiveLosses} perdite consecutive. Apro al massimo 1 posizione con size ridotta.`,
+      mode: 'recovery',
+      sizeMultiplier: RISK_RECOVERY_SIZE_MULTIPLIER,
+    }
+  }
+
+  return {
+    consecutiveLosses,
+    maxOpenings: Infinity,
+    message: `Prudenza attiva: ${consecutiveLosses} perdite consecutive. Size ridotta al 75%.`,
+    mode: 'caution',
+    sizeMultiplier: RISK_CAUTION_SIZE_MULTIPLIER,
+  }
+}
+
+function getRiskAdjustedPositionSize(capital, sizing, riskState) {
+  const baseSize = calculatePositionSize(capital, sizing)
+  const multiplier = Number.isFinite(Number(riskState?.sizeMultiplier))
+    ? Number(riskState.sizeMultiplier)
+    : 1
+
+  return Math.max(0, baseSize * multiplier)
+}
+
 function getOpeningOrderBlockReason(marketState, notional, strategy) {
   const riskLimits = getRiskLimits(strategy, marketState.riskLimits)
+  const riskState = getRiskGovernorState(marketState, strategy)
 
   if (marketState.executionMode !== EXECUTION_MODE) {
     return 'Modalità operativa non supportata: al momento Spapple può eseguire solo ordini simulati.'
@@ -779,6 +883,10 @@ function getOpeningOrderBlockReason(marketState, notional, strategy) {
 
   if (marketState.killSwitchEnabled) {
     return 'Kill switch attivo: nuove aperture bloccate.'
+  }
+
+  if (riskState.mode === 'paused' || riskState.mode === 'hard_stop') {
+    return riskState.message
   }
 
   if (marketState.pendingTicker) {
@@ -838,12 +946,6 @@ function getOpeningOrderBlockReason(marketState, notional, strategy) {
     return `Limite capitale giornaliero superato: massimo ${Math.round(
       riskLimits.maxDailyCapitalPct * 100,
     )}% del capitale iniziale del mercato.`
-  }
-
-  const consecutiveLosses = getConsecutiveLosses(marketState.history || [])
-
-  if (consecutiveLosses >= riskLimits.maxConsecutiveLosses) {
-    return `Blocco prudenziale attivo: ${consecutiveLosses} perdite consecutive.`
   }
 
   return null
@@ -2249,6 +2351,7 @@ export function TradingProvider({ children }) {
     const marketState = normalizeMarketState(marketId, current.markets?.[marketId])
     const sizing = strategy.positionSizing
     const maxPositions = getStrategyMaxPositions(strategy)
+    const riskState = getRiskGovernorState(marketState, strategy)
 
     if (!['LONG', 'SHORT'].includes(type)) {
       throw new Error('Tipo ordine non valido')
@@ -2258,7 +2361,11 @@ export function TradingProvider({ children }) {
       throw new Error('Slot operativi esauriti')
     }
 
-    const positionSize = calculatePositionSize(marketState.capital, sizing)
+    const positionSize = getRiskAdjustedPositionSize(
+      marketState.capital,
+      sizing,
+      riskState,
+    )
 
     if (!canOpenPosition(marketState.capital, sizing)) {
       throw new Error('Capitale operativo insufficiente')
@@ -2386,9 +2493,11 @@ export function TradingProvider({ children }) {
     const current = syncActiveMarketState(stateRef.current)
     const marketId = targetMarketId || current.activeMarket
     const strategy = getTradingStrategy(marketId)
+    const marketCopy = getMarketCopy(marketId)
     const marketState = normalizeMarketState(marketId, current.markets?.[marketId])
     const sizing = strategy.positionSizing
     const maxPositions = getStrategyMaxPositions(strategy)
+    const riskState = getRiskGovernorState(marketState, strategy)
     let capital = marketState.capital
     const positions = [...marketState.positions]
     let orders = marketState.orders || []
@@ -2408,18 +2517,18 @@ export function TradingProvider({ children }) {
         type: 'automation',
         status: 'waiting',
         title: closeGuardActive
-          ? `Protezione azioni ${getMarketCloseGuardLabel(strategy)} attiva`
-          : `Azioni in attesa delle ${getMarketScanStartLabel(strategy)}`,
+          ? `Protezione ${marketCopy.label} ${getMarketCloseGuardLabel(strategy)} attiva`
+          : `${marketCopy.label} in attesa delle ${getMarketScanStartLabel(strategy)}`,
         detail: closeGuardActive
-          ? 'Pilota automatico azionario fermo: nuove aperture bloccate fino alla prossima seduta.'
-          : `Pilota automatico azionario fermo: prima scansione consentita alle ${getMarketScanStartLabel(strategy)}, dopo la lettura del contesto USA.`,
+          ? `${marketCopy.label} fermo: nuove aperture bloccate fino alla prossima seduta.`
+          : `${marketCopy.label} fermo: prima scansione consentita alle ${getMarketScanStartLabel(strategy)}.`,
       })
       appendLocalLog(activity)
 
       const nextMarketState = {
         ...marketState,
         engineStatus: closeGuardActive
-          ? `Protezione azioni ${getMarketCloseGuardLabel(strategy)} attiva`
+          ? `Protezione ${marketCopy.label} ${getMarketCloseGuardLabel(strategy)} attiva`
           : `In attesa delle ${getMarketScanStartLabel(strategy)}`,
         nextScanAt: getNextScanAt(marketId),
         activityLog,
@@ -2430,7 +2539,11 @@ export function TradingProvider({ children }) {
       stateRef.current = nextState
       setState(nextState)
 
-      return { openedTrades, skippedTickers: rows.map((row) => row.ticker) }
+      return {
+        openedTrades,
+        riskState,
+        skippedTickers: rows.map((row) => row.ticker),
+      }
     }
 
     const rowsAllowedByContext = filterAutomaticRowsByMarketContext(
@@ -2438,11 +2551,28 @@ export function TradingProvider({ children }) {
       marketId,
       marketState.usMarketContext,
     )
+    const candidateRows =
+      riskState.mode === 'recovery'
+        ? rowsAllowedByContext.slice(0, RISK_RECOVERY_MAX_OPENINGS)
+        : rowsAllowedByContext
+
     rows
       .filter((row) => !rowsAllowedByContext.includes(row))
       .forEach((row) => skippedTickers.push(row.ticker))
 
-    rowsAllowedByContext.forEach((row) => {
+    rowsAllowedByContext
+      .filter((row) => !candidateRows.includes(row))
+      .forEach((row) => skippedTickers.push(row.ticker))
+
+    candidateRows.forEach((row) => {
+      if (
+        Number.isFinite(Number(riskState.maxOpenings)) &&
+        openedTrades.length >= Number(riskState.maxOpenings)
+      ) {
+        skippedTickers.push(row.ticker)
+        return
+      }
+
       const type = getSignalType(row, strategy)
       const alreadyOpen = positions.some(
         (position) => position.ticker === row.ticker,
@@ -2458,7 +2588,7 @@ export function TradingProvider({ children }) {
         return
       }
 
-      const positionSize = calculatePositionSize(capital, sizing)
+      const positionSize = getRiskAdjustedPositionSize(capital, sizing, riskState)
       const blockReason = getOpeningOrderBlockReason(
         { ...marketState, capital, positions, orders, pendingTicker: row.ticker },
         positionSize,
@@ -2557,7 +2687,11 @@ export function TradingProvider({ children }) {
           title: `Ordine automatico simulato ${type === 'LONG' ? 'Long' : 'Short'}`,
           detail: `${row.ticker}: ordine ${order.id} eseguito, posizione da ${positionSize.toFixed(
             2,
-          )}€ allocata.`,
+          )}€ allocata.${
+            riskState.mode === 'normal'
+              ? ''
+              : ` ${riskState.message || 'Size ridotta per controllo rischio.'}`
+          }`,
         }),
       )
     })
@@ -2572,7 +2706,8 @@ export function TradingProvider({ children }) {
             ? `${openedTrades.length} posizioni aperte automaticamente.`
             : `Nessuna posizione aperta. ${
                 skippedTickers.length > 0
-                  ? 'Segnali saltati per slot, capitale o duplicati.'
+                  ? riskState.message ||
+                    'Segnali saltati per slot, capitale o duplicati.'
                   : 'Nessun segnale disponibile.'
               }`,
       }),
@@ -2585,7 +2720,9 @@ export function TradingProvider({ children }) {
       orders,
       engineStatus:
         openedTrades.length > 0
-          ? 'Pilota automatico eseguito'
+          ? riskState.mode === 'recovery'
+            ? 'Recovery eseguita'
+            : 'Pilota automatico eseguito'
           : marketState.engineStatus,
       activityLog,
       events,
@@ -2595,7 +2732,7 @@ export function TradingProvider({ children }) {
     stateRef.current = nextState
     setState(nextState)
 
-    return { openedTrades, skippedTickers }
+    return { openedTrades, riskState, skippedTickers }
   }, [])
 
   const runAutomatedScan = useCallback(async (targetMarketId) => {
@@ -2661,7 +2798,10 @@ export function TradingProvider({ children }) {
         marketId,
       )
 
-      const { openedTrades } = executeAutomatedTrades(automaticRows, marketId)
+      const { openedTrades, riskState } = executeAutomatedTrades(
+        automaticRows,
+        marketId,
+      )
 
       updateTradingState((current) => {
         const syncedCurrent = syncActiveMarketState(current)
@@ -2673,7 +2813,8 @@ export function TradingProvider({ children }) {
           openedTrades.length > 0
             ? `Ho aperto ${openedTrades.length} posizioni automatiche dopo dati ${scannerConfig.provider}.`
             : actionableRows.length > 0
-              ? 'Ho trovato segnali, ma nessuno abbastanza forte o apribile secondo i limiti rischio.'
+              ? riskState?.message ||
+                'Ho trovato segnali, ma nessuno abbastanza forte o apribile secondo i limiti rischio.'
               : `Dati aggiornati da ${scannerConfig.provider}. Resto in attesa del prossimo ciclo.`
 
         return updateMarketState(syncedCurrent, marketId, {
