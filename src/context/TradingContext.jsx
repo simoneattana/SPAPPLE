@@ -1323,6 +1323,7 @@ function calculatePositionExecutionSnapshot(position, latestPrice, priceData = {
     notionalEur: theoreticalLatestPriceEur * quantity,
     phase: 'CLOSE',
     price: latestPrice,
+    ticker: position.ticker,
     type: position.type,
   })
   const effectiveLatestPrice = Number(closeExecutionCosts.effectivePrice)
@@ -1378,6 +1379,7 @@ function buildTrade(
     notionalEur: invested,
     phase: 'OPEN',
     price,
+    ticker,
     type,
   })
   const entryPrice = Number(openExecutionCosts.effectivePrice)

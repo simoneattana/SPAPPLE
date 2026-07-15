@@ -298,6 +298,7 @@ function getPositionCloseExecution(position, scanRow) {
       notionalEur,
       phase: 'CLOSE',
       price: marketPrice,
+      ticker: position.ticker,
       type: position.type,
     })
   } catch {

@@ -8,7 +8,7 @@ export const SPREAD_PER_SIDE = {
 
 export const EXECUTION_COST_ASSUMPTIONS = [
   {
-    commission: '1,9 per mille, min 1,50 EUR, max 18 EUR',
+    commission: 'Italia: 1,9 per mille min 1,50 EUR, max 18 EUR. Germania/Cboe Europa: 0,025% min 9,50 EUR. Svizzera: 0,03% min 20 CHF.',
     id: 'equities',
     label: 'Europa',
     sourceLabel: 'Directa, pagina commissioni',
@@ -58,7 +58,46 @@ function getAdverseDirection(type, phase) {
   return phase === 'OPEN' ? -1 : 1
 }
 
-function getCommission({ currency, fxToEur, marketId, notionalEur }) {
+function getEquityCommissionProfile(ticker = '') {
+  const normalizedTicker = String(ticker).toUpperCase()
+
+  if (normalizedTicker.endsWith('.MI')) {
+    return {
+      brokerProfile: 'Directa Italia variabile MTA',
+      maxEur: 18,
+      minNative: 1.5,
+      rate: 0.0019,
+      note: 'Italia MTA: 1,9 per mille del controvalore, minimo 1,5 EUR, massimo 18 EUR per eseguito.',
+    }
+  }
+
+  if (normalizedTicker.endsWith('.DE')) {
+    return {
+      brokerProfile: 'Directa Germania Xetra',
+      minNative: 9.5,
+      rate: 0.00025,
+      note: 'Germania Xetra: 0,025% del controvalore, minimo 9,5 EUR per eseguito.',
+    }
+  }
+
+  if (normalizedTicker.endsWith('.SW')) {
+    return {
+      brokerProfile: 'Directa Svizzera SIX',
+      minNative: 20,
+      rate: 0.0003,
+      note: 'Svizzera SIX: 0,03% del controvalore, minimo 20 CHF per eseguito.',
+    }
+  }
+
+  return {
+    brokerProfile: 'Directa Europa Cboe',
+    minNative: 9.5,
+    rate: 0.00025,
+    note: 'Europa Cboe: 0,025% del controvalore, minimo 9,5 EUR per eseguito.',
+  }
+}
+
+function getCommission({ currency, fxToEur, marketId, notionalEur, ticker }) {
   const safeNotionalEur = Number.isFinite(Number(notionalEur))
     ? Math.max(Number(notionalEur), 0)
     : 0
@@ -76,6 +115,23 @@ function getCommission({ currency, fxToEur, marketId, notionalEur }) {
       commissionNative: round(native),
       currency: currency || 'USD',
       note: 'Commissione fissa prudenziale di 9 USD per eseguito.',
+    }
+  }
+
+  if (marketId === 'equities') {
+    const profile = getEquityCommissionProfile(ticker)
+    const minEur = profile.minNative * safeFxToEur
+    const rawEur = safeNotionalEur * profile.rate
+    const cappedEur = Number.isFinite(Number(profile.maxEur))
+      ? Math.min(Math.max(rawEur, minEur), Number(profile.maxEur))
+      : Math.max(rawEur, minEur)
+
+    return {
+      brokerProfile: profile.brokerProfile,
+      commissionEur: round(cappedEur),
+      commissionNative: round(cappedEur / safeFxToEur),
+      currency: currency || 'EUR',
+      note: profile.note,
     }
   }
 
@@ -110,6 +166,7 @@ export function applyExecutionCosts({
   notionalEur = null,
   phase,
   price,
+  ticker = '',
   type,
 }) {
   const marketPrice = Number(price)
@@ -139,6 +196,7 @@ export function applyExecutionCosts({
     fxToEur: safeFxToEur,
     marketId,
     notionalEur: estimatedNotionalEur,
+    ticker,
   })
 
   return {
