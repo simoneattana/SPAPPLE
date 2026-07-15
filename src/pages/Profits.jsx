@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card'
 import { InfoTip } from '../components/ui/InfoTip'
 import { useTrading } from '../context/useTrading'
 import { getMarketCopy } from '../services/marketCopy'
+import { restateClosedTradeExecutionCosts } from '../services/executionCosts'
 import {
   calculateRealizedTotals,
   filterTradesByMonthKey,
@@ -139,9 +140,16 @@ export default function Profits({ marketId }) {
   const history = Array.isArray(routeMarketState.history)
     ? routeMarketState.history
     : EMPTY_ARRAY
+  const displayHistory = useMemo(
+    () => history.map((trade) => restateClosedTradeExecutionCosts(trade)),
+    [history],
+  )
   const marketLabel = routeMarketState.marketLabel || strategy.label
   const marketCopy = getMarketCopy(effectiveMarket)
-  const latestTradeDate = useMemo(() => getLatestTradeDate(history), [history])
+  const latestTradeDate = useMemo(
+    () => getLatestTradeDate(displayHistory),
+    [displayHistory],
+  )
   const availableMonths = useMemo(
     () => getRecentMonthKeysFromDate(latestTradeDate || new Date(), 3),
     [latestTradeDate],
@@ -155,8 +163,8 @@ export default function Profits({ marketId }) {
     }
   }, [availableMonths, selectedMonth])
   const selectedMonthTrades = useMemo(
-    () => filterTradesByMonthKey(history, selectedMonth),
-    [history, selectedMonth],
+    () => filterTradesByMonthKey(displayHistory, selectedMonth),
+    [displayHistory, selectedMonth],
   )
   const selectedMonthTotals = calculateRealizedTotals(selectedMonthTrades)
   const tradesByDay = useMemo(

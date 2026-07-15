@@ -235,3 +235,167 @@ export function getExecutionCommissionEur(executionCosts) {
 export function getPositionOpenCommissionEur(position) {
   return getExecutionCommissionEur(position?.executionCosts?.open)
 }
+
+function inferMarketIdFromTicker(ticker = '') {
+  const normalizedTicker = String(ticker).toUpperCase()
+
+  if (
+    normalizedTicker.endsWith('.T') ||
+    normalizedTicker.endsWith('.HK') ||
+    normalizedTicker.endsWith('.SS') ||
+    normalizedTicker.endsWith('.SZ')
+  ) {
+    return 'asia'
+  }
+
+  if (normalizedTicker.includes('.')) {
+    return 'equities'
+  }
+
+  return 'usa'
+}
+
+function firstFiniteNumber(...values) {
+  for (const value of values) {
+    const number = Number(value)
+
+    if (Number.isFinite(number) && number > 0) {
+      return number
+    }
+  }
+
+  return null
+}
+
+function roundMoney(value) {
+  const number = Number(value)
+
+  return Number.isFinite(number) ? Number(number.toFixed(4)) : null
+}
+
+export function restateClosedTradeExecutionCosts(trade) {
+  if (!trade || typeof trade !== 'object') {
+    return trade
+  }
+
+  const ticker = trade.ticker || ''
+  const marketId =
+    trade.marketId ||
+    trade.executionCosts?.open?.marketId ||
+    trade.executionCosts?.close?.marketId ||
+    inferMarketIdFromTicker(ticker)
+  const type = trade.type === 'SHORT' ? 'SHORT' : 'LONG'
+  const currency =
+    trade.currency ||
+    trade.executionCosts?.open?.currency ||
+    trade.executionCosts?.close?.currency ||
+    (marketId === 'usa' ? 'USD' : 'EUR')
+  const entryFxToEur = firstFiniteNumber(
+    trade.entryFxToEur,
+    trade.executionCosts?.open?.fxToEur,
+    1,
+  )
+  const exitFxToEur = firstFiniteNumber(
+    trade.exitFxToEur,
+    trade.executionCosts?.close?.fxToEur,
+    entryFxToEur,
+    1,
+  )
+  const invested = firstFiniteNumber(trade.invested)
+  const entrySignalPrice = firstFiniteNumber(
+    trade.entrySignalPrice,
+    trade.executionCosts?.open?.marketPrice,
+    trade.entryPrice,
+  )
+  const exitSignalPrice = firstFiniteNumber(
+    trade.exitSignalPrice,
+    trade.executionCosts?.close?.marketPrice,
+    trade.exitPrice,
+  )
+  const atr = firstFiniteNumber(
+    trade.atrAtEntry,
+    trade.executionCosts?.open?.slippageNative
+      ? Number(trade.executionCosts.open.slippageNative) / SLIPPAGE_ATR_RATIO
+      : null,
+    trade.executionCosts?.close?.slippageNative
+      ? Number(trade.executionCosts.close.slippageNative) / SLIPPAGE_ATR_RATIO
+      : null,
+    0,
+  )
+
+  if (!invested || !entrySignalPrice || !exitSignalPrice) {
+    return trade
+  }
+
+  try {
+    const openCosts = applyExecutionCosts({
+      atr,
+      currency,
+      fxToEur: entryFxToEur,
+      marketId,
+      notionalEur: invested,
+      phase: 'OPEN',
+      price: entrySignalPrice,
+      ticker,
+      type,
+    })
+    const entryPriceEur = Number(openCosts.effectivePriceEur)
+    const storedQuantity = firstFiniteNumber(trade.quantity)
+    const quantity =
+      storedQuantity ||
+      (Number.isFinite(entryPriceEur) && entryPriceEur > 0
+        ? invested / entryPriceEur
+        : null)
+
+    if (!quantity) {
+      return trade
+    }
+
+    const closeNotionalEur = exitSignalPrice * exitFxToEur * quantity
+    const closeCosts = applyExecutionCosts({
+      atr,
+      currency,
+      fxToEur: exitFxToEur,
+      marketId,
+      notionalEur: closeNotionalEur,
+      phase: 'CLOSE',
+      price: exitSignalPrice,
+      ticker,
+      type,
+    })
+    const exitPriceEur = Number(closeCosts.effectivePriceEur)
+    const grossPnlEur =
+      type === 'LONG'
+        ? (exitPriceEur - entryPriceEur) * quantity
+        : (entryPriceEur - exitPriceEur) * quantity
+    const openCommissionEur = Number(openCosts.commissionEur) || 0
+    const closeCommissionEur = Number(closeCosts.commissionEur) || 0
+    const pnlEur = grossPnlEur - openCommissionEur - closeCommissionEur
+    const recoveredCapital = Math.max(
+      invested + grossPnlEur - closeCommissionEur,
+      0,
+    )
+
+    return {
+      ...trade,
+      entryPrice: openCosts.effectivePrice,
+      entryPriceEur: roundMoney(entryPriceEur),
+      exitPrice: closeCosts.effectivePrice,
+      exitPriceEur: roundMoney(exitPriceEur),
+      executionCosts: {
+        ...(trade.executionCosts || {}),
+        open: openCosts,
+        close: closeCosts,
+      },
+      grossPnlEur: roundMoney(grossPnlEur),
+      pnlEur: roundMoney(pnlEur),
+      quantity: roundMoney(quantity),
+      recoveredCapital: roundMoney(recoveredCapital),
+      result: pnlEur >= 0 ? 'WIN' : 'LOSS',
+      totalCostsEur: roundMoney(openCommissionEur + closeCommissionEur),
+      costModelRestated: true,
+    }
+  } catch {
+    return trade
+  }
+}

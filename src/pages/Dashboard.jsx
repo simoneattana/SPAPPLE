@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Activity,
   AlertTriangle,
@@ -25,6 +25,7 @@ import { useTrading } from '../context/useTrading'
 import {
   EXECUTION_COST_ASSUMPTIONS,
   SLIPPAGE_ATR_RATIO,
+  restateClosedTradeExecutionCosts,
 } from '../services/executionCosts'
 import { getMarketCopy } from '../services/marketCopy'
 import { getMarketDisplayStatus } from '../services/marketHours'
@@ -49,6 +50,7 @@ const percentFormatter = new Intl.NumberFormat('it-IT', {
 
 const MINIMUM_SAMPLE = 30
 const RELIABLE_SAMPLE = 100
+const EMPTY_ARRAY = []
 
 const dateTimeFormatter = new Intl.DateTimeFormat('it-IT', {
   dateStyle: 'short',
@@ -187,7 +189,15 @@ function getOpenPositionEstimatedCosts(position) {
   )
 }
 
-function CostSummaryTip({ closeLabel = 'Chiusura', closeCosts, grossPnl, netPnl, openCosts, totalCosts }) {
+function CostSummaryTip({
+  closeLabel = 'Chiusura',
+  closeCosts,
+  grossPnl,
+  netPnl,
+  openCosts,
+  restated = false,
+  totalCosts,
+}) {
   const resolvedTotal =
     Number.isFinite(Number(totalCosts))
       ? Number(totalCosts)
@@ -204,6 +214,11 @@ function CostSummaryTip({ closeLabel = 'Chiusura', closeCosts, grossPnl, netPnl,
           <p>P/L netto visibile: {formatCurrency(netPnl)}</p>
         ) : null}
         <p>Costi totali inclusi: {formatCurrency(resolvedTotal)}</p>
+        {restated ? (
+          <p className="rounded-md border border-[var(--market-border)] bg-[var(--market-muted)] px-2 py-1 text-xs text-[var(--market-accent)]">
+            Ricalcolato con il modello commissionale attuale.
+          </p>
+        ) : null}
         {openCosts ? (
           <div className="border-t border-slate-800 pt-2">
             <p className="font-semibold text-slate-300">Apertura</p>
@@ -554,13 +569,17 @@ export default function Dashboard({ marketId }) {
   const totalCapital = capital + investedInOpenPositions
   const history = Array.isArray(routeMarketState.history)
     ? routeMarketState.history
-    : []
+    : EMPTY_ARRAY
+  const displayHistory = useMemo(
+    () => history.map((trade) => restateClosedTradeExecutionCosts(trade)),
+    [history],
+  )
   const engineStatus = routeMarketState.engineStatus || 'In attesa'
   const executionMode = routeMarketState.executionMode || 'simulation'
   const killSwitchEnabled = Boolean(routeMarketState.killSwitchEnabled)
-  const recentClosedTrades = history.slice(0, 5)
-  const currentMonthTrades = filterTradesByCurrentMonth(history)
-  const todayClosedTrades = filterTradesByToday(history)
+  const recentClosedTrades = displayHistory.slice(0, 5)
+  const currentMonthTrades = filterTradesByCurrentMonth(displayHistory)
+  const todayClosedTrades = filterTradesByToday(displayHistory)
   const lastScanAt = routeMarketState.lastScanAt || null
   const lastScanCount = Number(routeMarketState.lastScanCount || 0)
   const lastSignalCount = Number(routeMarketState.lastSignalCount || 0)
@@ -576,7 +595,7 @@ export default function Dashboard({ marketId }) {
     (currentStrategy?.positionSizing?.percent || 0.1) * 100,
   )
   const lastScanText = lastScanAt ? formatDate(lastScanAt) : 'Mai'
-  const strategyStats = calculateStrategyStats(history)
+  const strategyStats = calculateStrategyStats(displayHistory)
   const currentMonthStats = calculateRealizedTotals(currentMonthTrades)
   const todayStats = calculateRealizedTotals(todayClosedTrades)
   const todayCommissions = calculateCommissionTotal(todayClosedTrades)
@@ -1030,6 +1049,7 @@ export default function Dashboard({ marketId }) {
                                 grossPnl={trade.grossPnlEur}
                                 netPnl={trade.pnlEur}
                                 openCosts={trade.executionCosts?.open}
+                                restated={trade.costModelRestated}
                                 totalCosts={totalCosts}
                               />
                             </div>

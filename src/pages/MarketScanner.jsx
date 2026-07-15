@@ -6,6 +6,7 @@ import { InfoTip } from '../components/ui/InfoTip'
 import { useTrading } from '../context/useTrading'
 import { getMarketCopy } from '../services/marketCopy'
 import { getMarketDisplayStatus } from '../services/marketHours'
+import { restateClosedTradeExecutionCosts } from '../services/executionCosts'
 import {
   calculateRealizedTotals,
   filterTradesByCurrentMonth,
@@ -79,8 +80,13 @@ function MarketSummaryCard({ marketId, marketState }) {
   const copy = getMarketCopy(marketId)
   const theme = getMarketTheme(marketId)
   const history = Array.isArray(marketState.history) ? marketState.history : []
+  const displayHistory = history.map((trade) =>
+    restateClosedTradeExecutionCosts(trade),
+  )
   const positions = Array.isArray(marketState.positions) ? marketState.positions : []
-  const monthStats = calculateRealizedTotals(filterTradesByCurrentMonth(history))
+  const monthStats = calculateRealizedTotals(
+    filterTradesByCurrentMonth(displayHistory),
+  )
   const capital = Number.isFinite(Number(marketState.capital))
     ? Number(marketState.capital)
     : strategy.initialCapital

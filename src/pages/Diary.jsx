@@ -23,6 +23,7 @@ import {
   TableRow,
 } from '../components/ui/Table'
 import { useTrading } from '../context/useTrading'
+import { restateClosedTradeExecutionCosts } from '../services/executionCosts'
 import { getMarketCopy } from '../services/marketCopy'
 import { getTradingStrategy } from '../strategies'
 
@@ -323,6 +324,10 @@ export default function Diary({ marketId }) {
   const history = Array.isArray(routeMarketState.history)
     ? routeMarketState.history
     : EMPTY_ARRAY
+  const displayHistory = useMemo(
+    () => history.map((trade) => restateClosedTradeExecutionCosts(trade)),
+    [history],
+  )
   const orders = Array.isArray(routeMarketState.orders)
     ? routeMarketState.orders
     : EMPTY_ARRAY
@@ -332,8 +337,8 @@ export default function Diary({ marketId }) {
   const marketLabel = routeMarketState.marketLabel || strategy.label
   const marketCopy = getMarketCopy(effectiveMarket)
   const monthOptions = useMemo(
-    () => getMonthOptions(history, orders, events),
-    [events, history, orders],
+    () => getMonthOptions(displayHistory, orders, events),
+    [displayHistory, events, orders],
   )
   const [month, setMonth] = useState('all')
   const [result, setResult] = useState('all')
@@ -341,16 +346,16 @@ export default function Diary({ marketId }) {
   const [query, setQuery] = useState('')
   const filteredTrades = useMemo(
     () =>
-      history.filter((trade) =>
+      displayHistory.filter((trade) =>
         tradeMatchesFilters(trade, { month, query, result }),
       ),
-    [history, month, query, result],
+    [displayHistory, month, query, result],
   )
   const visibleTrades = filteredTrades.slice(0, MAX_VISIBLE_ROWS)
   const realizedTotals = calculateRealizedTotals(filteredTrades)
   const activityRecords = useMemo(
-    () => buildActivityRecords({ events, history, orders }),
-    [events, history, orders],
+    () => buildActivityRecords({ events, history: displayHistory, orders }),
+    [displayHistory, events, orders],
   )
   const filteredActivity = useMemo(
     () =>
