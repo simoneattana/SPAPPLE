@@ -87,7 +87,7 @@ export default async function handler(request, response) {
   const supabase = getSupabaseClient()
 
   if (!supabase) {
-    sendJson(response, 503, { error: 'Supabase non configurato' })
+    sendJson(response, 503, { error: 'Database Neon non configurato' })
     return
   }
 

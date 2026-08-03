@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js'
+import { neon } from '@neondatabase/serverless'
 import { ATR, RSI } from 'technicalindicators'
 import {
   CRYPTO_TICKERS,
@@ -569,21 +569,21 @@ export function sendJson(response, status, payload) {
   response.end(JSON.stringify(payload))
 }
 
-export function getSupabaseClient() {
-  const supabaseUrl = process.env.SUPABASE_URL
-  const supabaseServerKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVER_KEY
+export function getNeonSql() {
+  const databaseUrl =
+    process.env.DATABASE_URL ||
+    process.env.NEON_DATABASE_URL ||
+    process.env.POSTGRES_URL
 
-  if (!supabaseUrl || !supabaseServerKey) {
+  if (!databaseUrl) {
     return null
   }
 
-  return createClient(supabaseUrl, supabaseServerKey, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-    },
-  })
+  return neon(databaseUrl)
+}
+
+export function getSupabaseClient() {
+  return getNeonSql()
 }
 
 export function normalizeTradingState(payload) {
@@ -2714,98 +2714,75 @@ export async function runBackendMonitor(state) {
   }
 }
 
-export async function readTradingState(supabase) {
-  const { data, error } = await runSupabaseQuery(
-    'Lettura stato Supabase',
-    (signal) =>
-      supabase
-        .from('spapple_state')
-        .select('payload, updated_at')
-        .eq('id', STATE_ID)
-        .maybeSingle()
-        .abortSignal(signal),
+async function runNeonQuery(label, queryFn) {
+  const timeoutMs = SUPABASE_QUERY_TIMEOUT_MS || 8_000
+  return Promise.race([
+    queryFn(),
+    new Promise((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`${label} non ha risposto entro ${timeoutMs / 1000} secondi.`)),
+        timeoutMs,
+      ),
+    ),
+  ])
+}
+
+export async function readTradingState(dbClient) {
+  const sql = typeof dbClient === 'function' ? dbClient : getNeonSql()
+
+  if (!sql) {
+    throw new Error('Database Neon non configurato')
+  }
+
+  const rows = await runNeonQuery('Lettura stato Neon', () =>
+    sql`SELECT payload, updated_at FROM public.spapple_state WHERE id = ${STATE_ID} LIMIT 1`,
   )
 
-  if (error) {
-    throw error
-  }
+  const data = Array.isArray(rows) && rows.length > 0 ? rows[0] : null
 
   return {
     payload: normalizeTradingState(data?.payload),
-    updatedAt: data?.updated_at || null,
+    updatedAt: data?.updated_at ? new Date(data.updated_at).toISOString() : null,
   }
 }
 
-async function runSupabaseQuery(label, queryFactory) {
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => {
-    controller.abort()
-  }, SUPABASE_QUERY_TIMEOUT_MS)
-
-  try {
-    return await queryFactory(controller.signal)
-  } catch (error) {
-    const rawMessage = String(error?.message || error || '')
-
-    if (error?.name === 'AbortError' || rawMessage.includes('AbortError')) {
-      throw new Error(
-        `${label} non ha risposto entro ${SUPABASE_QUERY_TIMEOUT_MS / 1000} secondi.`,
-      )
-    }
-
-    throw error
-  } finally {
-    clearTimeout(timeoutId)
-  }
-}
-
-async function writeStateEvent(supabase, payload) {
+async function writeStateEvent(sql, payload) {
   const deleteBefore = new Date(Date.now() - STATE_EVENT_RETENTION_MS).toISOString()
 
-  await runSupabaseQuery('Pulizia eventi Supabase', (signal) =>
-    supabase
-      .from('spapple_state_events')
-      .delete()
-      .eq('state_id', STATE_ID)
-      .lt('created_at', deleteBefore)
-      .abortSignal(signal),
-  )
+  try {
+    await runNeonQuery('Pulizia eventi Neon', () =>
+      sql`DELETE FROM public.spapple_state_events WHERE state_id = ${STATE_ID} AND created_at < ${deleteBefore}`,
+    )
 
-  const { error } = await runSupabaseQuery('Scrittura evento Supabase', (signal) =>
-    supabase
-      .from('spapple_state_events')
-      .insert({
-        state_id: STATE_ID,
-        revision: payload.stateRevision,
-        source: payload.lastStateMutationSource || 'server',
-        summary: payload.lastStateMutationSummary || 'Stato Spapple aggiornato',
-      })
-      .abortSignal(signal),
-  )
+    await runNeonQuery('Scrittura evento Neon', () =>
+      sql`INSERT INTO public.spapple_state_events (state_id, revision, source, summary)
+          VALUES (${STATE_ID}, ${payload.stateRevision || 0}, ${payload.lastStateMutationSource || 'server'}, ${payload.lastStateMutationSummary || 'Stato Spapple aggiornato'})`,
+    )
+  } catch (error) {
+    const rawMessage = String(error?.message || error || '')
+    const optionalTableMissing =
+      rawMessage.includes('spapple_state_events') ||
+      rawMessage.includes('42P01') ||
+      rawMessage.includes('42501')
 
-  if (!error) {
-    return
+    if (!optionalTableMissing) {
+      // Ignora errori su tabella opzionale di eventi
+    }
   }
-
-  const optionalRealtimeMissing =
-    error.code === '42P01' ||
-    error.code === '42501' ||
-    error.code === 'PGRST205' ||
-    String(error.message || '').includes('spapple_state_events')
-
-  if (optionalRealtimeMissing) {
-    return
-  }
-
-  throw error
 }
 
 export async function writeTradingState(
-  supabase,
+  dbClient,
   payload,
   { source = 'server', summary = 'Stato Spapple aggiornato' } = {},
 ) {
-  const { payload: currentPayload } = await readTradingState(supabase)
+  const sql = typeof dbClient === 'function' ? dbClient : getNeonSql()
+
+  if (!sql) {
+    throw new Error('Database Neon non configurato')
+  }
+
+  const { payload: currentPayload } = await readTradingState(sql)
   const updatedAt = new Date().toISOString()
   const nextPayload = normalizeTradingState({
     ...payload,
@@ -2814,22 +2791,15 @@ export async function writeTradingState(
     lastStateMutationSource: source,
     lastStateMutationSummary: summary,
   })
-  const { error } = await runSupabaseQuery('Scrittura stato Supabase', (signal) =>
-    supabase
-      .from('spapple_state')
-      .upsert({
-        id: STATE_ID,
-        payload: nextPayload,
-        updated_at: updatedAt,
-      })
-      .abortSignal(signal),
+
+  await runNeonQuery('Scrittura stato Neon', () =>
+    sql`INSERT INTO public.spapple_state (id, payload, updated_at)
+        VALUES (${STATE_ID}, ${JSON.stringify(nextPayload)}, ${updatedAt})
+        ON CONFLICT (id) DO UPDATE
+        SET payload = EXCLUDED.payload, updated_at = EXCLUDED.updated_at`,
   )
 
-  if (error) {
-    throw error
-  }
-
-  await writeStateEvent(supabase, nextPayload)
+  await writeStateEvent(sql, nextPayload)
 
   return {
     payload: nextPayload,

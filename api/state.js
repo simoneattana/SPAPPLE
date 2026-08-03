@@ -21,7 +21,7 @@ function normalizeApiError(error, fallback = 'Stato remoto non disponibile') {
     rawMessage.includes('<html') ||
     rawMessage.toLowerCase().includes('bad gateway')
   ) {
-    return 'Supabase temporaneamente non disponibile. Spapple riprovera automaticamente.'
+    return 'Database Neon temporaneamente non disponibile. Spapple riproverà automaticamente.'
   }
 
   return rawMessage.length > 220 ? `${rawMessage.slice(0, 220)}...` : rawMessage
@@ -339,7 +339,7 @@ export default async function handler(request, response) {
 
   if (!supabase) {
     sendJson(response, 503, {
-      error: 'Supabase non configurato',
+      error: 'Database Neon non configurato',
     })
     return
   }
