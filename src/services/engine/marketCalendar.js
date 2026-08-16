@@ -5,12 +5,18 @@
 // di borsa come gli altri, e infatti il 2 agosto 2026, di domenica, ha aperto
 // e chiuso tre posizioni su Europa e USA a mercati chiusi.
 //
-// Due livelli di protezione:
-//  1. questo calendario, che sa in anticipo le chiusure note
-//  2. il controllo di freschezza del dato in isMarketDataStale, che coglie le
-//     chiusure lunghe non previste qui (Capodanno lunare, Golden Week)
+// Tre livelli di protezione:
+//  1. fine settimana, che si sa dalla data e non sbaglia mai
+//  2. questo calendario, per borsa e non per mercato: il gruppo "Europa" ne
+//     contiene dieci con festivita diverse fra loro
+//  3. il controllo di freschezza del dato in isMarketDataStale, che coglie le
+//     chiusure lunghe non previste qui
+//
+// Le date non calcolabili per regola (equinozi giapponesi, capodanno lunare)
+// sono elencate anno per anno. Fonti consultate il 2026-08-16: jpx.co.jp,
+// hkex.com.hk, euronext.com, six-group.com, cashmarket.deutsche-boerse.com.
 
-// --- Pasqua, da cui discendono Venerdi Santo e Lunedi dell'Angelo -----------
+// --- Pasqua, da cui discendono meta delle feste europee ---------------------
 // Algoritmo di Gauss-Butcher, valido per il calendario gregoriano.
 export function getEasterSunday(year) {
   const a = year % 19
@@ -43,7 +49,6 @@ function fixed(year, month, day) {
   return toKey(new Date(Date.UTC(year, month - 1, day)))
 }
 
-// n-esimo giorno della settimana del mese: nthWeekday(2026, 1, 1, 3) = terzo lunedi di gennaio
 function nthWeekday(year, month, weekday, n) {
   const first = new Date(Date.UTC(year, month - 1, 1))
   const offset = (weekday - first.getUTCDay() + 7) % 7
@@ -68,10 +73,177 @@ function usObserved(key) {
   return key
 }
 
-// --- Chiusure verificate sui calendari ufficiali ----------------------------
-// JPX e HKEX hanno molte festivita non calcolabili per regola (equinozi,
-// capodanno lunare), quindi vanno elencate anno per anno.
-// Fonti: jpx.co.jp e hkex.com.hk, consultate il 2026-08-16.
+// Il venerdi fra il 19 e il 25 giugno: Midsummer svedese e finlandese.
+function midsummerFriday(year) {
+  for (let day = 19; day <= 25; day += 1) {
+    const date = new Date(Date.UTC(year, 5, day))
+    if (date.getUTCDay() === 5) {
+      return toKey(date)
+    }
+  }
+
+  return fixed(year, 6, 19)
+}
+
+function pasquali(year) {
+  const pasqua = getEasterSunday(year)
+
+  return {
+    giovediSanto: toKey(shift(pasqua, -3)),
+    venerdiSanto: toKey(shift(pasqua, -2)),
+    lunediAngelo: toKey(shift(pasqua, 1)),
+    ascensione: toKey(shift(pasqua, 39)),
+    lunediPentecoste: toKey(shift(pasqua, 50)),
+  }
+}
+
+// --- Una regola per borsa ---------------------------------------------------
+// Le chiusure di fine anno sono elencate anche quando cadono di sabato o
+// domenica: il controllo sul fine settimana le assorbe comunque.
+
+// Milano, Parigi, Amsterdam, Lisbona, Bruxelles.
+function chiusureEuronext(year) {
+  const p = pasquali(year)
+
+  return [
+    fixed(year, 1, 1),
+    p.venerdiSanto,
+    p.lunediAngelo,
+    fixed(year, 5, 1),
+    fixed(year, 12, 25),
+    fixed(year, 12, 26),
+  ]
+}
+
+// Oslo segue Euronext ma aggiunge le feste norvegesi.
+function chiusureOslo(year) {
+  const p = pasquali(year)
+
+  return [
+    ...chiusureEuronext(year),
+    p.giovediSanto,
+    p.ascensione,
+    p.lunediPentecoste,
+    fixed(year, 12, 24),
+    fixed(year, 12, 31),
+  ]
+}
+
+// Xetra e Borsa di Francoforte.
+function chiusureXetra(year) {
+  const p = pasquali(year)
+
+  return [
+    fixed(year, 1, 1),
+    p.venerdiSanto,
+    p.lunediAngelo,
+    fixed(year, 5, 1),
+    fixed(year, 12, 24),
+    fixed(year, 12, 25),
+    fixed(year, 12, 26),
+    fixed(year, 12, 31),
+  ]
+}
+
+// SIX Swiss Exchange.
+function chiusureSix(year) {
+  const p = pasquali(year)
+
+  return [
+    fixed(year, 1, 1),
+    fixed(year, 1, 2), // Berchtoldstag
+    p.venerdiSanto,
+    p.lunediAngelo,
+    fixed(year, 5, 1),
+    p.ascensione,
+    p.lunediPentecoste,
+    // Festa nazionale svizzera. Nel 2026 e nel 2027 cade di weekend, quindi non
+    // compare nei calendari ufficiali di quegli anni e la regola non e
+    // verificabile su quelle liste: sta qui perche SIX chiude il 1 agosto.
+    fixed(year, 8, 1),
+    fixed(year, 12, 24),
+    fixed(year, 12, 25),
+    fixed(year, 12, 31),
+  ]
+}
+
+// Nasdaq Nordic: Stoccolma, Copenaghen, Helsinki.
+function chiusureNordic(year) {
+  const p = pasquali(year)
+
+  return [
+    fixed(year, 1, 1),
+    fixed(year, 1, 6), // Epifania
+    p.venerdiSanto,
+    p.lunediAngelo,
+    fixed(year, 5, 1),
+    p.ascensione,
+    midsummerFriday(year),
+    fixed(year, 12, 24),
+    fixed(year, 12, 25),
+    fixed(year, 12, 26),
+    fixed(year, 12, 31),
+  ]
+}
+
+// BME, Madrid.
+function chiusureBme(year) {
+  const p = pasquali(year)
+
+  return [
+    fixed(year, 1, 1),
+    p.venerdiSanto,
+    p.lunediAngelo,
+    fixed(year, 5, 1),
+    fixed(year, 12, 24),
+    fixed(year, 12, 25),
+    fixed(year, 12, 31),
+  ]
+}
+
+// Nucleo comune: le sole chiusure condivise da tutte e dieci le borse europee.
+// Vale quando si ragiona sul mercato "Europa" senza un titolo specifico.
+function chiusureEuropaComuni(year) {
+  const p = pasquali(year)
+
+  return [
+    fixed(year, 1, 1),
+    p.venerdiSanto,
+    p.lunediAngelo,
+    fixed(year, 5, 1),
+    fixed(year, 12, 25),
+  ]
+}
+
+function chiusureUsa(year) {
+  const p = pasquali(year)
+
+  return [
+    usObserved(fixed(year, 1, 1)),
+    nthWeekday(year, 1, 1, 3), // Martin Luther King, terzo lunedi
+    nthWeekday(year, 2, 1, 3), // Presidents Day, terzo lunedi
+    p.venerdiSanto,
+    lastWeekday(year, 5, 1), // Memorial Day, ultimo lunedi
+    usObserved(fixed(year, 6, 19)), // Juneteenth
+    usObserved(fixed(year, 7, 4)), // Indipendenza
+    nthWeekday(year, 9, 1, 1), // Labor Day, primo lunedi
+    nthWeekday(year, 11, 4, 4), // Ringraziamento, quarto giovedi
+    usObserved(fixed(year, 12, 25)),
+  ]
+}
+
+const REGOLE = {
+  europe: chiusureEuropaComuni,
+  euronext: chiusureEuronext,
+  oslo: chiusureOslo,
+  xetra: chiusureXetra,
+  six: chiusureSix,
+  nordic: chiusureNordic,
+  bme: chiusureBme,
+  usa: chiusureUsa,
+}
+
+// --- Chiusure non calcolabili per regola ------------------------------------
 const CHIUSURE_ELENCATE = {
   tokyo: {
     2026: [
@@ -81,6 +253,12 @@ const CHIUSURE_ELENCATE = {
       '2026-09-22', '2026-09-23', '2026-10-12', '2026-11-03', '2026-11-23',
       '2026-12-31',
     ],
+    2027: [
+      '2027-01-01', '2027-01-02', '2027-01-03', '2027-01-11', '2027-02-11',
+      '2027-02-23', '2027-03-21', '2027-04-29', '2027-05-03', '2027-05-04',
+      '2027-05-05', '2027-07-19', '2027-08-11', '2027-09-20', '2027-09-22',
+      '2027-09-23', '2027-10-11', '2027-11-03', '2027-11-23', '2027-12-31',
+    ],
   },
   'hong-kong': {
     2026: [
@@ -89,53 +267,49 @@ const CHIUSURE_ELENCATE = {
       '2026-06-19', '2026-07-01', '2026-09-26', '2026-10-01', '2026-10-19',
       '2026-12-25', '2026-12-26',
     ],
+    2027: [
+      '2027-01-01', '2027-02-06', '2027-02-07', '2027-02-08', '2027-02-09',
+      '2027-03-26', '2027-03-29', '2027-04-05', '2027-05-01', '2027-05-13',
+      '2027-06-09', '2027-07-01', '2027-09-16', '2027-10-01', '2027-10-08',
+      '2027-12-25', '2027-12-27',
+    ],
+  },
+  // Euronext osserva il Natale il 24 quando il 25 e il 26 cadono nel fine
+  // settimana, come nel 2027.
+  euronext: {
+    2027: ['2027-12-24'],
   },
 }
 
-// --- Chiusure calcolabili per regola ---------------------------------------
-// Nucleo comune alle borse europee. Il mercato "equities" ne raggruppa dieci
-// (.MI .PA .DE .AS .MC .SW .ST .CO .HE .OL) sotto un'unica sessione, quindi qui
-// stanno solo le chiusure che valgono per tutte.
-//
-// Resta scoperto: le festivita locali di un solo giorno, come la Festa
-// nazionale svizzera del 1 agosto, l'Ascensione e il Lunedi di Pentecoste nei
-// paesi nordici, il Midsummer svedese, il 3 ottobre tedesco. In quei giorni la
-// borsa interessata e chiusa mentre le altre lavorano, e il controllo di
-// freschezza non se ne accorge perche dura un giorno solo. Per chiuderlo
-// servono liste per suffisso di borsa.
-function chiusureEuropa(year) {
-  const pasqua = getEasterSunday(year)
-
-  return [
-    fixed(year, 1, 1), // Capodanno
-    toKey(shift(pasqua, -2)), // Venerdi Santo
-    toKey(shift(pasqua, 1)), // Lunedi dell'Angelo
-    fixed(year, 5, 1), // Primo maggio
-    fixed(year, 12, 25), // Natale
-    fixed(year, 12, 26), // Santo Stefano
-  ]
+// --- Da quale borsa dipende un titolo europeo -------------------------------
+const BORSA_PER_SUFFISSO = {
+  '.MI': 'euronext',
+  '.PA': 'euronext',
+  '.AS': 'euronext',
+  '.BR': 'euronext',
+  '.LS': 'euronext',
+  '.OL': 'oslo',
+  '.DE': 'xetra',
+  '.F': 'xetra',
+  '.SW': 'six',
+  '.VX': 'six',
+  '.ST': 'nordic',
+  '.CO': 'nordic',
+  '.HE': 'nordic',
+  '.MC': 'bme',
 }
 
-function chiusureUsa(year) {
-  const pasqua = getEasterSunday(year)
+export function getExchangeIdForTicker(sessionId, ticker) {
+  if (sessionId !== 'europe' || !ticker) {
+    return sessionId
+  }
 
-  return [
-    usObserved(fixed(year, 1, 1)), // Capodanno
-    nthWeekday(year, 1, 1, 3), // Martin Luther King, terzo lunedi
-    nthWeekday(year, 2, 1, 3), // Presidents Day, terzo lunedi
-    toKey(shift(pasqua, -2)), // Venerdi Santo
-    lastWeekday(year, 5, 1), // Memorial Day, ultimo lunedi
-    usObserved(fixed(year, 6, 19)), // Juneteenth
-    usObserved(fixed(year, 7, 4)), // Indipendenza
-    nthWeekday(year, 9, 1, 1), // Labor Day, primo lunedi
-    nthWeekday(year, 11, 4, 4), // Ringraziamento, quarto giovedi
-    usObserved(fixed(year, 12, 25)), // Natale
-  ]
-}
+  const normalizzato = String(ticker).toUpperCase()
+  const suffisso = Object.keys(BORSA_PER_SUFFISSO).find((chiave) =>
+    normalizzato.endsWith(chiave),
+  )
 
-const REGOLE = {
-  europe: chiusureEuropa,
-  usa: chiusureUsa,
+  return suffisso ? BORSA_PER_SUFFISSO[suffisso] : 'europe'
 }
 
 const cache = new Map()
@@ -156,31 +330,33 @@ export function getExchangeHolidays(exchangeId, year) {
   return insieme
 }
 
-// Vero quando per quella borsa non esiste nessuna chiusura nota per l'anno.
-// Serve a distinguere "oggi si scambia" da "il calendario e scaduto".
+// Vero quando per quella borsa esiste almeno una chiusura nota per l'anno.
+// Serve a distinguere "oggi si scambia" da "il calendario e scaduto": le borse
+// asiatiche dipendono da liste elencate, che vanno rinnovate.
 export function hasCalendarFor(exchangeId, year) {
   return getExchangeHolidays(exchangeId, year).size > 0
 }
 
-export function isExchangeHoliday(exchangeId, isoDate) {
+export function isExchangeHoliday(exchangeId, isoDate, ticker = null) {
   const year = Number(String(isoDate).slice(0, 4))
 
   if (!Number.isFinite(year)) {
     return false
   }
 
-  return getExchangeHolidays(exchangeId, year).has(String(isoDate))
+  const borsa = getExchangeIdForTicker(exchangeId, ticker)
+
+  return getExchangeHolidays(borsa, year).has(String(isoDate))
 }
 
 export function isWeekend(weekday) {
   return weekday === 0 || weekday === 6
 }
 
-// Rete per le chiusure lunghe che il calendario non conosce: Capodanno lunare,
-// Golden Week, settimane festive. Non puo essere piu stretta di cosi perche
-// durante una seduta normale l'ultima barra giornaliera chiusa e quella del
-// giorno di borsa precedente, quindi un weekend piu una festivita valgono
-// gia quattro giorni di distanza legittimi.
+// Rete per le chiusure lunghe non previste dal calendario. Non puo essere piu
+// stretta di cosi perche durante una seduta normale l'ultima barra giornaliera
+// chiusa e quella del giorno di borsa precedente, quindi un fine settimana piu
+// una festivita valgono gia quattro giorni di distanza legittimi.
 export const MAX_ETA_DATO_GIORNI = 4
 
 export function isMarketDataStale(latestBarDate, now = new Date()) {
@@ -194,7 +370,5 @@ export function isMarketDataStale(latestBarDate, now = new Date()) {
     return false
   }
 
-  const giorni = (now.getTime() - barra.getTime()) / 86_400_000
-
-  return giorni > MAX_ETA_DATO_GIORNI
+  return (now.getTime() - barra.getTime()) / 86_400_000 > MAX_ETA_DATO_GIORNI
 }

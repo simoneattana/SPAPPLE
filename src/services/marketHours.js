@@ -166,7 +166,7 @@ function getTimeInTimezone(date = new Date(), timezone = 'Europe/Rome') {
 
 // Giorno senza scambi: fine settimana o festivita della borsa. Il crypto non
 // chiude mai, quindi resta fuori.
-function isSessionClosedDay(session, date = new Date()) {
+function isSessionClosedDay(session, date = new Date(), ticker = null) {
   if (session.alwaysOpen) {
     return false
   }
@@ -177,7 +177,9 @@ function isSessionClosedDay(session, date = new Date()) {
     return true
   }
 
-  return isExchangeHoliday(session.id, isoDate)
+  // Con il titolo si risale alla borsa esatta: il gruppo Europa ne contiene
+  // dieci e il 1 agosto svizzero non ferma Milano.
+  return isExchangeHoliday(session.id, isoDate, ticker)
 }
 
 function getSessions(strategy, ticker = null) {
@@ -197,8 +199,8 @@ function getSessions(strategy, ticker = null) {
   return matched ? [matched] : sessions
 }
 
-function getSessionStatus(session, date = new Date()) {
-  if (isSessionClosedDay(session, date)) {
+function getSessionStatus(session, date = new Date(), ticker = null) {
+  if (isSessionClosedDay(session, date, ticker)) {
     return {
       ...session,
       isClosedDay: true,
@@ -281,7 +283,7 @@ function getSessionStatus(session, date = new Date()) {
   }
 }
 
-function getSecondsUntilScanStart(session, date = new Date()) {
+function getSecondsUntilScanStart(session, date = new Date(), ticker = null) {
   const localTime = getTimeInTimezone(date, session.timezone)
   const currentSeconds =
     localTime.hour * 3600 + localTime.minute * 60 + localTime.second
@@ -315,7 +317,7 @@ function getSecondsUntilScanStart(session, date = new Date()) {
     const seconds = dayOffset * 24 * 3600 - currentSeconds + opening
     const candidate = new Date(date.getTime() + seconds * 1000)
 
-    if (!isSessionClosedDay(session, candidate)) {
+    if (!isSessionClosedDay(session, candidate, ticker)) {
       return seconds
     }
   }
@@ -323,12 +325,12 @@ function getSecondsUntilScanStart(session, date = new Date()) {
   return 24 * 3600 - currentSeconds + openingSeconds[0]
 }
 
-function getSessionMarketDisplayStatus(session, date = new Date()) {
+function getSessionMarketDisplayStatus(session, date = new Date(), ticker = null) {
   const localTime = getTimeInTimezone(date, session.timezone)
   const currentSeconds =
     localTime.hour * 3600 + localTime.minute * 60 + localTime.second
   const currentMinutes = localTime.hour * 60 + localTime.minute
-  const closedDay = isSessionClosedDay(session, date)
+  const closedDay = isSessionClosedDay(session, date, ticker)
   const marketWindows = session.marketWindows || [
     {
       start: session.marketOpen || session.scanStart,
@@ -362,7 +364,7 @@ function getSessionMarketDisplayStatus(session, date = new Date()) {
     const candidateSeconds = dayOffset * 24 * 3600 - currentSeconds + opening
     const candidate = new Date(date.getTime() + candidateSeconds * 1000)
 
-    if (!isSessionClosedDay(session, candidate)) {
+    if (!isSessionClosedDay(session, candidate, ticker)) {
       secondsToOpen = candidateSeconds
       break
     }
@@ -381,7 +383,7 @@ function getSessionMarketDisplayStatus(session, date = new Date()) {
 
 export function getMarketSessionStatus(strategy, date = new Date(), ticker = null) {
   const statuses = getSessions(strategy, ticker).map((session) =>
-    getSessionStatus(session, date),
+    getSessionStatus(session, date, ticker),
   )
 
   return (
@@ -394,19 +396,19 @@ export function getMarketSessionStatus(strategy, date = new Date(), ticker = nul
 
 export function isMarketCloseGuardActive(strategy, date = new Date(), ticker = null) {
   return getSessions(strategy, ticker).some(
-    (session) => getSessionStatus(session, date).riskReviewActive,
+    (session) => getSessionStatus(session, date, ticker).riskReviewActive,
   )
 }
 
 export function isMarketScanBlocked(strategy, date = new Date(), ticker = null) {
   return !getSessions(strategy, ticker).some(
-    (session) => getSessionStatus(session, date).isOpenForScan,
+    (session) => getSessionStatus(session, date, ticker).isOpenForScan,
   )
 }
 
 export function isMarketPreOpen(strategy, date = new Date(), ticker = null) {
   return getSessions(strategy, ticker).some(
-    (session) => getSessionStatus(session, date).isPreOpen,
+    (session) => getSessionStatus(session, date, ticker).isPreOpen,
   )
 }
 
@@ -443,11 +445,11 @@ export function getMarketOpeningHoursLabel(strategy) {
 
 export function getMarketDisplayStatus(strategy, date = new Date(), ticker = null) {
   const statuses = getSessions(strategy, ticker).map((session) =>
-    getSessionMarketDisplayStatus(session, date),
+    getSessionMarketDisplayStatus(session, date, ticker),
   )
   const openStatus = statuses.find((status) => status.isMarketOpen)
   const preOpenStatus = statuses.find(
-    (status) => getSessionStatus(status, date).isPreOpen,
+    (status) => getSessionStatus(status, date, ticker).isPreOpen,
   )
   const selectedStatus = openStatus || preOpenStatus || statuses[0]
   const secondsToOpen = Math.min(
@@ -463,10 +465,10 @@ export function getMarketDisplayStatus(strategy, date = new Date(), ticker = nul
   }
 }
 
-export function getNextMarketScanAt(strategy, from = new Date()) {
+export function getNextMarketScanAt(strategy, from = new Date(), ticker = null) {
   const secondsUntilStart = Math.min(
-    ...getSessions(strategy).map((session) =>
-      getSecondsUntilScanStart(session, from),
+    ...getSessions(strategy, ticker).map((session) =>
+      getSecondsUntilScanStart(session, from, ticker),
     ),
   )
 
