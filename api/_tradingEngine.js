@@ -30,7 +30,6 @@ import {
 import {
   LEGACY_POSITION_SIZE,
   MIN_POSITION_SIZE,
-  calculatePositionSize,
   canOpenPosition,
 } from '../src/services/positionSizing.js'
 import {
@@ -47,7 +46,6 @@ import {
   getMarketCloseGuardLabel,
   getMarketScanStartLabel,
   getMarketSessionStatus,
-  getNextMarketScanAt,
   getPreCloseProtectionDecision,
   isMarketCloseGuardActive,
   isMarketScanBlocked,
@@ -58,33 +56,33 @@ import {
   TRADING_STRATEGIES,
   getTradingStrategy,
 } from '../src/strategies/index.js'
-import {
-  DEFAULT_REENTRY_COOLDOWN_MS,
-  DEFAULT_RISK_LIMITS,
-  EXECUTION_MODE,
-  MAX_POSITIONS,
-  getMarketScanIntervalMs,
-} from '../src/services/engine/constants.js'
-import {
-  formatCooldownDuration,
-  isSameDay,
-  roundPrice,
-  roundQuantity,
-} from '../src/services/engine/format.js'
+import { MAX_POSITIONS } from '../src/services/engine/constants.js'
+import { roundPrice, roundQuantity } from '../src/services/engine/format.js'
 import { appendLogs, createActivity } from '../src/services/engine/activity.js'
 import {
   appendOrders,
-  backfillLegacyCloseOrders,
   createSimulationOrder,
-  dedupeOrders,
   getCloseOrderSide,
   getOpenOrderSide,
 } from '../src/services/engine/orders.js'
+import {
+  STORAGE_VERSION,
+  createInitialMarkets,
+  createInitialState,
+  getNextScanAt,
+  normalizeMarketState,
+  syncActiveMarketState,
+} from '../src/services/engine/state.js'
+import {
+  getOpeningOrderBlockReason,
+  getRiskAdjustedPositionSize,
+  getRiskGovernorState,
+} from '../src/services/engine/risk.js'
 import { fetchEodhdJson, isEodhdConfigured } from './_eodhd.js'
 import { clearYahooAuth, fetchYahooJson, getYahooAuth } from './_yahoo.js'
 
 export const STATE_ID = 'default'
-export const STORAGE_VERSION = 10
+export { STORAGE_VERSION } from '../src/services/engine/state.js'
 export { DEFAULT_MARKET_ID }
 
 const MIN_HISTORY_LENGTH = 30
@@ -94,399 +92,10 @@ const REQUEST_CONCURRENCY = 8
 const STATE_EVENT_RETENTION_MS = 60 * 24 * 60 * 60 * 1000
 const SUPABASE_QUERY_TIMEOUT_MS = 8_000
 const backendFxRateCache = new Map()
-function getRiskLimits(strategy, riskLimits = {}) {
-  return {
-    ...DEFAULT_RISK_LIMITS,
-    ...(riskLimits || {}),
-    ...(strategy?.riskLimits || {}),
-  }
-}
-
-function getNextScanAt(marketId, from = new Date()) {
-  const strategy = getTradingStrategy(marketId)
-
-  if (isMarketCloseGuardActive(strategy, from) || isMarketScanBlocked(strategy, from)) {
-    return getNextMarketScanAt(strategy, from).toISOString()
-  }
-
-  return new Date(from.getTime() + getMarketScanIntervalMs(marketId)).toISOString()
-}
-
-function normalizeNextScanAt(marketId, value, fallbackValue = null) {
-  const candidate = value || fallbackValue
-
-  if (!candidate) {
-    return getNextScanAt(marketId)
-  }
-
-  const candidateDate = new Date(candidate)
-
-  if (
-    Number.isFinite(candidateDate.getTime()) &&
-    isMarketScanBlocked(getTradingStrategy(marketId), candidateDate)
-  ) {
-    return getNextScanAt(marketId, candidateDate)
-  }
-
-  return candidate
-}
-
 function getStrategyMaxPositions(strategy) {
   return Number.isFinite(Number(strategy.maxPositions))
     ? Number(strategy.maxPositions)
     : MAX_POSITIONS
-}
-
-const marketStateFields = [
-  'capital',
-  'vault',
-  'positions',
-  'history',
-  'orders',
-  'activityLog',
-  'events',
-  'executionMode',
-  'killSwitchEnabled',
-  'riskLimits',
-  'automationEnabled',
-  'lastScanAt',
-  'lastScanCount',
-  'lastSignalCount',
-  'lastScanResults',
-  'isChecking',
-  'isScanning',
-  'lastAutomationMessage',
-  'lastDataProvider',
-  'lastSyncAt',
-  'lastLiveCheckAt',
-  'lastBackendCheckAt',
-  'nextScanAt',
-  'nextLiveCheckAt',
-  'engineStatus',
-  'liveMonitorEnabled',
-  'backendMonitorEnabled',
-  'usMarketContext',
-]
-
-const initialState = {
-  version: STORAGE_VERSION,
-  stateRevision: 0,
-  lastStateMutationAt: null,
-  lastStateMutationSource: 'iniziale',
-  lastStateMutationSummary: 'Stato iniziale Spapple.',
-  activeMarket: DEFAULT_MARKET_ID,
-  marketId: DEFAULT_MARKET_ID,
-  marketLabel: getTradingStrategy(DEFAULT_MARKET_ID).label,
-  capital: 30000,
-  vault: 0,
-  positions: [],
-  history: [],
-  orders: [],
-  activityLog: [],
-  events: [],
-  executionMode: EXECUTION_MODE,
-  killSwitchEnabled: false,
-  riskLimits: DEFAULT_RISK_LIMITS,
-  automationEnabled: true,
-  liveMonitorEnabled: true,
-  backendMonitorEnabled: true,
-  lastScanAt: null,
-  lastScanCount: 0,
-  lastSignalCount: 0,
-  lastScanResults: [],
-  isChecking: false,
-  isScanning: false,
-  lastAutomationMessage: 'Pilota automatico pronto.',
-  lastDataProvider: null,
-  lastSyncAt: null,
-  lastLiveCheckAt: null,
-  lastBackendCheckAt: null,
-  nextScanAt: getNextScanAt(DEFAULT_MARKET_ID),
-  nextLiveCheckAt: null,
-  engineStatus: 'In attesa',
-  usMarketContext: null,
-}
-
-function createInitialMarkets() {
-  return Object.values(TRADING_STRATEGIES).reduce((markets, strategy) => {
-    markets[strategy.id] = normalizeMarketState(strategy.id, {})
-    return markets
-  }, {})
-}
-
-function pickMarketState(state) {
-  return marketStateFields.reduce((marketState, field) => {
-    marketState[field] = state[field]
-    return marketState
-  }, {})
-}
-
-function removeClosedPositions(positions = [], history = []) {
-  const closedIds = new Set(
-    history.map((trade) => trade?.positionId).filter(Boolean),
-  )
-  const closedKeys = new Set(
-    history
-      .filter((trade) => trade?.ticker && trade?.openedAt)
-      .map((trade) => `${trade.ticker}-${trade.openedAt}`),
-  )
-
-  return positions.filter((position) => {
-    if (position?.id && closedIds.has(position.id)) {
-      return false
-    }
-
-    if (!position?.ticker || !position?.openedAt) {
-      return true
-    }
-
-    return !closedKeys.has(`${position.ticker}-${position.openedAt}`)
-  })
-}
-
-function resultBelongsToMarket(row, marketId) {
-  if (!row || typeof row !== 'object') {
-    return false
-  }
-
-  if (marketId === 'crypto') {
-    return row.market === 'crypto' || row.provider === 'Kraken'
-  }
-
-  return row.market !== 'crypto' && row.provider !== 'Kraken'
-}
-
-function sanitizeScanResults(results = [], marketId) {
-  if (!Array.isArray(results)) {
-    return []
-  }
-
-  return results.filter((row) => resultBelongsToMarket(row, marketId))
-}
-
-function dedupeClosedTrades(history = []) {
-  const trades = Array.isArray(history) ? history : []
-  const byPosition = new Map()
-
-  trades.forEach((trade) => {
-    if (!trade?.ticker || !trade?.exitDate) {
-      return
-    }
-
-    const key = trade.positionId
-      ? `position-${trade.positionId}`
-      : `${trade.ticker}-${trade.exitDate}`
-    const current = byPosition.get(key)
-
-    if (!current || new Date(trade.exitDate) > new Date(current.exitDate)) {
-      byPosition.set(key, trade)
-    }
-  })
-
-  return [...byPosition.values()].sort(
-    (first, second) =>
-      new Date(second.exitDate || 0) - new Date(first.exitDate || 0),
-  )
-}
-
-function calculateVaultFromHistory(history = []) {
-  return history.reduce((total, trade) => {
-    const pnl = Number(trade?.pnlEur)
-
-    if (trade?.result !== 'WIN' || !Number.isFinite(pnl) || pnl <= 0) {
-      return total
-    }
-
-    return total + pnl
-  }, 0)
-}
-
-function calculateNetPnlFromHistory(history = []) {
-  return history.reduce((total, trade) => {
-    const pnl = Number(trade?.pnlEur)
-
-    return Number.isFinite(pnl) ? total + pnl : total
-  }, 0)
-}
-
-function calculateInvestedInPositions(positions = []) {
-  return positions.reduce((total, position) => {
-    const invested = Number(position?.invested)
-    const openCommission = getPositionOpenCommissionEur(position)
-
-    return Number.isFinite(invested) ? total + invested + openCommission : total
-  }, 0)
-}
-
-function reconcileAvailableCapital(strategy, fallbackCapital, history, positions) {
-  if (!history.length && !positions.length) {
-    return fallbackCapital
-  }
-
-  const netPnl = calculateNetPnlFromHistory(history)
-  const invested = calculateInvestedInPositions(positions)
-
-  return roundPrice(Math.max(strategy.initialCapital + netPnl - invested, 0))
-}
-
-function normalizeMarketState(marketId, rawMarketState = {}) {
-  const strategy = getTradingStrategy(marketId)
-  const fallback = {
-    marketId: strategy.id,
-    marketLabel: strategy.label,
-    capital: strategy.initialCapital,
-    vault: 0,
-    positions: [],
-    history: [],
-    orders: [],
-    activityLog: [],
-    events: [],
-    executionMode: EXECUTION_MODE,
-    killSwitchEnabled: false,
-    riskLimits: getRiskLimits(strategy),
-    automationEnabled: true,
-    liveMonitorEnabled: true,
-    backendMonitorEnabled: true,
-    lastScanAt: null,
-    lastScanCount: 0,
-    lastSignalCount: 0,
-    lastScanResults: [],
-    isChecking: false,
-    isScanning: false,
-    lastAutomationMessage: 'Pilota automatico pronto.',
-    lastDataProvider: null,
-    lastSyncAt: null,
-    lastLiveCheckAt: null,
-    lastBackendCheckAt: null,
-    nextScanAt: getNextScanAt(strategy.id),
-    nextLiveCheckAt: null,
-    engineStatus: 'In attesa',
-  }
-  const capital = Number(rawMarketState.capital)
-  const vault = Number(rawMarketState.vault)
-  const unusedMarket =
-    !rawMarketState.positions?.length &&
-    !rawMarketState.history?.length &&
-    !rawMarketState.events?.length
-  const normalizedCapital =
-    strategy.id === 'crypto' &&
-    (capital === 0 || capital === 5000) &&
-    unusedMarket
-      ? fallback.capital
-      : Number.isFinite(capital)
-        ? capital
-        : fallback.capital
-
-  const history = Array.isArray(rawMarketState.history) ? rawMarketState.history : []
-  const orders = Array.isArray(rawMarketState.orders) ? rawMarketState.orders : []
-  const backfill = backfillLegacyCloseOrders(
-    marketId,
-    strategy.label,
-    history,
-    orders,
-  )
-  const normalizedHistory = dedupeClosedTrades(backfill.history)
-  const vaultFromHistory = calculateVaultFromHistory(normalizedHistory)
-  const normalizedVault =
-    normalizedHistory.length > 0
-      ? vaultFromHistory
-      : Number.isFinite(vault)
-        ? vault
-        : fallback.vault
-  const positions = removeClosedPositions(
-    Array.isArray(rawMarketState.positions)
-      ? rawMarketState.positions
-      : [],
-    normalizedHistory,
-  )
-  const reconciledCapital = reconcileAvailableCapital(
-    strategy,
-    normalizedCapital,
-    normalizedHistory,
-    positions,
-  )
-
-  return {
-    ...fallback,
-    ...rawMarketState,
-    marketId,
-    marketLabel: strategy.label,
-    capital: reconciledCapital,
-    vault: roundPrice(normalizedVault),
-    positions,
-    history: normalizedHistory,
-    orders: dedupeOrders(backfill.orders),
-    activityLog: Array.isArray(rawMarketState.activityLog)
-      ? rawMarketState.activityLog
-      : [],
-    events: Array.isArray(rawMarketState.events) ? rawMarketState.events : [],
-    executionMode: rawMarketState.executionMode || fallback.executionMode,
-    killSwitchEnabled:
-      typeof rawMarketState.killSwitchEnabled === 'boolean'
-        ? rawMarketState.killSwitchEnabled
-        : fallback.killSwitchEnabled,
-    riskLimits: getRiskLimits(strategy, rawMarketState.riskLimits),
-    automationEnabled:
-      typeof rawMarketState.automationEnabled === 'boolean'
-        ? rawMarketState.automationEnabled
-        : fallback.automationEnabled,
-    liveMonitorEnabled:
-      typeof rawMarketState.liveMonitorEnabled === 'boolean'
-        ? rawMarketState.liveMonitorEnabled
-        : fallback.liveMonitorEnabled,
-    backendMonitorEnabled:
-      typeof rawMarketState.backendMonitorEnabled === 'boolean'
-        ? rawMarketState.backendMonitorEnabled
-        : fallback.backendMonitorEnabled,
-    isChecking: Boolean(rawMarketState.isChecking),
-    isScanning: Boolean(rawMarketState.isScanning),
-    lastAutomationMessage:
-      rawMarketState.lastAutomationMessage || fallback.lastAutomationMessage,
-    lastDataProvider: rawMarketState.lastDataProvider || fallback.lastDataProvider,
-    lastSyncAt: rawMarketState.lastSyncAt || fallback.lastSyncAt,
-    lastScanAt: rawMarketState.lastScanAt || fallback.lastScanAt,
-    lastScanCount: Number.isFinite(Number(rawMarketState.lastScanCount))
-      ? Number(rawMarketState.lastScanCount)
-      : fallback.lastScanCount,
-    lastSignalCount: Number.isFinite(Number(rawMarketState.lastSignalCount))
-      ? Number(rawMarketState.lastSignalCount)
-      : fallback.lastSignalCount,
-    lastLiveCheckAt: rawMarketState.lastLiveCheckAt || fallback.lastLiveCheckAt,
-    lastBackendCheckAt:
-      rawMarketState.lastBackendCheckAt || fallback.lastBackendCheckAt,
-    nextScanAt: normalizeNextScanAt(
-      marketId,
-      rawMarketState.nextScanAt,
-      fallback.nextScanAt,
-    ),
-    nextLiveCheckAt: rawMarketState.nextLiveCheckAt || fallback.nextLiveCheckAt,
-    lastScanResults: sanitizeScanResults(rawMarketState.lastScanResults, marketId),
-    usMarketContext: rawMarketState.usMarketContext || fallback.usMarketContext,
-  }
-}
-
-function syncActiveMarketState(state) {
-  const activeMarket = state.activeMarket || DEFAULT_MARKET_ID
-  const rawMarkets =
-    state.markets && typeof state.markets === 'object' ? state.markets : {}
-  const rawActiveMarketState =
-    rawMarkets[activeMarket] || rawMarkets[DEFAULT_MARKET_ID]
-  const currentMarketState = normalizeMarketState(
-    activeMarket,
-    rawActiveMarketState || pickMarketState(state),
-  )
-  const markets = {
-    ...rawMarkets,
-    [activeMarket]: currentMarketState,
-  }
-
-  return {
-    ...state,
-    activeMarket,
-    markets,
-    ...currentMarketState,
-    version: STORAGE_VERSION,
-  }
 }
 
 export function sendJson(response, status, payload) {
@@ -536,7 +145,7 @@ export function normalizeTradingState(payload) {
   )
 
   return syncActiveMarketState({
-    ...initialState,
+    ...createInitialState(),
     ...state,
     version: STORAGE_VERSION,
     stateRevision: Number.isFinite(Number(state.stateRevision))
@@ -571,154 +180,6 @@ function assertNumber(value, label) {
   }
 
   return number
-}
-
-function getConsecutiveLosses(history = []) {
-  let losses = 0
-
-  for (const trade of history) {
-    if (trade.result === 'LOSS') {
-      losses += 1
-      continue
-    }
-
-    break
-  }
-
-  return losses
-}
-
-function getReentryCooldownMs(strategy, latestClosedTrade) {
-  const pnlEur = Number(latestClosedTrade?.pnlEur)
-  const isLoss =
-    latestClosedTrade?.result === 'LOSS' || (Number.isFinite(pnlEur) && pnlEur < 0)
-  const isWin =
-    latestClosedTrade?.result === 'WIN' || (Number.isFinite(pnlEur) && pnlEur >= 0)
-  const dynamicCooldownMs = isLoss
-    ? strategy?.reentryCooldownAfterLossMs
-    : isWin
-      ? strategy?.reentryCooldownAfterWinMs
-      : null
-
-  if (Number.isFinite(Number(dynamicCooldownMs))) {
-    return Number(dynamicCooldownMs)
-  }
-
-  if (Number.isFinite(Number(strategy?.reentryCooldownMs))) {
-    return Number(strategy.reentryCooldownMs)
-  }
-
-  return DEFAULT_REENTRY_COOLDOWN_MS
-}
-
-function getTickerCooldownReason(marketState, ticker, strategy) {
-  if (!ticker) {
-    return null
-  }
-
-  const latestClosedTrade = (marketState.history || []).find(
-    (trade) => trade?.ticker === ticker && trade?.exitDate,
-  )
-
-  if (!latestClosedTrade) {
-    return null
-  }
-
-  const cooldownMs = getReentryCooldownMs(strategy, latestClosedTrade)
-
-  if (cooldownMs <= 0) {
-    return null
-  }
-
-  const closedAt = new Date(latestClosedTrade.exitDate).getTime()
-  const remainingMs = closedAt + cooldownMs - Date.now()
-
-  if (!Number.isFinite(closedAt) || remainingMs <= 0) {
-    return null
-  }
-
-  return `${ticker} è in pausa operativa dopo l’ultima chiusura. Nuova apertura consentita tra circa ${formatCooldownDuration(
-    remainingMs,
-  )}.`
-}
-
-function getOpeningOrderBlockReason(marketState, notional, strategy) {
-  const riskLimits = getRiskLimits(strategy, marketState.riskLimits)
-
-  if (marketState.executionMode !== EXECUTION_MODE) {
-    return 'Modalità operativa non supportata: al momento Spapple può eseguire solo ordini simulati.'
-  }
-
-  if (marketState.killSwitchEnabled) {
-    return 'Kill switch attivo: nuove aperture bloccate.'
-  }
-
-  if (marketState.pendingTicker) {
-    if (isMarketCloseGuardActive(strategy, new Date(), marketState.pendingTicker)) {
-      return `${marketState.pendingTicker}: protezione ${getMarketCloseGuardLabel(
-        strategy,
-        marketState.pendingTicker,
-      )} attiva. Nuove aperture bloccate fino alla prossima seduta.`
-    }
-
-    if (isMarketScanBlocked(strategy, new Date(), marketState.pendingTicker)) {
-      return `${marketState.pendingTicker}: borsa di riferimento chiusa. Nuove aperture consentite solo da ${getMarketScanStartLabel(
-        strategy,
-      )}.`
-    }
-  }
-
-  if (isMarketCloseGuardActive(strategy)) {
-    return `Protezione azionaria ${getMarketCloseGuardLabel(strategy)} attiva: nuove aperture bloccate fino alla prossima seduta.`
-  }
-
-  if (marketState.pendingTicker) {
-    const cooldownReason = getTickerCooldownReason(
-      marketState,
-      marketState.pendingTicker,
-      strategy,
-    )
-
-    if (cooldownReason) {
-      return cooldownReason
-    }
-  }
-
-  const todaysOrders = (marketState.orders || []).filter((order) =>
-    isSameDay(order.createdAt),
-  )
-  const todaysOpeningOrders = todaysOrders.filter(
-    (order) => order.action === 'OPEN' && order.status === 'ESEGUITO',
-  )
-
-  if (todaysOpeningOrders.length >= riskLimits.maxDailyOrders) {
-    return `Limite giornaliero raggiunto: massimo ${riskLimits.maxDailyOrders} aperture eseguite al giorno.`
-  }
-
-  const dailyCapitalLimit =
-    Number(strategy.initialCapital || 0) * Number(riskLimits.maxDailyCapitalPct)
-  const dailyAllocated = todaysOpeningOrders.reduce(
-    (sum, order) => sum + Number(order.notional || 0),
-    0,
-  )
-
-  if (
-    Number.isFinite(dailyCapitalLimit) &&
-    dailyCapitalLimit > 0 &&
-    dailyAllocated + Number(notional || 0) > dailyCapitalLimit
-  ) {
-    return `Limite capitale giornaliero superato: massimo ${Math.round(
-      riskLimits.maxDailyCapitalPct * 100,
-    )}% del capitale iniziale del mercato.`
-  }
-
-  const consecutiveLosses = getConsecutiveLosses(marketState.history || [])
-
-  if (consecutiveLosses >= riskLimits.maxConsecutiveLosses) {
-    return `Blocco prudenziale attivo: ${consecutiveLosses} perdite consecutive.`
-  }
-
-  return null
 }
 
 async function fetchSummaryPrice(ticker) {
@@ -1741,13 +1202,22 @@ async function refillOpenSlots(state, excludedTickers = []) {
   let capital = state.capital
   const maxPositions = getStrategyMaxPositions(strategy)
   const sizing = strategy.positionSizing
+  // Il governo del rischio vale anche qui: dopo due perdite consecutive la size
+  // scende, dopo tre si apre al massimo una posizione. Prima il backend ignorava
+  // i moltiplicatori e conosceva solo il blocco permanente.
+  const riskState = getRiskGovernorState(state, strategy)
+  let riskOpenings = 0
 
   automaticRows.forEach((row) => {
     if (positions.length >= maxPositions || !canOpenPosition(capital, sizing)) {
       return
     }
 
-    const positionSize = calculatePositionSize(capital, sizing)
+    if (riskOpenings >= (riskState.maxOpenings ?? Infinity)) {
+      return
+    }
+
+    const positionSize = getRiskAdjustedPositionSize(capital, sizing, riskState)
     const type = getSignalType(row, strategy)
     const blockReason = getOpeningOrderBlockReason(
       { ...state, capital, positions, orders, pendingTicker: row.ticker },
@@ -1822,6 +1292,7 @@ async function refillOpenSlots(state, excludedTickers = []) {
     positions.push(trade)
     capital = roundPrice(capital - positionSize - openCommissionEur)
     openedTrades.push(trade)
+    riskOpenings += 1
   })
 
   return {
