@@ -26,5 +26,13 @@ dist-ssr
 *.sln
 *.sw?
 .vercel
-supabase/.temp
 .agent/
+.env*
+
+# Skill agent installate da integrazioni Vercel
+.agents/
+skills-lock.json
+
+# Impostazioni locali di Claude Code (permessi per macchina)
+.claude/settings.local.json
+.claude/skills/
