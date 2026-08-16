@@ -58,6 +58,28 @@ import {
   TRADING_STRATEGIES,
   getTradingStrategy,
 } from '../src/strategies/index.js'
+import {
+  DEFAULT_REENTRY_COOLDOWN_MS,
+  DEFAULT_RISK_LIMITS,
+  EXECUTION_MODE,
+  MAX_POSITIONS,
+  getMarketScanIntervalMs,
+} from '../src/services/engine/constants.js'
+import {
+  formatCooldownDuration,
+  isSameDay,
+  roundPrice,
+  roundQuantity,
+} from '../src/services/engine/format.js'
+import { appendLogs, createActivity } from '../src/services/engine/activity.js'
+import {
+  appendOrders,
+  backfillLegacyCloseOrders,
+  createSimulationOrder,
+  dedupeOrders,
+  getCloseOrderSide,
+  getOpenOrderSide,
+} from '../src/services/engine/orders.js'
 import { fetchEodhdJson, isEodhdConfigured } from './_eodhd.js'
 import { clearYahooAuth, fetchYahooJson, getYahooAuth } from './_yahoo.js'
 
@@ -65,30 +87,13 @@ export const STATE_ID = 'default'
 export const STORAGE_VERSION = 10
 export { DEFAULT_MARKET_ID }
 
-const MAX_POSITIONS = 5
 const MIN_HISTORY_LENGTH = 30
 const RSI_PERIOD = 14
 const ATR_PERIOD = 14
 const REQUEST_CONCURRENCY = 8
-const EXECUTION_MODE = 'simulation'
-const EQUITIES_SCAN_INTERVAL_MS = 15 * 60_000
-const CRYPTO_SCAN_INTERVAL_MS = 5 * 60_000
-const ORDER_RETENTION_MS = 60 * 24 * 60 * 60 * 1000
 const STATE_EVENT_RETENTION_MS = 60 * 24 * 60 * 60 * 1000
-const MAX_ORDER_AUDIT_RECORDS = 180
 const SUPABASE_QUERY_TIMEOUT_MS = 8_000
 const backendFxRateCache = new Map()
-const DEFAULT_RISK_LIMITS = {
-  maxDailyOrders: 20,
-  maxDailyCapitalPct: 1,
-  maxConsecutiveLosses: 3,
-}
-const DEFAULT_REENTRY_COOLDOWN_MS = 6 * 60 * 60 * 1000
-
-function getMarketScanIntervalMs(marketId) {
-  return marketId === 'crypto' ? CRYPTO_SCAN_INTERVAL_MS : EQUITIES_SCAN_INTERVAL_MS
-}
-
 function getRiskLimits(strategy, riskLimits = {}) {
   return {
     ...DEFAULT_RISK_LIMITS,
@@ -282,94 +287,6 @@ function dedupeClosedTrades(history = []) {
     (first, second) =>
       new Date(second.exitDate || 0) - new Date(first.exitDate || 0),
   )
-}
-
-function isRecentOrder(order, now = Date.now()) {
-  const timestamp = new Date(
-    order?.createdAt || order?.executedAt || order?.submittedAt || 0,
-  ).getTime()
-
-  return Number.isFinite(timestamp) && now - timestamp <= ORDER_RETENTION_MS
-}
-
-function compactOrder(order) {
-  if (!order?.id) {
-    return null
-  }
-
-  const compacted = {
-    id: order.id,
-    marketId: order.marketId || null,
-    marketLabel: order.marketLabel || null,
-    action: order.action || null,
-    side: order.side || null,
-    direction: order.direction || null,
-    status: order.status || 'ESEGUITO',
-    source: order.source || 'system',
-    ticker: order.ticker || null,
-    positionId: order.positionId || null,
-    quantity: Number.isFinite(Number(order.quantity))
-      ? roundQuantity(Number(order.quantity))
-      : null,
-    notional: Number.isFinite(Number(order.notional))
-      ? roundPrice(Number(order.notional))
-      : 0,
-    requestedPrice: Number.isFinite(Number(order.requestedPrice))
-      ? roundPrice(Number(order.requestedPrice))
-      : null,
-    executedPrice: Number.isFinite(Number(order.executedPrice))
-      ? roundPrice(Number(order.executedPrice))
-      : null,
-    executedPriceEur: Number.isFinite(Number(order.executedPriceEur))
-      ? roundPrice(Number(order.executedPriceEur))
-      : null,
-    executionCosts: order.executionCosts || null,
-    fee: Number.isFinite(Number(order.fee)) ? roundPrice(Number(order.fee)) : null,
-    reason: order.reason || null,
-    dataQuality: order.dataQuality || null,
-    createdAt: order.createdAt || order.executedAt || new Date().toISOString(),
-    executedAt: order.executedAt || null,
-  }
-
-  return Object.fromEntries(
-    Object.entries(compacted).filter(([, value]) => value !== null),
-  )
-}
-
-function dedupeOrders(orders = []) {
-  const normalizedOrders = Array.isArray(orders) ? orders : []
-  const byKey = new Map()
-  const now = Date.now()
-
-  normalizedOrders.forEach((order) => {
-    if (!order?.id || !isRecentOrder(order, now)) {
-      return
-    }
-
-    const compactedOrder = compactOrder(order)
-
-    if (!compactedOrder) {
-      return
-    }
-
-    const key =
-      compactedOrder.action === 'CLOSE' && compactedOrder.positionId
-        ? `close-${compactedOrder.positionId}`
-        : `order-${compactedOrder.id}`
-    const current = byKey.get(key)
-
-    if (
-      !current ||
-      new Date(compactedOrder.createdAt || 0) > new Date(current.createdAt || 0)
-    ) {
-      byKey.set(key, compactedOrder)
-    }
-  })
-
-  return [...byKey.values()].sort(
-    (first, second) =>
-      new Date(second.createdAt || 0) - new Date(first.createdAt || 0),
-  ).slice(0, MAX_ORDER_AUDIT_RECORDS)
 }
 
 function calculateVaultFromHistory(history = []) {
@@ -635,26 +552,6 @@ export function normalizeTradingState(payload) {
   })
 }
 
-function roundPrice(value) {
-  const number = Number(value)
-
-  if (!Number.isFinite(number)) {
-    return null
-  }
-
-  return Number(number.toFixed(4))
-}
-
-function roundQuantity(value) {
-  const number = Number(value)
-
-  if (!Number.isFinite(number)) {
-    return null
-  }
-
-  return Number(number.toFixed(8))
-}
-
 function convertToEur(value, fxToEur = 1) {
   const amount = Number(value)
   const rate = Number(fxToEur)
@@ -676,33 +573,6 @@ function assertNumber(value, label) {
   return number
 }
 
-function createActivity({ type = 'system', status = 'done', title, detail }) {
-  return {
-    id: `${type}-${Date.now()}-${crypto.randomUUID()}`,
-    type,
-    status,
-    title,
-    detail,
-    createdAt: new Date().toISOString(),
-  }
-}
-
-function appendLogs(state, activity) {
-  return {
-    activityLog: [activity, ...(state.activityLog || [])].slice(0, 14),
-    events: [activity, ...(state.events || [])],
-  }
-}
-
-function appendOrders(state, orders) {
-  const nextOrders = Array.isArray(orders) ? orders : [orders]
-  return dedupeOrders([...nextOrders, ...(state.orders || [])])
-}
-
-function isSameDay(value, dayKey = new Date().toISOString().slice(0, 10)) {
-  return value ? String(value).slice(0, 10) === dayKey : false
-}
-
 function getConsecutiveLosses(history = []) {
   let losses = 0
 
@@ -716,16 +586,6 @@ function getConsecutiveLosses(history = []) {
   }
 
   return losses
-}
-
-function formatCooldownDuration(remainingMs) {
-  const minutes = Math.ceil(remainingMs / 60000)
-
-  if (minutes < 60) {
-    return `${minutes} min`
-  }
-
-  return `${Math.ceil(minutes / 60)} ore`
 }
 
 function getReentryCooldownMs(strategy, latestClosedTrade) {
@@ -859,204 +719,6 @@ function getOpeningOrderBlockReason(marketState, notional, strategy) {
   }
 
   return null
-}
-
-function getOpenOrderSide(type) {
-  return type === 'LONG' ? 'BUY' : 'SELL_SHORT'
-}
-
-function getCloseOrderSide(type) {
-  return type === 'LONG' ? 'SELL' : 'BUY_TO_COVER'
-}
-
-function normalizeIdPart(value) {
-  return String(value || 'na')
-    .replace(/[^a-z0-9]+/gi, '-')
-    .replace(/^-|-$/g, '')
-    .toLowerCase()
-}
-
-function createLegacyCloseOrderId(marketId, trade, index) {
-  return [
-    'legacy-close',
-    marketId,
-    normalizeIdPart(trade.ticker),
-    normalizeIdPart(trade.openedAt),
-    normalizeIdPart(trade.exitDate),
-    index,
-  ].join('-')
-}
-
-function hasCompleteLegacyTradeData(trade) {
-  return (
-    Number.isFinite(Number(trade.entryPrice)) &&
-    Number(trade.entryPrice) > 0 &&
-    Number.isFinite(Number(trade.exitPrice)) &&
-    Number(trade.exitPrice) > 0 &&
-    Number.isFinite(Number(trade.pnlEur)) &&
-    Number.isFinite(Number(trade.recoveredCapital))
-  )
-}
-
-function createLegacyCloseOrder(trade, marketId, marketLabel, index) {
-  const complete = hasCompleteLegacyTradeData(trade)
-  const id = trade.closeOrderId || createLegacyCloseOrderId(marketId, trade, index)
-  const positionId =
-    trade.positionId ||
-    `legacy-position-${marketId}-${normalizeIdPart(trade.ticker)}-${normalizeIdPart(
-      trade.openedAt || trade.exitDate,
-    )}-${index}`
-  const entryPrice = Number(trade.entryPrice)
-  const exitPrice = Number(trade.exitPrice)
-  const invested = Number(trade.invested)
-  const recoveredCapital = Number(trade.recoveredCapital)
-  const quantity =
-    complete && Number.isFinite(invested) && invested > 0
-      ? invested / entryPrice
-      : null
-  const createdAt = trade.exitDate || new Date().toISOString()
-
-  return compactOrder({
-    id,
-    marketId,
-    marketLabel,
-    action: 'CLOSE',
-    side: getCloseOrderSide(trade.type),
-    direction: trade.type,
-    status: 'ESEGUITO',
-    source: 'legacy-backfill',
-    ticker: trade.ticker,
-    positionId,
-    quantity: Number.isFinite(quantity) ? roundQuantity(quantity) : null,
-    notional: Number.isFinite(recoveredCapital)
-      ? roundPrice(recoveredCapital)
-      : Number.isFinite(invested)
-        ? roundPrice(invested)
-        : 0,
-    requestedPrice: complete ? roundPrice(exitPrice) : null,
-    executedPrice: complete ? roundPrice(exitPrice) : null,
-    fee: 0,
-    slippagePct: 0,
-    reason: complete
-      ? 'Ordine storico ricostruito da una chiusura già registrata.'
-      : 'Ordine storico ricostruito con dati incompleti: prezzi o P/L legacy non disponibili.',
-    dataQuality: complete ? 'complete' : 'incomplete',
-    createdAt,
-    submittedAt: createdAt,
-    executedAt: createdAt,
-  })
-}
-
-function backfillLegacyCloseOrders(marketId, marketLabel, history = [], orders = []) {
-  const existingOrderIds = new Set(orders.map((order) => order?.id).filter(Boolean))
-  const nextOrders = [...orders]
-  let changed = false
-  const nextHistory = history.map((trade, index) => {
-    if (!trade?.ticker || !trade?.exitDate) {
-      return trade
-    }
-
-    const order = createLegacyCloseOrder(trade, marketId, marketLabel, index)
-    const positionId = trade.positionId || order.positionId
-    const nextTrade = {
-      ...trade,
-      positionId,
-      closeOrderId: trade.closeOrderId || order.id,
-      dataQuality: hasCompleteLegacyTradeData(trade) ? 'complete' : 'incomplete',
-      legacyBackfilled: true,
-    }
-
-    if (!existingOrderIds.has(order.id)) {
-      nextOrders.push(order)
-      existingOrderIds.add(order.id)
-      changed = true
-    }
-
-    if (
-      nextTrade.positionId !== trade.positionId ||
-      nextTrade.closeOrderId !== trade.closeOrderId ||
-      nextTrade.dataQuality !== trade.dataQuality ||
-      nextTrade.legacyBackfilled !== trade.legacyBackfilled
-    ) {
-      changed = true
-      return nextTrade
-    }
-
-    return trade
-  })
-
-  return {
-    changed,
-    history: nextHistory,
-    orders: nextOrders.sort(
-      (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0),
-    ),
-  }
-}
-
-function createSimulationOrder({
-  action,
-  direction,
-  executedPrice = null,
-  executedPriceEur = null,
-  executionCosts = null,
-  fee = 0,
-  marketId,
-  marketLabel,
-  notional = 0,
-  positionId = null,
-  quantity = null,
-  reason,
-  requestedPrice = null,
-  side,
-  source = 'backend-monitor',
-  status = 'ESEGUITO',
-  ticker,
-}) {
-  const now = new Date().toISOString()
-  const normalizedPrice = Number(executedPrice ?? requestedPrice)
-  const normalizedNotional = Number(notional)
-  const normalizedQuantity =
-    Number.isFinite(Number(quantity)) && Number(quantity) > 0
-      ? Number(quantity)
-      : Number.isFinite(normalizedPrice) && normalizedPrice > 0
-        ? normalizedNotional / normalizedPrice
-        : null
-
-  return compactOrder({
-    id: `order-${Date.now()}-${crypto.randomUUID()}`,
-    marketId,
-    marketLabel,
-    action,
-    side,
-    direction,
-    status,
-    source,
-    ticker,
-    positionId,
-    quantity: Number.isFinite(normalizedQuantity)
-      ? roundQuantity(normalizedQuantity)
-      : null,
-    notional: Number.isFinite(normalizedNotional)
-      ? roundPrice(normalizedNotional)
-      : 0,
-    requestedPrice: Number.isFinite(Number(requestedPrice))
-      ? roundPrice(Number(requestedPrice))
-      : null,
-    executedPrice: Number.isFinite(Number(executedPrice))
-      ? roundPrice(Number(executedPrice))
-      : null,
-    executedPriceEur: Number.isFinite(Number(executedPriceEur))
-      ? roundPrice(Number(executedPriceEur))
-      : null,
-    executionCosts,
-    fee,
-    slippagePct: 0,
-    reason,
-    createdAt: now,
-    submittedAt: status === 'RIFIUTATO' ? null : now,
-    executedAt: status === 'ESEGUITO' ? now : null,
-  })
 }
 
 async function fetchSummaryPrice(ticker) {
