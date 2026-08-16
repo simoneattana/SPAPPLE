@@ -7,7 +7,6 @@ import {
 } from '../src/services/cryptoUniverse.js'
 import {
   CRYPTO_LONG_RSI_LIMIT,
-  getCryptoSignalType,
   isCryptoActionableResult,
   isCryptoAutoEligibleResult,
   sortByCryptoAutoScore,
@@ -56,8 +55,7 @@ import {
   TRADING_STRATEGIES,
   getTradingStrategy,
 } from '../src/strategies/index.js'
-import { MAX_POSITIONS } from '../src/services/engine/constants.js'
-import { roundPrice, roundQuantity } from '../src/services/engine/format.js'
+import { roundPrice } from '../src/services/engine/format.js'
 import { appendLogs, createActivity } from '../src/services/engine/activity.js'
 import {
   appendOrders,
@@ -78,6 +76,14 @@ import {
   getRiskAdjustedPositionSize,
   getRiskGovernorState,
 } from '../src/services/engine/risk.js'
+import {
+  buildTrade,
+  evaluateProfitExit,
+  getCloseReasonText,
+  getProtectedStopLoss,
+  getSignalType,
+  getStrategyMaxPositions,
+} from '../src/services/engine/trades.js'
 import { fetchEodhdJson, isEodhdConfigured } from './_eodhd.js'
 import { clearYahooAuth, fetchYahooJson, getYahooAuth } from './_yahoo.js'
 
@@ -92,12 +98,6 @@ const REQUEST_CONCURRENCY = 8
 const STATE_EVENT_RETENTION_MS = 60 * 24 * 60 * 60 * 1000
 const SUPABASE_QUERY_TIMEOUT_MS = 8_000
 const backendFxRateCache = new Map()
-function getStrategyMaxPositions(strategy) {
-  return Number.isFinite(Number(strategy.maxPositions))
-    ? Number(strategy.maxPositions)
-    : MAX_POSITIONS
-}
-
 export function sendJson(response, status, payload) {
   response.statusCode = status
   response.setHeader('content-type', 'application/json; charset=utf-8')
@@ -954,220 +954,6 @@ async function fetchBackendMarketData(marketId = DEFAULT_MARKET_ID) {
   )
 }
 
-function getSignalType(row, strategy) {
-  if (strategy.id === 'crypto') {
-    return getCryptoSignalType(row)
-  }
-
-  if (row.rsi < 30) {
-    return 'LONG'
-  }
-
-  if (row.rsi > 70) {
-    return 'SHORT'
-  }
-
-  return null
-}
-
-function buildTrade(row, invested, strategy = getTradingStrategy(), order = null) {
-  const atrPct = (row.atr / row.currentPrice) * 100
-  const isCrypto = strategy.id === 'crypto'
-  const targetPct = isCrypto ? (atrPct < 4 ? 0.45 : 0.65) : atrPct < 1.5 ? 0.35 : 0.6
-  const maxTargetPct = isCrypto ? targetPct : atrPct < 1.5 ? 0.8 : 1.2
-  const trailingPct = isCrypto ? null : atrPct < 1.5 ? 0.2 : 0.3
-  const stopMultiplier = isCrypto ? 1.8 : atrPct < 1.5 ? 1.2 : 1.5
-  const type = strategy.id === 'crypto'
-    ? getCryptoSignalType(row)
-    : row.rsi < 30
-      ? 'LONG'
-      : 'SHORT'
-  const long = type === 'LONG'
-  const openedAt = new Date().toISOString()
-  const currency = row.currency || getTickerCurrency(row.ticker)
-  const entryFxToEur =
-    Number.isFinite(Number(row.fxToEur)) && Number(row.fxToEur) > 0
-      ? Number(row.fxToEur)
-      : 1
-  const openExecutionCosts = applyExecutionCosts({
-    atr: row.atr,
-    currency,
-    fxToEur: entryFxToEur,
-    marketId: strategy.id,
-    notionalEur: invested,
-    phase: 'OPEN',
-    price: row.currentPrice,
-    type,
-  })
-  const entryPrice = openExecutionCosts.effectivePrice
-  const entryPriceEur =
-    Number(openExecutionCosts.effectivePriceEur) ||
-    convertToEur(entryPrice, entryFxToEur)
-  const entrySignalPriceEur =
-    Number(row.currentPriceEur) || convertToEur(row.currentPrice, entryFxToEur)
-  const atrAtEntryEur = Number(row.atrEur) || convertToEur(row.atr, entryFxToEur)
-  const quantity = roundQuantity(invested / entryPriceEur)
-
-  return {
-    id: `${row.ticker}-${type}-${Date.now()}-${crypto.randomUUID()}`,
-    marketId: strategy.id,
-    marketLabel: strategy.label,
-    ticker: row.ticker,
-    profile: row.profile || null,
-    type,
-    openOrderId: order?.id || null,
-    openedAt,
-    currency,
-    entryFxToEur,
-    entryPriceEur: roundPrice(entryPriceEur),
-    entrySignalPrice: roundPrice(row.currentPrice),
-    entrySignalPriceEur: roundPrice(entrySignalPriceEur),
-    atrAtEntryEur: roundPrice(atrAtEntryEur),
-    fxPair: row.fxPair || null,
-    fxProvider: row.fxProvider || null,
-    entryPrice: roundPrice(entryPrice),
-    executionCosts: {
-      open: openExecutionCosts,
-    },
-    atrAtEntry: roundPrice(row.atr),
-    takeProfit: roundPrice(
-      long
-        ? entryPrice * (1 + targetPct / 100)
-        : entryPrice * (1 - targetPct / 100),
-    ),
-    finalTakeProfit: roundPrice(
-      long
-        ? entryPrice * (1 + maxTargetPct / 100)
-        : entryPrice * (1 - maxTargetPct / 100),
-    ),
-    stopLoss: roundPrice(
-      long
-        ? entryPrice - row.atr * stopMultiplier
-        : entryPrice + row.atr * stopMultiplier,
-    ),
-    initialStopLoss: roundPrice(
-      long
-        ? entryPrice - row.atr * stopMultiplier
-        : entryPrice + row.atr * stopMultiplier,
-    ),
-    profitLockArmed: false,
-    favorablePrice: roundPrice(entryPrice),
-    daysHeld: 0,
-    invested: roundPrice(invested),
-    quantity,
-    targetPct,
-    maxTargetPct,
-    trailingPct,
-  }
-}
-
-function evaluateProfitExit(position, latestPrice) {
-  const long = position.type === 'LONG'
-  const trailingPct = Number(position.trailingPct)
-  const hasDynamicProfit = Number.isFinite(trailingPct) && trailingPct > 0
-  const takeProfit = Number(position.takeProfit)
-  const finalTakeProfit = Number(position.finalTakeProfit || position.takeProfit)
-
-  if (!hasDynamicProfit) {
-    return {
-      exitReason: 'TAKE_PROFIT',
-      isWin: long ? latestPrice >= takeProfit : latestPrice <= takeProfit,
-      monitoredFields: {},
-    }
-  }
-
-  const previousFavorablePrice = Number.isFinite(Number(position.favorablePrice))
-    ? Number(position.favorablePrice)
-    : Number(position.entryPrice)
-  const favorablePrice = long
-    ? Math.max(previousFavorablePrice, latestPrice)
-    : Math.min(previousFavorablePrice, latestPrice)
-  const profitLockReached = long
-    ? latestPrice >= takeProfit
-    : latestPrice <= takeProfit
-  const profitLockArmed = Boolean(position.profitLockArmed) || profitLockReached
-  const trailingStopPrice = profitLockArmed
-    ? long
-      ? favorablePrice * (1 - trailingPct / 100)
-      : favorablePrice * (1 + trailingPct / 100)
-    : null
-  const maxTargetReached = long
-    ? latestPrice >= finalTakeProfit
-    : latestPrice <= finalTakeProfit
-  const trailingTriggered =
-    profitLockArmed &&
-    Number.isFinite(Number(trailingStopPrice)) &&
-    (long ? latestPrice <= trailingStopPrice : latestPrice >= trailingStopPrice)
-
-  return {
-    exitReason: maxTargetReached ? 'TAKE_PROFIT_MAX' : 'TRAILING_PROFIT',
-    isWin: maxTargetReached || trailingTriggered,
-    monitoredFields: {
-      profitLockArmed,
-      favorablePrice: roundPrice(favorablePrice),
-      trailingStopPrice: Number.isFinite(Number(trailingStopPrice))
-        ? roundPrice(trailingStopPrice)
-        : null,
-    },
-  }
-}
-
-function getProtectedStopLoss(position, profitExit) {
-  const trailingPct = Number(position.trailingPct)
-  const hasDynamicStop = Number.isFinite(trailingPct) && trailingPct > 0
-  const currentStopLoss = Number(position.stopLoss)
-
-  if (!hasDynamicStop || !Number.isFinite(currentStopLoss)) {
-    return currentStopLoss
-  }
-
-  const profitLockArmed =
-    Boolean(position.profitLockArmed) ||
-    Boolean(profitExit?.monitoredFields?.profitLockArmed)
-
-  if (!profitLockArmed) {
-    return currentStopLoss
-  }
-
-  const entryPrice = Number(position.entryPrice)
-
-  if (!Number.isFinite(entryPrice)) {
-    return currentStopLoss
-  }
-
-  return position.type === 'LONG'
-    ? Math.max(currentStopLoss, entryPrice)
-    : Math.min(currentStopLoss, entryPrice)
-}
-
-function getCloseReasonText(exitReason, strategy = null) {
-  if (exitReason === 'STOP_LOSS') {
-    return 'Chiusura automatica backend: stop loss raggiunto.'
-  }
-
-  if (exitReason === 'BREAK_EVEN_STOP') {
-    return 'Chiusura automatica backend: stop a pareggio raggiunto.'
-  }
-
-  if (exitReason === 'PRE_CLOSE_PROFIT_LOCK') {
-    return 'Chiusura automatica backend: protezione pre-chiusura, utile consolidato.'
-  }
-
-  if (exitReason === 'PRE_CLOSE_CAPITAL_PROTECTION') {
-    return 'Chiusura automatica backend: protezione pre-chiusura, capitale protetto.'
-  }
-
-  if (exitReason === 'PRE_CLOSE_RISK' || exitReason === 'SESSION_PROTECTION') {
-    return `Chiusura automatica backend: protezione ${getMarketCloseGuardLabel(strategy)} attivata.`
-  }
-
-  if (exitReason === 'TRAILING_PROFIT') {
-    return 'Chiusura automatica backend: trailing profit attivato.'
-  }
-
-  return 'Chiusura automatica backend: target profit raggiunto.'
-}
-
 async function refillOpenSlots(state, excludedTickers = []) {
   const strategy = getTradingStrategy(state.activeMarket)
   const usMarketContext =
@@ -1219,6 +1005,14 @@ async function refillOpenSlots(state, excludedTickers = []) {
 
     const positionSize = getRiskAdjustedPositionSize(capital, sizing, riskState)
     const type = getSignalType(row, strategy)
+
+    // Senza direzione non si apre. Prima questa riga non esisteva: buildTrade
+    // ricalcolava il tipo con `rsi < 30 ? LONG : SHORT` e ogni segnale che non
+    // riconosceva finiva aperto SHORT, con direction null nell'ordine.
+    if (!type) {
+      return
+    }
+
     const blockReason = getOpeningOrderBlockReason(
       { ...state, capital, positions, orders, pendingTicker: row.ticker },
       positionSize,
@@ -1257,7 +1051,17 @@ async function refillOpenSlots(state, excludedTickers = []) {
       source: 'backend-monitor',
       ticker: row.ticker,
     })
-    const trade = buildTrade(row, positionSize, strategy, order)
+    const trade = buildTrade({
+      ticker: row.ticker,
+      price: row.currentPrice,
+      atr: row.atr,
+      type,
+      invested: positionSize,
+      profile: row.profile || null,
+      strategy,
+      order,
+      marketData: row,
+    })
     const openCommissionEur = Number(trade.executionCosts?.open?.commissionEur) || 0
 
     if (capital < positionSize + openCommissionEur) {
