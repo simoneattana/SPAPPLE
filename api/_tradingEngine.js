@@ -504,10 +504,19 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
       : [],
     events: Array.isArray(rawMarketState.events) ? rawMarketState.events : [],
     executionMode: rawMarketState.executionMode || fallback.executionMode,
-    killSwitchEnabled: false,
+    killSwitchEnabled:
+      typeof rawMarketState.killSwitchEnabled === 'boolean'
+        ? rawMarketState.killSwitchEnabled
+        : fallback.killSwitchEnabled,
     riskLimits: getRiskLimits(strategy, rawMarketState.riskLimits),
-    automationEnabled: true,
-    liveMonitorEnabled: true,
+    automationEnabled:
+      typeof rawMarketState.automationEnabled === 'boolean'
+        ? rawMarketState.automationEnabled
+        : fallback.automationEnabled,
+    liveMonitorEnabled:
+      typeof rawMarketState.liveMonitorEnabled === 'boolean'
+        ? rawMarketState.liveMonitorEnabled
+        : fallback.liveMonitorEnabled,
     backendMonitorEnabled:
       typeof rawMarketState.backendMonitorEnabled === 'boolean'
         ? rawMarketState.backendMonitorEnabled

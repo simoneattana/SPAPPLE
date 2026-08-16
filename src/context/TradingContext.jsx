@@ -542,9 +542,15 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
         ? rawMarketState.activityLog
         : fallback.events,
     executionMode: rawMarketState.executionMode || fallback.executionMode,
-    killSwitchEnabled: false,
+    killSwitchEnabled:
+      typeof rawMarketState.killSwitchEnabled === 'boolean'
+        ? rawMarketState.killSwitchEnabled
+        : fallback.killSwitchEnabled,
     riskLimits: getRiskLimits(strategy, rawMarketState.riskLimits),
-    automationEnabled: true,
+    automationEnabled:
+      typeof rawMarketState.automationEnabled === 'boolean'
+        ? rawMarketState.automationEnabled
+        : fallback.automationEnabled,
     lastScanAt: rawMarketState.lastScanAt || fallback.lastScanAt,
     lastScanCount: Number.isFinite(Number(rawMarketState.lastScanCount))
       ? Number(rawMarketState.lastScanCount)
@@ -560,7 +566,10 @@ function normalizeMarketState(marketId, rawMarketState = {}) {
       rawMarketState.lastAutomationMessage || fallback.lastAutomationMessage,
     lastDataProvider: rawMarketState.lastDataProvider || fallback.lastDataProvider,
     lastSyncAt: rawMarketState.lastSyncAt || fallback.lastSyncAt,
-    liveMonitorEnabled: true,
+    liveMonitorEnabled:
+      typeof rawMarketState.liveMonitorEnabled === 'boolean'
+        ? rawMarketState.liveMonitorEnabled
+        : fallback.liveMonitorEnabled,
     backendMonitorEnabled:
       typeof rawMarketState.backendMonitorEnabled === 'boolean'
         ? rawMarketState.backendMonitorEnabled
