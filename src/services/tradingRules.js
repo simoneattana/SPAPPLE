@@ -42,12 +42,25 @@ export function getEquitySignalThresholds(rowOrTicker) {
 
 export function getEquitySignalType(row) {
   const thresholds = getEquitySignalThresholds(row)
+  const rawRsi = row?.rsi
 
-  if (row.rsi < thresholds.long) {
+  // Senza RSI utilizzabile non esiste segnale. Servono due controlli: null < 30
+  // e vero in JavaScript, e Number(null) vale 0, che sarebbe comunque sotto soglia.
+  if (rawRsi === null || rawRsi === undefined || rawRsi === '') {
+    return null
+  }
+
+  const rsi = Number(rawRsi)
+
+  if (!Number.isFinite(rsi)) {
+    return null
+  }
+
+  if (rsi < thresholds.long) {
     return 'LONG'
   }
 
-  if (row.rsi > thresholds.short) {
+  if (rsi > thresholds.short) {
     return 'SHORT'
   }
 
