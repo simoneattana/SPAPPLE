@@ -1,0 +1,284 @@
+From bb494809482395aaf3eab785d727cf0d9438ae89 Mon Sep 17 00:00:00 2001
+From: simoneattana <22839075+simoneattana@users.noreply.github.com>
+Date: Mon, 20 Jul 2026 17:34:02 +0200
+Subject: [PATCH] Sperimenta strategia liquidita eventi
+
+---
+ api/_tradingEngine.js              |  32 ++++++--
+ docs/strategia-liquidita-eventi.md |  27 +++++++
+ src/context/TradingContext.jsx     |  25 +++++--
+ src/services/opportunityScoring.js | 114 +++++++++++++++++++++++++++++
+ 4 files changed, 188 insertions(+), 10 deletions(-)
+ create mode 100644 docs/strategia-liquidita-eventi.md
+ create mode 100644 src/services/opportunityScoring.js
+
+diff --git a/api/_tradingEngine.js b/api/_tradingEngine.js
+index 5319477..7b6f615 100644
+--- a/api/_tradingEngine.js
++++ b/api/_tradingEngine.js
+@@ -20,6 +20,10 @@ import {
+   isAutoEligibleResult,
+   sortByAutoScore,
+ } from '../src/services/tradingRules.js'
++import {
++  assessOpportunityNetEdge,
++  getTradeTargetProfile,
++} from '../src/services/opportunityScoring.js'
+ import {
+   buildUsMarketContextFromHistory,
+   createUnavailableUsMarketContext,
+@@ -1840,11 +1844,8 @@ function getSignalType(row, strategy) {
+ 
+ function buildTrade(row, invested, strategy = getTradingStrategy(), order = null) {
+   const atrPct = (row.atr / row.currentPrice) * 100
+-  const isCrypto = strategy.id === 'crypto'
+-  const targetPct = isCrypto ? (atrPct < 4 ? 0.45 : 0.65) : atrPct < 1.5 ? 0.35 : 0.6
+-  const maxTargetPct = isCrypto ? targetPct : atrPct < 1.5 ? 0.8 : 1.2
+-  const trailingPct = isCrypto ? null : atrPct < 1.5 ? 0.2 : 0.3
+-  const stopMultiplier = isCrypto ? 1.8 : atrPct < 1.5 ? 1.2 : 1.5
++  const { maxTargetPct, stopMultiplier, targetPct, trailingPct } =
++    getTradeTargetProfile(atrPct, strategy.id)
+   const type = strategy.id === 'crypto'
+     ? getCryptoSignalType(row)
+     : row.rsi < 30
+@@ -1865,6 +1866,7 @@ function buildTrade(row, invested, strategy = getTradingStrategy(), order = null
+     notionalEur: invested,
+     phase: 'OPEN',
+     price: row.currentPrice,
++    ticker: row.ticker,
+     type,
+   })
+   const entryPrice = openExecutionCosts.effectivePrice
+@@ -2078,6 +2080,26 @@ async function refillOpenSlots(state, excludedTickers = []) {
+ 
+     const positionSize = calculatePositionSize(capital, sizing)
+     const type = getSignalType(row, strategy)
++    const edge = assessOpportunityNetEdge(row, strategy, positionSize, type)
++
++    if (!edge.passed) {
++      const rejectedOrder = createSimulationOrder({
++        action: 'OPEN',
++        direction: type,
++        marketId: strategy.id,
++        marketLabel: strategy.label,
++        notional: positionSize,
++        requestedPrice: row.currentPrice,
++        reason: edge.reason || 'Margine netto insufficiente dopo i costi.',
++        side: getOpenOrderSide(type),
++        source: 'backend-monitor',
++        status: 'RIFIUTATO',
++        ticker: row.ticker,
++      })
++      orders = appendOrders({ orders }, rejectedOrder)
++      rejectedOrders.push(rejectedOrder)
++      return
++    }
+     const blockReason = getOpeningOrderBlockReason(
+       { ...state, capital, positions, orders, pendingTicker: row.ticker },
+       positionSize,
+diff --git a/docs/strategia-liquidita-eventi.md b/docs/strategia-liquidita-eventi.md
+new file mode 100644
+index 0000000..f7ec05f
+--- /dev/null
++++ b/docs/strategia-liquidita-eventi.md
+@@ -0,0 +1,27 @@
++# Strategia Liquidita + Eventi
++
++Questa branch sperimenta un approccio meno "mordi e fuggi" rispetto a Spapple main.
++
++## Obiettivo
++
++Ridurre operazioni fragili dove commissioni, spread e slippage mangiano il profitto.
++
++## Regola base
++
++Spapple apre automaticamente solo se il profitto netto stimato supera i costi con margine minimo.
++
++## Cosa cambia
++
++- Target piu ampi: 1,00% sui titoli tranquilli, 1,40% sui titoli piu volatili.
++- Target massimo piu ampio: 1,80% o 2,40%.
++- Trailing piu largo: 0,45% o 0,65%.
++- Prima di aprire, il sistema simula apertura, chiusura a target, spread, slippage e commissioni.
++- Se il margine netto stimato e troppo basso, il titolo viene scartato.
++
++## Cosa non c'e ancora
++
++- Lettura automatica di eventi ufficiali SEC/news.
++- Ranking basato su notizie.
++- Collegamento broker reale.
++
++Questi pezzi vanno aggiunti solo se il filtro costi dimostra di migliorare la qualita delle aperture.
+diff --git a/src/context/TradingContext.jsx b/src/context/TradingContext.jsx
+index 1d507c4..50fe225 100644
+--- a/src/context/TradingContext.jsx
++++ b/src/context/TradingContext.jsx
+@@ -25,6 +25,10 @@ import {
+   isAutoEligibleResult,
+   sortByAutoScore,
+ } from '../services/tradingRules'
++import {
++  assessOpportunityNetEdge,
++  getTradeTargetProfile,
++} from '../services/opportunityScoring'
+ import {
+   filterEquityRowsByUsMarketContext,
+   getUsMarketContextSummary,
+@@ -1363,11 +1367,8 @@ function buildTrade(
+   marketData = {},
+ ) {
+   const atrPct = (atr / price) * 100
+-  const isCrypto = strategy.id === 'crypto'
+-  const targetPct = isCrypto ? (atrPct < 4 ? 0.45 : 0.65) : atrPct < 1.5 ? 0.35 : 0.6
+-  const maxTargetPct = isCrypto ? targetPct : atrPct < 1.5 ? 0.8 : 1.2
+-  const trailingPct = isCrypto ? null : atrPct < 1.5 ? 0.2 : 0.3
+-  const stopMultiplier = isCrypto ? 1.8 : atrPct < 1.5 ? 1.2 : 1.5
++  const { maxTargetPct, stopMultiplier, targetPct, trailingPct } =
++    getTradeTargetProfile(atrPct, strategy.id)
+   const long = type === 'LONG'
+   const openedAt = new Date().toISOString()
+   const currencyData = getMarketCurrencyData(ticker, price, atr, marketData)
+@@ -2591,6 +2592,20 @@ export function TradingProvider({ children }) {
+       }
+ 
+       const positionSize = getRiskAdjustedPositionSize(capital, sizing, riskState)
++      const edge = assessOpportunityNetEdge(row, strategy, positionSize, type)
++
++      if (!edge.passed) {
++        skippedTickers.push(row.ticker)
++        appendLocalLog(
++          createActivity({
++            type: 'automation',
++            status: 'waiting',
++            title: `${row.ticker} scartato`,
++            detail: edge.reason || 'Margine netto insufficiente dopo i costi.',
++          }),
++        )
++        return
++      }
+       const blockReason = getOpeningOrderBlockReason(
+         { ...marketState, capital, positions, orders, pendingTicker: row.ticker },
+         positionSize,
+diff --git a/src/services/opportunityScoring.js b/src/services/opportunityScoring.js
+new file mode 100644
+index 0000000..1a0c7b9
+--- /dev/null
++++ b/src/services/opportunityScoring.js
+@@ -0,0 +1,114 @@
++import { applyExecutionCosts } from './executionCosts.js'
++import { getTickerCurrency } from './marketUniverse.js'
++
++const MIN_EXPECTED_NET_PCT = 0.35
++const MIN_NET_TO_COST_RATIO = 1.15
++
++function finiteNumber(value, fallback = 0) {
++  const number = Number(value)
++
++  return Number.isFinite(number) ? number : fallback
++}
++
++export function getTradeTargetProfile(atrPct, strategyId = 'equities') {
++  if (strategyId === 'crypto') {
++    return {
++      maxTargetPct: atrPct < 4 ? 0.45 : 0.65,
++      stopMultiplier: 1.8,
++      targetPct: atrPct < 4 ? 0.45 : 0.65,
++      trailingPct: null,
++    }
++  }
++
++  const calm = atrPct < 1.5
++
++  return {
++    maxTargetPct: calm ? 1.8 : 2.4,
++    stopMultiplier: calm ? 1.2 : 1.5,
++    targetPct: calm ? 1 : 1.4,
++    trailingPct: calm ? 0.45 : 0.65,
++  }
++}
++
++export function assessOpportunityNetEdge(row, strategy, notionalEur, type) {
++  if (!row || strategy?.id === 'crypto') {
++    return { passed: true, reason: null }
++  }
++
++  const price = finiteNumber(row.currentPrice)
++  const atr = finiteNumber(row.atr)
++  const fxToEur = finiteNumber(row.fxToEur, 1)
++  const invested = finiteNumber(notionalEur)
++
++  if (price <= 0 || atr <= 0 || invested <= 0 || !['LONG', 'SHORT'].includes(type)) {
++    return { passed: false, reason: 'Dati insufficienti per stimare margine netto e costi.' }
++  }
++
++  const atrPct = (atr / price) * 100
++  const target = getTradeTargetProfile(atrPct, strategy?.id)
++  const currency = row.currency || getTickerCurrency(row.ticker)
++  const openCosts = applyExecutionCosts({
++    atr,
++    currency,
++    fxToEur,
++    marketId: strategy?.id || 'equities',
++    notionalEur: invested,
++    phase: 'OPEN',
++    price,
++    ticker: row.ticker,
++    type,
++  })
++  const entryPrice = finiteNumber(openCosts.effectivePrice)
++  const entryPriceEur = finiteNumber(openCosts.effectivePriceEur)
++  const quantity = entryPriceEur > 0 ? invested / entryPriceEur : 0
++  const targetPrice =
++    type === 'LONG'
++      ? entryPrice * (1 + target.targetPct / 100)
++      : entryPrice * (1 - target.targetPct / 100)
++
++  if (quantity <= 0 || targetPrice <= 0) {
++    return { passed: false, reason: 'Quantità o target non calcolabile.' }
++  }
++
++  const closeCosts = applyExecutionCosts({
++    atr,
++    currency,
++    fxToEur,
++    marketId: strategy?.id || 'equities',
++    notionalEur: targetPrice * fxToEur * quantity,
++    phase: 'CLOSE',
++    price: targetPrice,
++    ticker: row.ticker,
++    type,
++  })
++  const exitPriceEur = finiteNumber(closeCosts.effectivePriceEur)
++  const grossPnlEur =
++    type === 'LONG'
++      ? (exitPriceEur - entryPriceEur) * quantity
++      : (entryPriceEur - exitPriceEur) * quantity
++  const commissions =
++    finiteNumber(openCosts.commissionEur) + finiteNumber(closeCosts.commissionEur)
++  const priceDrag =
++    finiteNumber(openCosts.pricePenaltyEur) * quantity +
++    finiteNumber(closeCosts.pricePenaltyEur) * quantity
++  const totalCosts = commissions + priceDrag
++  const expectedNetPnl = grossPnlEur - commissions
++  const expectedNetPct = (expectedNetPnl / invested) * 100
++  const netToCostRatio = totalCosts > 0 ? expectedNetPnl / totalCosts : Infinity
++  const passed =
++    expectedNetPct >= MIN_EXPECTED_NET_PCT &&
++    netToCostRatio >= MIN_NET_TO_COST_RATIO
++
++  return {
++    expectedNetPct,
++    expectedNetPnl,
++    netToCostRatio,
++    passed,
++    reason: passed
++      ? null
++      : `Margine netto stimato troppo basso: ${expectedNetPct.toFixed(
++          2,
++        )}% netto, rapporto utile/costi ${netToCostRatio.toFixed(2)}.`,
++    totalCosts,
++  }
++}
+-- 
+2.50.1 (Apple Git-155)
+
