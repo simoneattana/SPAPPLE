@@ -1,3 +1,8 @@
+import {
+  isExchangeHoliday,
+  isWeekend,
+} from './engine/marketCalendar.js'
+
 const MARKET_SCAN_INTERVAL_MS = 15 * 60_000
 
 const SESSION_GROUPS = {
@@ -6,6 +11,7 @@ const SESSION_GROUPS = {
       id: 'crypto',
       label: 'Crypto legacy',
       timezone: 'Europe/Rome',
+      alwaysOpen: true,
       scanStart: { hour: 0, minute: 0 },
       blockNewEntries: { hour: 23, minute: 59 },
       riskReview: { hour: 23, minute: 59 },
@@ -122,19 +128,56 @@ function formatTime(time) {
   )}`
 }
 
+const WEEKDAY_INDEX = {
+  sun: 0,
+  mon: 1,
+  tue: 2,
+  wed: 3,
+  thu: 4,
+  fri: 5,
+  sat: 6,
+}
+
+// Oltre all'orario serve il giorno, nel fuso della borsa e non in quello di chi
+// guarda: a Tokyo puo essere gia lunedi mentre in Italia e ancora domenica.
 function getTimeInTimezone(date = new Date(), timezone = 'Europe/Rome') {
-  const parts = new Intl.DateTimeFormat('it-IT', {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
+    weekday: 'short',
     hour12: false,
     timeZone: timezone,
   }).formatToParts(date)
-  const hour = Number(parts.find((part) => part.type === 'hour')?.value)
-  const minute = Number(parts.find((part) => part.type === 'minute')?.value)
-  const second = Number(parts.find((part) => part.type === 'second')?.value)
+  const value = (type) => parts.find((part) => part.type === type)?.value
+  const hourValue = Number(value('hour'))
+  // en-US con hour12 false rende mezzanotte come 24: va riportata a 0.
+  const hour = hourValue === 24 ? 0 : hourValue
+  const minute = Number(value('minute'))
+  const second = Number(value('second'))
+  const weekday = WEEKDAY_INDEX[String(value('weekday')).slice(0, 3).toLowerCase()]
+  const isoDate = `${value('year')}-${value('month')}-${value('day')}`
 
-  return { hour, minute, second }
+  return { hour, minute, second, weekday, isoDate }
+}
+
+// Giorno senza scambi: fine settimana o festivita della borsa. Il crypto non
+// chiude mai, quindi resta fuori.
+function isSessionClosedDay(session, date = new Date()) {
+  if (session.alwaysOpen) {
+    return false
+  }
+
+  const { weekday, isoDate } = getTimeInTimezone(date, session.timezone)
+
+  if (isWeekend(weekday)) {
+    return true
+  }
+
+  return isExchangeHoliday(session.id, isoDate)
 }
 
 function getSessions(strategy, ticker = null) {
@@ -155,6 +198,19 @@ function getSessions(strategy, ticker = null) {
 }
 
 function getSessionStatus(session, date = new Date()) {
+  if (isSessionClosedDay(session, date)) {
+    return {
+      ...session,
+      isClosedDay: true,
+      isOpenForScan: false,
+      isPreOpen: false,
+      newEntriesBlocked: true,
+      riskReviewActive: false,
+      protectiveCloseActive: false,
+      minutesToClose: null,
+    }
+  }
+
   const localTime = getTimeInTimezone(date, session.timezone)
   const currentMinutes = localTime.hour * 60 + localTime.minute
   const orderAcceptanceStartMinutes = session.orderAcceptanceStart
@@ -243,12 +299,25 @@ function getSecondsUntilScanStart(session, date = new Date()) {
     return MARKET_SCAN_INTERVAL_MS / 1000
   }
 
-  const nextTodayOpening = openingSeconds.find(
-    (openingSecond) => currentSeconds < openingSecond,
-  )
+  // Si scorrono i giorni finche non se ne trova uno di borsa. Senza questo, una
+  // pausa decisa il venerdi sera ripartiva il sabato mattina, su una sessione
+  // che non esiste.
+  for (let dayOffset = 0; dayOffset <= 14; dayOffset += 1) {
+    const opening =
+      dayOffset === 0
+        ? openingSeconds.find((openingSecond) => currentSeconds < openingSecond)
+        : openingSeconds[0]
 
-  if (Number.isFinite(nextTodayOpening)) {
-    return nextTodayOpening - currentSeconds
+    if (!Number.isFinite(opening)) {
+      continue
+    }
+
+    const seconds = dayOffset * 24 * 3600 - currentSeconds + opening
+    const candidate = new Date(date.getTime() + seconds * 1000)
+
+    if (!isSessionClosedDay(session, candidate)) {
+      return seconds
+    }
   }
 
   return 24 * 3600 - currentSeconds + openingSeconds[0]
@@ -259,6 +328,7 @@ function getSessionMarketDisplayStatus(session, date = new Date()) {
   const currentSeconds =
     localTime.hour * 3600 + localTime.minute * 60 + localTime.second
   const currentMinutes = localTime.hour * 60 + localTime.minute
+  const closedDay = isSessionClosedDay(session, date)
   const marketWindows = session.marketWindows || [
     {
       start: session.marketOpen || session.scanStart,
@@ -274,17 +344,37 @@ function getSessionMarketDisplayStatus(session, date = new Date()) {
       currentMinutes >= toMinutes(window.start) &&
       currentMinutes < toMinutes(window.end),
   )
-  const nextTodayOpening = marketOpenSeconds.find(
-    (openingSecond) => currentSeconds < openingSecond,
-  )
-  const secondsToOpen = Number.isFinite(nextTodayOpening)
-    ? nextTodayOpening - currentSeconds
-    : 24 * 3600 - currentSeconds + marketOpenSeconds[0]
+  // Il conto alla rovescia deve puntare alla prossima apertura vera, saltando
+  // fine settimana e festivita, altrimenti in un weekend indica un orario di
+  // domani che non esiste.
+  let secondsToOpen = 24 * 3600 - currentSeconds + marketOpenSeconds[0]
+
+  for (let dayOffset = 0; dayOffset <= 14; dayOffset += 1) {
+    const opening =
+      dayOffset === 0
+        ? marketOpenSeconds.find((openingSecond) => currentSeconds < openingSecond)
+        : marketOpenSeconds[0]
+
+    if (!Number.isFinite(opening)) {
+      continue
+    }
+
+    const candidateSeconds = dayOffset * 24 * 3600 - currentSeconds + opening
+    const candidate = new Date(date.getTime() + candidateSeconds * 1000)
+
+    if (!isSessionClosedDay(session, candidate)) {
+      secondsToOpen = candidateSeconds
+      break
+    }
+  }
 
   return {
     ...session,
-    isMarketOpen,
-    minutesToMarketClose: Math.max(0, marketCloseMinutes - currentMinutes),
+    isClosedDay: closedDay,
+    isMarketOpen: closedDay ? false : isMarketOpen,
+    minutesToMarketClose: closedDay
+      ? 0
+      : Math.max(0, marketCloseMinutes - currentMinutes),
     secondsToOpen,
   }
 }

@@ -76,6 +76,7 @@ import {
   getRiskAdjustedPositionSize,
   getRiskGovernorState,
 } from '../src/services/engine/risk.js'
+import { isMarketDataStale } from '../src/services/engine/marketCalendar.js'
 import {
   buildTrade,
   evaluateProfitExit,
@@ -759,6 +760,7 @@ async function fetchTickerDiagnostic(ticker) {
       provider,
       profile,
       currentPrice: latestBar.close,
+      latestBarDate: latestBar.date || null,
       pe,
       rsi,
       atr,
@@ -1010,6 +1012,12 @@ async function refillOpenSlots(state, excludedTickers = []) {
     // ricalcolava il tipo con `rsi < 30 ? LONG : SHORT` e ogni segnale che non
     // riconosceva finiva aperto SHORT, con direction null nell'ordine.
     if (!type) {
+      return
+    }
+
+    // Rete per le chiusure lunghe che il calendario non conosce: se l'ultimo
+    // dato disponibile e troppo vecchio, quella borsa non sta scambiando.
+    if (isMarketDataStale(row.latestBarDate)) {
       return
     }
 

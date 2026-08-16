@@ -77,6 +77,7 @@ import {
   getRiskAdjustedPositionSize,
   getRiskGovernorState,
 } from '../services/engine/risk'
+import { isMarketDataStale } from '../services/engine/marketCalendar'
 import {
   buildTrade,
   evaluateProfitExit,
@@ -1362,6 +1363,9 @@ export function TradingProvider({ children }) {
       )
       const canOpen =
         ['LONG', 'SHORT'].includes(type) &&
+        // Rete per le chiusure lunghe che il calendario non conosce: se
+        // l'ultimo dato disponibile e troppo vecchio, quella borsa e ferma.
+        !isMarketDataStale(row.latestBarDate) &&
         positions.length < maxPositions &&
         canOpenPosition(capital, sizing) &&
         !alreadyOpen
