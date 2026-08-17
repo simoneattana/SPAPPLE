@@ -231,6 +231,41 @@ Tre, e valgono più di qualunque scelta tecnica di questo documento.
   che non è questo.
 - **Il broker vero**: nessun passaggio a chiavi reali è in discussione.
 
+## 6-bis. Stato al 17 agosto, pomeriggio
+
+**Il motore è acceso** su Europa, USA e Asia. Crypto resta fermo per scelta: non è mai
+stato attivato. Il cron gira di nuovo ogni 5 minuti e risponde 200 per la prima volta
+dal 3 agosto.
+
+Oltre alla Fase A è entrata anche una regola nuova, la **guardia sui costi**: rifiuta le
+operazioni il cui bersaglio non copre il costo del giro completo. Non è taratura sui
+dati passati, è aritmetica: se punti allo 0,35% e spendi lo 0,40%, hai perso prima di
+cominciare. Il metro è il bersaglio vicino, non quello massimo.
+
+Sulle 25 operazioni archiviate ne avrebbe fatte passare 14: Europa 4 su 4, USA 4 su 5,
+Asia 6 su 16, con **tutte le Hong Kong rifiutate** per via del bollo di stato.
+
+Primo giro reale sull'Europa, ore 11:20: 80 titoli scansionati, 8 segnali, **3 posizioni
+aperte** su `MAERSK-B.CO`, `ACA.PA` e `LDO.MI`, e **2 rifiutate dalla guardia**, entrambe
+`ISP.MI` con la motivazione scritta nell'ordine: *«il bersaglio dello 0,35% non copre il
+costo del giro, stimato allo 0,40%»*. Intesa è italiana e paga la Tobin, ed è un titolo
+calmo quindi punta allo 0,35%: i conti non tornano e il motore lo dice.
+
+### Un difetto trovato accendendo
+
+Il monitor rispondeva «aperte: 3» ma nello stato non compariva nessuna posizione. Il
+motore aggiorna i campi alla radice dello stato, mentre `syncActiveMarketState` legge le
+posizioni da `markets[mercato]`: senza aggiornare `markets` prima, la copia vecchia
+vinceva e le aperture sparivano fra il calcolo e il salvataggio.
+
+Il ramo principale del monitor lo faceva già a mano, i quattro rami di uscita anticipata
+no. Ecco perché il 3 agosto aveva funzionato: c'erano posizioni aperte, quindi passava
+dal ramo giusto. Corretto in `withMarketState`, con 4 test di regressione.
+
+È il tipo di difetto che nessun test unitario avrebbe trovato da solo, perché ognuno dei
+due pezzi era corretto: sbagliato era il modo in cui si parlavano. L'ha trovato
+l'accensione.
+
 ## 7. Cosa fare per primo
 
 ~~Fase A: commissioni IBKR e termine di cambio.~~ **Fatta il 2026-08-17**, commit
