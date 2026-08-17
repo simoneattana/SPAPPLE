@@ -110,7 +110,7 @@ accompagnato da cosa lo rende vero o incerto.**
 
 ## 4. La rotta
 
-### Fase A — Il modello costi smette di mentire
+### Fase A — Il modello costi smette di mentire ✅ fatta il 2026-08-17
 
 È la prima perché tutto il resto ci poggia sopra.
 
@@ -129,16 +129,32 @@ accompagnato da cosa lo rende vero o incerto.**
    sua fonte, o l'ammissione che non ne ha una, e la possibilità di vedere quanto cambia
    il risultato al variare di quel numero.
 
-Effetto atteso sul costo di un giro completo, dalla misura attuale di 0,850%:
+**Esito misurato.** Ricalcolando le 25 operazioni archiviate con il nuovo modello:
 
-| Borsa | Costo modellato | di cui slittamento |
-|---|---|---|
-| USA | 0,274% | 55% |
-| Xetra | 0,310% | 48% |
-| Svizzera | 0,377% | 40% |
-| Milano | 0,410% | 37% |
-| Tokyo | 0,410% | 37% |
-| Hong Kong | 0,642% | 23% |
+| | Directa | IBKR | differenza |
+|---|---|---|---|
+| Costi in contanti | 481,73 € | **134,19 €** | −347,54 € |
+| Costo per giro completo | 0,848% | **0,236%** | −0,61 punti |
+| Risultato netto | −450,83 € | **−103,29 €** | +347,54 € |
+| Operazioni in utile | 6 su 25 | **10 su 25** | +4 |
+
+Per mercato: Europa dallo 0,804% allo **0,134%**, USA dallo 0,685% allo **0,089%**,
+Asia dallo 0,915% allo **0,315%**. L'Asia resta la più cara e la ragione è il bollo di
+Hong Kong, che è imposta di stato e non si riduce cambiando intermediario.
+
+Una precisazione sulle unità, perché confonde: questi numeri sono i **costi in
+contanti**, cioè commissioni più cambio più imposte. Spread e slittamento non ci sono
+dentro, perché sono già scontati nel prezzo di esecuzione e quindi dentro al risultato
+lordo. Il costo *pieno* di un giro, contanti più impatto sul prezzo, resta più alto:
+attorno allo 0,27% negli USA e allo 0,64% a Hong Kong su una posizione da 3.000 € con
+volatilità dell'1,5%.
+
+**Cosa non ha risolto.** Il risultato resta negativo. Il vantaggio lordo di +0,113% per
+operazione è comunque inferiore al costo ridotto dello 0,236%. E quel +0,113%, come
+detto al punto 1, non è nemmeno dimostrato: sparisce togliendo una sola giornata.
+
+Il modello costi era una bugia che andava tolta di mezzo, e ora non c'è più. Non era
+la causa del problema: era quello che impediva di vederlo.
 
 ### Fase B — L'interfaccia dice cosa sono i numeri
 
@@ -217,11 +233,15 @@ Tre, e valgono più di qualunque scelta tecnica di questo documento.
 
 ## 7. Cosa fare per primo
 
-Fase A, punto 1 e 2: commissioni IBKR e termine di cambio. Sono contenute, hanno una
-fonte verificata, e sbloccano ogni discussione successiva sui costi.
+~~Fase A: commissioni IBKR e termine di cambio.~~ **Fatta il 2026-08-17**, commit
+`9afa3b5`, con 22 test nuovi. Tutte e cinque le voci previste, comprese imposte e
+prestito titoli.
 
-Poi la Fase B, perché è la più economica e la più protettiva: senza numerosità accanto
-ai numeri, questo documento verrà riscritto sbagliato una seconda volta.
+Adesso tocca alla **Fase B**, perché è la più economica e la più protettiva: senza
+numerosità accanto ai numeri, questo documento verrà riscritto sbagliato una seconda
+volta. E c'è un motivo in più adesso: l'app mostra costi calcolati con un modello
+diverso da quello con cui furono registrate le operazioni vecchie, e senza una nota
+che lo dica i due numeri sembrano confrontabili quando non lo sono.
 
 ---
 
