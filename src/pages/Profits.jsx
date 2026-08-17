@@ -14,8 +14,10 @@ import { InfoTip } from '../components/ui/InfoTip'
 import { useTrading } from '../context/useTrading'
 import { getMarketCopy } from '../services/marketCopy'
 import { restateClosedTradeExecutionCosts } from '../services/executionCosts'
+import { Campione, NotaModello } from '../components/EtichetteDati'
 import {
   calculateRealizedTotals,
+  calculateSampleSize,
   filterTradesByMonthKey,
   groupTradesByDay,
   normalizeTradeDate,
@@ -167,6 +169,7 @@ export default function Profits({ marketId }) {
     [displayHistory, selectedMonth],
   )
   const selectedMonthTotals = calculateRealizedTotals(selectedMonthTrades)
+  const campioneMese = calculateSampleSize(selectedMonthTrades, effectiveMarket)
   const tradesByDay = useMemo(
     () => groupTradesByDay(selectedMonthTrades),
     [selectedMonthTrades],
@@ -257,7 +260,12 @@ export default function Profits({ marketId }) {
         </div>
       </header>
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Campione campione={campioneMese} />
+          <NotaModello />
+        </div>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           icon={PiggyBank}
           label="Utili mese"
@@ -289,6 +297,7 @@ export default function Profits({ marketId }) {
           value={`${positiveDays} positivi / ${negativeDays} negativi`}
           info="Conta solo i giorni con almeno una chiusura."
         />
+        </div>
       </section>
 
       <section className="grid gap-4 lg:grid-cols-2">

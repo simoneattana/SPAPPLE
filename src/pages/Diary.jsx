@@ -26,6 +26,11 @@ import { useTrading } from '../context/useTrading'
 import { restateClosedTradeExecutionCosts } from '../services/executionCosts'
 import { getMarketCopy } from '../services/marketCopy'
 import { getTradingStrategy } from '../strategies'
+import { Campione, NotaModello } from '../components/EtichetteDati'
+import {
+  calculateRealizedTotals,
+  calculateSampleSize,
+} from '../services/profitStats'
 
 const currencyFormatter = new Intl.NumberFormat('it-IT', {
   style: 'currency',
@@ -145,28 +150,6 @@ function TradeCostTip({ trade }) {
       </div>
     </InfoTip>
   )
-}
-
-function calculateRealizedTotals(history = []) {
-  const wins = history.filter((trade) => trade.result === 'WIN')
-  const losses = history.filter((trade) => trade.result === 'LOSS')
-  const grossWins = wins.reduce(
-    (sum, trade) => sum + Math.max(Number(trade.pnlEur || 0), 0),
-    0,
-  )
-  const grossLosses = losses.reduce(
-    (sum, trade) => sum + Math.abs(Math.min(Number(trade.pnlEur || 0), 0)),
-    0,
-  )
-
-  return {
-    closed: history.length,
-    grossLosses,
-    grossWins,
-    losses: losses.length,
-    netPnl: grossWins - grossLosses,
-    wins: wins.length,
-  }
 }
 
 function getMonthOptions(history = [], orders = [], events = []) {
@@ -353,6 +336,7 @@ export default function Diary({ marketId }) {
   )
   const visibleTrades = filteredTrades.slice(0, MAX_VISIBLE_ROWS)
   const realizedTotals = calculateRealizedTotals(filteredTrades)
+  const campioneDiario = calculateSampleSize(filteredTrades, effectiveMarket)
   const activityRecords = useMemo(
     () => buildActivityRecords({ events, history: displayHistory, orders }),
     [displayHistory, events, orders],
@@ -446,6 +430,11 @@ export default function Diary({ marketId }) {
           </CardContent>
         </Card>
       </section>
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Campione campione={campioneDiario} />
+        <NotaModello />
+      </div>
 
       <Card>
         <CardHeader className="items-center justify-between gap-4 border-b border-slate-800">

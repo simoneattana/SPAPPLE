@@ -29,8 +29,10 @@ import {
 } from '../services/executionCosts'
 import { getMarketCopy } from '../services/marketCopy'
 import { getMarketDisplayStatus } from '../services/marketHours'
+import { Campione, NotaModello } from '../components/EtichetteDati'
 import {
   calculateRealizedTotals,
+  calculateSampleSize,
   filterTradesByCurrentMonth,
   filterTradesByToday,
 } from '../services/profitStats'
@@ -48,6 +50,9 @@ const percentFormatter = new Intl.NumberFormat('it-IT', {
   maximumFractionDigits: 1,
 })
 
+// Le soglie contano GIORNATE, non operazioni. Posizioni aperte nello stesso
+// giro sullo stesso mercato si muovono insieme e valgono come una misura sola:
+// 25 operazioni prodotte in 8 giornate sono 8 osservazioni, non 25.
 const MINIMUM_SAMPLE = 30
 const RELIABLE_SAMPLE = 100
 const EMPTY_ARRAY = []
@@ -257,8 +262,9 @@ function exitReasonLabel(reason) {
   return labels[reason] || reason || 'N/D'
 }
 
-function calculateStrategyStats(history) {
+function calculateStrategyStats(history, marketId = null) {
   const closedTrades = Array.isArray(history) ? history : []
+  const campione = calculateSampleSize(closedTrades, marketId)
   const wins = closedTrades.filter((trade) => trade.result === 'WIN')
   const losses = closedTrades.filter((trade) => trade.result === 'LOSS')
   const total = closedTrades.length
@@ -269,20 +275,21 @@ function calculateStrategyStats(history) {
   const expectancy =
     total > 0 ? winRate * averageWin - (1 - winRate) * averageLoss : 0
 
-  let sampleLabel = 'Campione basso'
+  let sampleLabel = `${campione.giornate} giornate: campione basso`
   let sampleVariant = 'negative'
 
-  if (total >= RELIABLE_SAMPLE) {
-    sampleLabel = 'Campione solido'
+  if (campione.giornate >= RELIABLE_SAMPLE) {
+    sampleLabel = `${campione.giornate} giornate: campione utilizzabile`
     sampleVariant = 'positive'
-  } else if (total >= MINIMUM_SAMPLE) {
-    sampleLabel = 'Campione iniziale'
+  } else if (campione.giornate >= MINIMUM_SAMPLE) {
+    sampleLabel = `${campione.giornate} giornate: campione iniziale`
     sampleVariant = 'default'
   }
 
   return {
     averageLoss,
     averageWin,
+    campione,
     expectancy,
     grossLosses,
     grossWins,
@@ -595,7 +602,7 @@ export default function Dashboard({ marketId }) {
     (currentStrategy?.positionSizing?.percent || 0.1) * 100,
   )
   const lastScanText = lastScanAt ? formatDate(lastScanAt) : 'Mai'
-  const strategyStats = calculateStrategyStats(displayHistory)
+  const strategyStats = calculateStrategyStats(displayHistory, activeMarket)
   const currentMonthStats = calculateRealizedTotals(currentMonthTrades)
   const todayStats = calculateRealizedTotals(todayClosedTrades)
   const todayCommissions = calculateCommissionTotal(todayClosedTrades)
@@ -1093,8 +1100,11 @@ export default function Dashboard({ marketId }) {
             <div className="flex items-center gap-2">
               <CardTitle className="text-white">Strategia</CardTitle>
               <InfoTip>
-                Le metriche sono utili solo quando esiste uno storico sufficiente.
-                Sotto {MINIMUM_SAMPLE} chiusure sono indicative, non decisionali.
+                Queste metriche valgono quanto il campione che le produce, e il
+                campione si misura in giornate, non in operazioni: posizioni aperte
+                nello stesso giro sullo stesso mercato si muovono insieme e valgono
+                come una misura sola. Sotto {MINIMUM_SAMPLE} giornate i numeri qui
+                sotto sono indicativi, non decisionali.
               </InfoTip>
             </div>
             <Badge variant={strategyStats.sampleVariant}>
@@ -1102,6 +1112,10 @@ export default function Dashboard({ marketId }) {
             </Badge>
           </CardHeader>
           <CardContent className="grid gap-3 p-4">
+            <div className="flex flex-col gap-1">
+              <Campione campione={strategyStats.campione} />
+              <NotaModello />
+            </div>
             <DashboardBox
               label="Win rate"
               value={

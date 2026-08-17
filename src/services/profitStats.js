@@ -1,4 +1,10 @@
 export function normalizeTradeDate(value) {
+  // new Date(null) non da una data non valida: da il 1 gennaio 1970. Senza
+  // questa guardia un'operazione senza data inventa una giornata di borsa.
+  if (value === null || value === undefined || value === '') {
+    return null
+  }
+
   const date = new Date(value)
 
   return Number.isNaN(date.getTime()) ? null : date
@@ -63,6 +69,37 @@ export function calculateRealizedTotals(history = []) {
     losses: losses.length,
     netPnl: grossWins - grossLosses,
     wins: wins.length,
+  }
+}
+
+// La numerosita vera di un campione di operazioni non e quante sono, e quante
+// giornate distinte le hanno prodotte.
+//
+// Tredici posizioni aperte nello stesso giro sullo stesso mercato si muovono
+// insieme: se quel giorno la borsa scende, vanno bene tutte e tredici per un
+// motivo solo. Contarle come tredici prove separate e l'errore che ha fatto
+// sembrare positivo uno storico che positivo non era.
+export function calculateSampleSize(history = [], fallbackMarketId = null) {
+  const trades = Array.isArray(history) ? history : []
+  const giornate = new Set()
+
+  for (const trade of trades) {
+    const data = normalizeTradeDate(trade?.openedAt || trade?.exitDate)
+
+    if (!data) {
+      continue
+    }
+
+    const mercato = trade?.marketId || fallbackMarketId || 'n/d'
+    giornate.add(`${mercato}-${data.toISOString().slice(0, 10)}`)
+  }
+
+  return {
+    operazioni: trades.length,
+    giornate: giornate.size,
+    // Quante operazioni, in media, vengono dalla stessa giornata. Sopra 3 il
+    // campione e molto piu piccolo di quanto sembri.
+    perGiornata: giornate.size > 0 ? trades.length / giornate.size : 0,
   }
 }
 
