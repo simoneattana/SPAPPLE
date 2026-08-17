@@ -275,14 +275,17 @@ function calculateStrategyStats(history, marketId = null) {
   const expectancy =
     total > 0 ? winRate * averageWin - (1 - winRate) * averageLoss : 0
 
-  let sampleLabel = `${campione.giornate} giornate: campione basso`
+  const giornateLabel = `${campione.giornate} ${
+    campione.giornate === 1 ? 'giornata' : 'giornate'
+  }`
+  let sampleLabel = `${giornateLabel}: campione basso`
   let sampleVariant = 'negative'
 
   if (campione.giornate >= RELIABLE_SAMPLE) {
-    sampleLabel = `${campione.giornate} giornate: campione utilizzabile`
+    sampleLabel = `${giornateLabel}: campione utilizzabile`
     sampleVariant = 'positive'
   } else if (campione.giornate >= MINIMUM_SAMPLE) {
-    sampleLabel = `${campione.giornate} giornate: campione iniziale`
+    sampleLabel = `${giornateLabel}: campione iniziale`
     sampleVariant = 'default'
   }
 
