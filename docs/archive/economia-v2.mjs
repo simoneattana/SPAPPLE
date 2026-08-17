@@ -17,7 +17,8 @@ function commissioneIbkr(mercato, notionalEur) {
     case 'milano':
       return Math.max(notionalEur * 0.0005, 1.25)
     case 'usa':
-      return Math.max(0.35 * USD_EUR, notionalEur * 0.0000) + 0.35 * USD_EUR * 0 || 0.35 * USD_EUR
+      // minimo 0,35 USD per eseguito: su posizioni piccole domina sempre
+      return 0.35 * USD_EUR
     case 'hongkong':
       return Math.max(notionalEur * 0.0005, 18 * HKD_EUR)
     case 'tokyo':

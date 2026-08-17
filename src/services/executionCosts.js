@@ -1,4 +1,50 @@
-export const SLIPPAGE_ATR_RATIO = 0.05
+// Costo di un'operazione, lato per lato.
+//
+// Modello broker: Interactive Brokers, piano Pro Tiered, scelto il 2026-08-11
+// dopo il confronto con Directa, Degiro, Fineco e Kraken. Fino al 2026-08-17
+// questo file conteneva il listino Directa, che non descriveva piu nessun
+// intermediario in uso.
+//
+// Il costo si compone di cinque voci. Le prime due muovono il prezzo di
+// esecuzione, le altre tre sono esborsi in contanti:
+//
+//   spread      il prezzo peggiora della meta del differenziale denaro-lettera
+//   slittamento il prezzo peggiora ancora, per il tempo fra decisione ed esecuzione
+//   commissione quanto trattiene il broker
+//   cambio      quanto costa convertire la valuta
+//   imposte     quanto trattiene lo Stato, che nessun broker puo ridurre
+//
+// piu una sesta che scatta solo sugli short tenuti oltre la giornata:
+//
+//   prestito    quanto costa farsi prestare i titoli venduti allo scoperto
+//
+// ATTENZIONE: due di questi numeri sono ipotesi, non misure. Stanno raccolti
+// in ASSUNZIONI e vanno trattati come tali: sono dichiarati nel risultato di
+// ogni calcolo perche l'interfaccia possa mostrarli come tali.
+
+// --- Ipotesi dichiarate ------------------------------------------------------
+
+export const ASSUNZIONI = {
+  slippage: {
+    id: 'slippage',
+    valore: 0.05,
+    unita: "frazione dell'ATR giornaliero, per lato",
+    fonte: null,
+    nota: "Nessuna fonte. In simulazione non esistono eseguiti veri con cui confrontarla, quindi non e verificabile finche non si opera davvero. E la voce piu pesante del modello: vale circa meta del costo totale su Europa e USA.",
+  },
+  prestitoTitoli: {
+    id: 'prestito-titoli',
+    valore: 0.005,
+    unita: 'tasso annuo sul controvalore, solo per posizioni short',
+    fonte: null,
+    nota: "Stima per titoli facili da reperire. Sui titoli difficili puo essere molte volte tanto. Incide solo se una posizione short resta aperta oltre la giornata: sulle operazioni infragiornaliere vale zero.",
+  },
+}
+
+export const SLIPPAGE_ATR_RATIO = ASSUNZIONI.slippage.valore
+export const BORROW_ANNUAL_RATE = ASSUNZIONI.prestitoTitoli.valore
+
+// --- Spread, per lato --------------------------------------------------------
 
 export const SPREAD_PER_SIDE = {
   asia: 0.0005,
@@ -6,29 +52,184 @@ export const SPREAD_PER_SIDE = {
   usa: 0.0002,
 }
 
-export const EXECUTION_COST_ASSUMPTIONS = [
+// --- Cambio valuta -----------------------------------------------------------
+//
+// IBKR converte in due modi. In automatico applica uno 0,03% al cambio, senza
+// minimi. In manuale costa lo 0,002% con un minimo di 2 USD per conversione,
+// quindi conviene solo sopra i 6.100 EUR circa, dove il minimo smette di pesare.
+// Qui si modella la conversione automatica, che e quella che avviene se non si
+// gestiscono a mano i saldi in valuta.
+
+export const FX_AUTO_RATE = 0.0003
+export const FX_MANUAL_RATE = 0.00002
+export const FX_MANUAL_MIN_USD = 2
+
+// --- Imposte di stato --------------------------------------------------------
+//
+// Non dipendono dal broker: cambiarlo non le riduce.
+
+const IMPOSTE = [
   {
-    commission: 'Italia: 1,9 per mille min 1,50 EUR, max 18 EUR. Germania/Cboe Europa: 0,025% min 9,50 EUR. Svizzera: 0,03% min 20 CHF.',
-    id: 'equities',
-    label: 'Europa',
-    sourceLabel: 'Directa, pagina commissioni',
-    sourceUrl: 'https://www.directa.it/commissioni',
-    spread: '0,03% per lato',
+    id: 'tobin-italia',
+    suffissi: ['.MI'],
+    lato: 'ACQUISTO',
+    aliquota: 0.001,
+    etichetta: 'Tobin tax italiana',
+    nota: 'Imposta italiana sulle transazioni finanziarie: 0,10% sugli acquisti di azioni italiane. Da verificare: per il 2026 e circolata una possibile revisione allo 0,20%.',
+    fonte: 'Agenzia delle Entrate, imposta sulle transazioni finanziarie',
   },
   {
-    commission: '9 USD per ordine',
-    id: 'usa',
-    label: 'USA',
-    sourceLabel: 'Directa, pagina commissioni',
-    sourceUrl: 'https://www.directa.it/commissioni',
+    id: 'bollo-hong-kong',
+    suffissi: ['.HK'],
+    lato: 'ENTRAMBI',
+    aliquota: 0.001,
+    etichetta: 'Stamp duty di Hong Kong',
+    nota: 'Bollo di Hong Kong: 0,10% su entrambi i lati. Su un giro completo vale lo 0,20%, ed e la ragione principale per cui Hong Kong resta il mercato piu caro.',
+    fonte: 'HKEX, trading tariffs',
+  },
+  {
+    id: 'imposta-cina',
+    suffissi: ['.SS', '.SZ'],
+    lato: 'VENDITA',
+    aliquota: 0.0005,
+    etichetta: 'Imposta cinese sulle vendite',
+    nota: 'Stamp duty cinese: 0,05% sulle sole vendite.',
+    fonte: 'Shanghai/Shenzhen Stock Connect',
+  },
+  {
+    id: 'sec-usa',
+    suffissi: [],
+    mercati: ['usa'],
+    lato: 'VENDITA',
+    aliquota: 0.0000278,
+    etichetta: 'SEC fee',
+    nota: 'Contributo SEC sulle vendite di titoli americani. Trascurabile ma reale.',
+    fonte: 'SEC Section 31 fee',
+  },
+]
+
+// --- Commissioni IBKR Pro Tiered, per borsa ----------------------------------
+//
+// Ogni riga porta la sua fonte. I minimi sono in valuta locale e vengono
+// convertiti con il cambio del titolo, non con un tasso fisso.
+
+const LISTINO = [
+  {
+    id: 'ibkr-eu',
+    suffissi: ['.MI', '.PA', '.AS', '.BR', '.LS', '.MC', '.ST', '.CO', '.HE', '.OL'],
+    etichetta: 'IBKR Europa',
+    aliquota: 0.0005,
+    minimoNativo: 1.25,
+    valutaMinimo: 'EUR',
+    nota: '0,05% del controvalore, minimo 1,25 EUR per eseguito.',
+    fonte: 'IBKR, commissioni azioni europee (piano Tiered)',
+  },
+  {
+    id: 'ibkr-xetra',
+    suffissi: ['.DE', '.F'],
+    etichetta: 'IBKR Xetra',
+    aliquota: 0.0005,
+    minimoNativo: 1.25,
+    massimoNativo: 29,
+    valutaMinimo: 'EUR',
+    nota: '0,05% del controvalore, minimo 1,25 EUR, massimo 29 EUR per eseguito.',
+    fonte: 'IBKR, commissioni azioni europee (piano Tiered)',
+  },
+  {
+    id: 'ibkr-six',
+    suffissi: ['.SW', '.VX'],
+    etichetta: 'IBKR SIX Svizzera',
+    aliquota: 0.0005,
+    minimoNativo: 1.5,
+    valutaMinimo: 'CHF',
+    nota: '0,05% del controvalore, minimo 1,50 CHF per eseguito.',
+    fonte: 'IBKR, commissioni azioni europee (piano Tiered)',
+  },
+  {
+    id: 'ibkr-hk',
+    suffissi: ['.HK'],
+    etichetta: 'IBKR Hong Kong',
+    aliquota: 0.0005,
+    minimoNativo: 18,
+    valutaMinimo: 'HKD',
+    nota: '0,05% del controvalore, minimo 18 HKD per eseguito.',
+    fonte: 'IBKR, commissioni azioni Hong Kong (SEHK)',
+  },
+  {
+    id: 'ibkr-jp',
+    suffissi: ['.TSE', '.T'],
+    etichetta: 'IBKR Giappone',
+    aliquota: 0.0005,
+    minimoNativo: 80,
+    valutaMinimo: 'JPY',
+    nota: '0,05% del controvalore, minimo 80 JPY per eseguito.',
+    fonte: 'IBKR, commissioni azioni giapponesi (TSEJ)',
+  },
+  {
+    id: 'ibkr-cn',
+    suffissi: ['.SS', '.SZ'],
+    etichetta: 'IBKR Cina Stock Connect',
+    aliquota: 0.0005,
+    minimoNativo: 15,
+    valutaMinimo: 'CNH',
+    nota: '0,05% del controvalore, minimo 15 CNH per eseguito.',
+    fonte: 'IBKR, commissioni Shanghai/Shenzhen Stock Connect',
+  },
+]
+
+const LISTINO_USA = {
+  id: 'ibkr-usa',
+  etichetta: 'IBKR Stati Uniti',
+  perAzione: 0.0035,
+  minimoNativo: 0.35,
+  valutaMinimo: 'USD',
+  tettoPct: 0.01,
+  nota: '0,0035 USD per azione, minimo 0,35 USD, mai oltre l1% del controvalore.',
+  fonte: 'IBKR, commissioni azioni USA (piano Tiered)',
+}
+
+export const EXECUTION_COST_ASSUMPTIONS = [
+  ...LISTINO.map((voce) => ({
+    id: voce.id,
+    label: voce.etichetta,
+    commission: voce.nota,
+    sourceLabel: voce.fonte,
+    spread: null,
+  })),
+  {
+    id: LISTINO_USA.id,
+    label: LISTINO_USA.etichetta,
+    commission: LISTINO_USA.nota,
+    sourceLabel: LISTINO_USA.fonte,
     spread: '0,02% per lato',
   },
+  ...IMPOSTE.map((voce) => ({
+    id: voce.id,
+    label: voce.etichetta,
+    commission: voce.nota,
+    sourceLabel: voce.fonte,
+    spread: null,
+  })),
   {
-    commission: '0,15% del controvalore, min 10 EUR',
-    id: 'asia',
-    label: 'Asia',
-    sourceLabel: 'Stima prudenziale interna Spapple',
-    spread: '0,05% per lato',
+    id: 'cambio',
+    label: 'Cambio valuta',
+    commission: `Conversione automatica IBKR: ${(FX_AUTO_RATE * 100).toFixed(2)}% per lato, senza minimi. Si applica solo ai titoli non in euro.`,
+    sourceLabel: 'IBKR, currency conversion',
+    spread: null,
+  },
+  {
+    id: ASSUNZIONI.slippage.id,
+    label: 'Slittamento (ipotesi, non misurato)',
+    commission: ASSUNZIONI.slippage.nota,
+    sourceLabel: null,
+    spread: `${(ASSUNZIONI.slippage.valore * 100).toFixed(0)}% dell'ATR per lato`,
+  },
+  {
+    id: ASSUNZIONI.prestitoTitoli.id,
+    label: 'Prestito titoli (ipotesi, non misurato)',
+    commission: ASSUNZIONI.prestitoTitoli.nota,
+    sourceLabel: null,
+    spread: null,
   },
 ]
 
@@ -40,10 +241,6 @@ function round(value, digits = 4) {
   }
 
   return Number(number.toFixed(digits))
-}
-
-function clamp(value, min, max) {
-  return Math.min(Math.max(value, min), max)
 }
 
 function getSpreadPct(marketId) {
@@ -58,109 +255,141 @@ function getAdverseDirection(type, phase) {
   return phase === 'OPEN' ? -1 : 1
 }
 
-function getEquityCommissionProfile(ticker = '') {
-  const normalizedTicker = String(ticker).toUpperCase()
+function normalizza(ticker) {
+  return String(ticker || '').toUpperCase()
+}
 
-  if (normalizedTicker.endsWith('.MI')) {
+function trovaListino(ticker, marketId) {
+  const normalizzato = normalizza(ticker)
+  const voce = LISTINO.find((riga) =>
+    riga.suffissi.some((suffisso) => normalizzato.endsWith(suffisso)),
+  )
+
+  if (voce) {
+    return voce
+  }
+
+  if (marketId === 'usa' || !normalizzato.includes('.')) {
+    return LISTINO_USA
+  }
+
+  return LISTINO[0]
+}
+
+// Il lato dell'operazione in termini di acquisto o vendita, che serve alle
+// imposte: un LONG compra all'apertura, uno SHORT compra alla chiusura.
+function latoOperazione(type, phase) {
+  if (type === 'LONG') {
+    return phase === 'OPEN' ? 'ACQUISTO' : 'VENDITA'
+  }
+
+  return phase === 'OPEN' ? 'VENDITA' : 'ACQUISTO'
+}
+
+function getCommission({ fxToEur, marketId, notionalEur, price, ticker }) {
+  const voce = trovaListino(ticker, marketId)
+  const cambio = Number.isFinite(Number(fxToEur)) && Number(fxToEur) > 0 ? Number(fxToEur) : 1
+  const controvalore = Math.max(Number(notionalEur) || 0, 0)
+
+  if (voce.perAzione) {
+    const prezzoEur = Number(price) * cambio
+    const quantita = prezzoEur > 0 ? controvalore / prezzoEur : 0
+    const minimoEur = voce.minimoNativo * cambio
+    const tettoEur = controvalore * voce.tettoPct
+    const grezzoEur = quantita * voce.perAzione * cambio
+    const commissioneEur = Math.min(Math.max(grezzoEur, minimoEur), tettoEur || Infinity)
+
     return {
-      brokerProfile: 'Directa Italia variabile MTA',
-      maxEur: 18,
-      minNative: 1.5,
-      rate: 0.0019,
-      note: 'Italia MTA: 1,9 per mille del controvalore, minimo 1,5 EUR, massimo 18 EUR per eseguito.',
+      brokerProfile: voce.etichetta,
+      commissionEur: round(commissioneEur),
+      commissionNative: round(commissioneEur / cambio),
+      note: voce.nota,
+      source: voce.fonte,
     }
   }
 
-  if (normalizedTicker.endsWith('.DE')) {
-    return {
-      brokerProfile: 'Directa Germania Xetra',
-      minNative: 9.5,
-      rate: 0.00025,
-      note: 'Germania Xetra: 0,025% del controvalore, minimo 9,5 EUR per eseguito.',
-    }
-  }
-
-  if (normalizedTicker.endsWith('.SW')) {
-    return {
-      brokerProfile: 'Directa Svizzera SIX',
-      minNative: 20,
-      rate: 0.0003,
-      note: 'Svizzera SIX: 0,03% del controvalore, minimo 20 CHF per eseguito.',
-    }
-  }
+  // I minimi in valuta diversa da quella del titolo non sono convertibili con
+  // il solo cambio disponibile: in quel caso il minimo si applica come se
+  // fosse gia in valuta del titolo, ed e un'approssimazione dichiarata.
+  const minimoEur = voce.minimoNativo * cambio
+  const massimoEur = voce.massimoNativo ? voce.massimoNativo * cambio : Infinity
+  const grezzoEur = controvalore * voce.aliquota
+  const commissioneEur = Math.min(Math.max(grezzoEur, minimoEur), massimoEur)
 
   return {
-    brokerProfile: 'Directa Europa Cboe',
-    minNative: 9.5,
-    rate: 0.00025,
-    note: 'Europa Cboe: 0,025% del controvalore, minimo 9,5 EUR per eseguito.',
+    brokerProfile: voce.etichetta,
+    commissionEur: round(commissioneEur),
+    commissionNative: round(commissioneEur / cambio),
+    note: voce.nota,
+    source: voce.fonte,
   }
 }
 
-function getCommission({ currency, fxToEur, marketId, notionalEur, ticker }) {
-  const safeNotionalEur = Number.isFinite(Number(notionalEur))
-    ? Math.max(Number(notionalEur), 0)
-    : 0
-  const safeFxToEur =
-    Number.isFinite(Number(fxToEur)) && Number(fxToEur) > 0
-      ? Number(fxToEur)
-      : 1
+export function getFxCostEur({ currency, notionalEur }) {
+  const valuta = String(currency || 'EUR').toUpperCase()
 
-  if (marketId === 'usa') {
-    const native = 9
-
-    return {
-      brokerProfile: 'Directa USA fisso prudente',
-      commissionEur: round(native * safeFxToEur),
-      commissionNative: round(native),
-      currency: currency || 'USD',
-      note: 'Commissione fissa prudenziale di 9 USD per eseguito.',
-    }
+  if (valuta === 'EUR') {
+    return { fxCostEur: 0, fxRule: 'Nessuna conversione: il titolo e gia in euro.' }
   }
 
-  if (marketId === 'equities') {
-    const profile = getEquityCommissionProfile(ticker)
-    const minEur = profile.minNative * safeFxToEur
-    const rawEur = safeNotionalEur * profile.rate
-    const cappedEur = Number.isFinite(Number(profile.maxEur))
-      ? Math.min(Math.max(rawEur, minEur), Number(profile.maxEur))
-      : Math.max(rawEur, minEur)
-
-    return {
-      brokerProfile: profile.brokerProfile,
-      commissionEur: round(cappedEur),
-      commissionNative: round(cappedEur / safeFxToEur),
-      currency: currency || 'EUR',
-      note: profile.note,
-    }
-  }
-
-  if (marketId === 'asia') {
-    const eur = Math.max(safeNotionalEur * 0.0015, 10)
-
-    return {
-      brokerProfile: 'Asia stima prudente',
-      commissionEur: round(eur),
-      commissionNative: round(eur / safeFxToEur),
-      currency: currency || 'EUR',
-      note: 'Stima prudente: 0,15% del controvalore, minimo 10 EUR.',
-    }
-  }
-
-  const eur = clamp(safeNotionalEur * 0.0019, 1.5, 18)
+  const controvalore = Math.max(Number(notionalEur) || 0, 0)
 
   return {
-    brokerProfile: 'Directa variabile Italia',
-    commissionEur: round(eur),
-    commissionNative: round(eur / safeFxToEur),
-    currency: currency || 'EUR',
-    note: 'Profilo variabile: 1,9 per mille, minimo 1,5 EUR, massimo 18 EUR.',
+    fxCostEur: round(controvalore * FX_AUTO_RATE),
+    fxRule: `Conversione automatica IBKR, ${(FX_AUTO_RATE * 100).toFixed(2)}% per lato.`,
+  }
+}
+
+export function getStateTaxEur({ marketId, notionalEur, phase, ticker, type }) {
+  const normalizzato = normalizza(ticker)
+  const lato = latoOperazione(type, phase)
+  const controvalore = Math.max(Number(notionalEur) || 0, 0)
+
+  const voce = IMPOSTE.find((riga) => {
+    const perSuffisso = (riga.suffissi || []).some((s) => normalizzato.endsWith(s))
+    const perMercato = (riga.mercati || []).includes(marketId)
+    return perSuffisso || perMercato
+  })
+
+  if (!voce) {
+    return { stateTaxEur: 0, stateTaxLabel: null, stateTaxNote: null }
+  }
+
+  const dovuta = voce.lato === 'ENTRAMBI' || voce.lato === lato
+
+  return {
+    stateTaxEur: dovuta ? round(controvalore * voce.aliquota) : 0,
+    stateTaxLabel: voce.etichetta,
+    stateTaxNote: voce.nota,
+  }
+}
+
+export function getBorrowCostEur({ daysHeld = 0, notionalEur, phase, type }) {
+  if (type !== 'SHORT' || phase !== 'CLOSE') {
+    return { borrowCostEur: 0, borrowRule: null }
+  }
+
+  const giorni = Math.max(Number(daysHeld) || 0, 0)
+
+  if (giorni <= 0) {
+    return {
+      borrowCostEur: 0,
+      borrowRule: 'Posizione chiusa in giornata: nessun costo di prestito.',
+    }
+  }
+
+  const controvalore = Math.max(Number(notionalEur) || 0, 0)
+
+  return {
+    borrowCostEur: round((controvalore * BORROW_ANNUAL_RATE * giorni) / 365),
+    borrowRule: `Prestito titoli stimato al ${(BORROW_ANNUAL_RATE * 100).toFixed(2)}% annuo per ${giorni} giorni.`,
   }
 }
 
 export function applyExecutionCosts({
   atr = 0,
   currency = 'EUR',
+  daysHeld = 0,
   fxToEur = 1,
   marketId = 'equities',
   notionalEur = null,
@@ -177,9 +406,7 @@ export function applyExecutionCosts({
 
   const safeAtr = Number.isFinite(Number(atr)) && Number(atr) > 0 ? Number(atr) : 0
   const safeFxToEur =
-    Number.isFinite(Number(fxToEur)) && Number(fxToEur) > 0
-      ? Number(fxToEur)
-      : 1
+    Number.isFinite(Number(fxToEur)) && Number(fxToEur) > 0 ? Number(fxToEur) : 1
   const spreadPct = getSpreadPct(marketId)
   const spreadNative = marketPrice * spreadPct
   const slippageNative = safeAtr * SLIPPAGE_ATR_RATIO
@@ -191,22 +418,53 @@ export function applyExecutionCosts({
     Number.isFinite(Number(notionalEur)) && Number(notionalEur) > 0
       ? Number(notionalEur)
       : effectivePriceEur
+
   const commission = getCommission({
-    currency,
     fxToEur: safeFxToEur,
     marketId,
     notionalEur: estimatedNotionalEur,
+    price: marketPrice,
     ticker,
   })
+  const { fxCostEur, fxRule } = getFxCostEur({
+    currency,
+    notionalEur: estimatedNotionalEur,
+  })
+  const { stateTaxEur, stateTaxLabel, stateTaxNote } = getStateTaxEur({
+    marketId,
+    notionalEur: estimatedNotionalEur,
+    phase,
+    ticker,
+    type,
+  })
+  const { borrowCostEur, borrowRule } = getBorrowCostEur({
+    daysHeld,
+    notionalEur: estimatedNotionalEur,
+    phase,
+    type,
+  })
+
+  // feesEur e il numero autorevole: tutto quello che esce di tasca su questo
+  // lato. commissionEur resta la sola commissione del broker, perche
+  // l'interfaccia la mostra con quel nome.
+  const feesEur = round(
+    (commission.commissionEur || 0) + fxCostEur + stateTaxEur + borrowCostEur,
+  )
 
   return {
     brokerProfile: commission.brokerProfile,
     commissionEur: commission.commissionEur,
     commissionNative: commission.commissionNative,
     commissionNote: commission.note,
-    currency: commission.currency,
+    commissionSource: commission.source,
+    currency: currency || 'EUR',
+    borrowCostEur,
+    borrowRule,
     effectivePrice: round(effectivePrice),
     effectivePriceEur: round(effectivePriceEur),
+    feesEur,
+    fxCostEur,
+    fxRule,
     fxToEur: round(safeFxToEur, 8),
     marketId,
     marketPrice: round(marketPrice),
@@ -217,13 +475,32 @@ export function applyExecutionCosts({
     pricePenaltyNative: round(pricePenaltyNative),
     sideEffect: direction > 0 ? 'prezzo aumentato' : 'prezzo ridotto',
     slippageEur: round(slippageNative * safeFxToEur),
+    slippageIsAssumption: true,
     slippageNative: round(slippageNative),
-    slippageRule: '5% ATR giornaliero per lato',
+    slippageRule: `${(SLIPPAGE_ATR_RATIO * 100).toFixed(0)}% ATR giornaliero per lato (ipotesi, senza fonte)`,
     spreadEur: round(spreadNative * safeFxToEur),
     spreadNative: round(spreadNative),
     spreadPct: round(spreadPct * 100, 4),
+    stateTaxEur,
+    stateTaxLabel,
+    stateTaxNote,
     type,
   }
+}
+
+// Il costo in contanti di un lato: commissione, cambio, imposte, prestito.
+// Preferire questo a getExecutionCommissionEur ovunque si calcoli un risultato.
+export function getExecutionFeesEur(executionCosts) {
+  const totale = Number(executionCosts?.feesEur)
+
+  if (Number.isFinite(totale)) {
+    return totale
+  }
+
+  // Operazioni salvate prima del 2026-08-17 non hanno feesEur.
+  const commissione = Number(executionCosts?.commissionEur)
+
+  return Number.isFinite(commissione) ? commissione : 0
 }
 
 export function getExecutionCommissionEur(executionCosts) {
@@ -233,14 +510,15 @@ export function getExecutionCommissionEur(executionCosts) {
 }
 
 export function getPositionOpenCommissionEur(position) {
-  return getExecutionCommissionEur(position?.executionCosts?.open)
+  return getExecutionFeesEur(position?.executionCosts?.open)
 }
 
 function inferMarketIdFromTicker(ticker = '') {
-  const normalizedTicker = String(ticker).toUpperCase()
+  const normalizedTicker = normalizza(ticker)
 
   if (
     normalizedTicker.endsWith('.T') ||
+    normalizedTicker.endsWith('.TSE') ||
     normalizedTicker.endsWith('.HK') ||
     normalizedTicker.endsWith('.SS') ||
     normalizedTicker.endsWith('.SZ')
@@ -271,6 +549,17 @@ function roundMoney(value) {
   const number = Number(value)
 
   return Number.isFinite(number) ? Number(number.toFixed(4)) : null
+}
+
+function giorniTenuta(trade) {
+  const apertura = new Date(trade?.openedAt || 0).getTime()
+  const chiusura = new Date(trade?.exitDate || 0).getTime()
+
+  if (!Number.isFinite(apertura) || !Number.isFinite(chiusura) || chiusura <= apertura) {
+    return 0
+  }
+
+  return Math.floor((chiusura - apertura) / 86_400_000)
 }
 
 export function restateClosedTradeExecutionCosts(trade) {
@@ -355,6 +644,7 @@ export function restateClosedTradeExecutionCosts(trade) {
     const closeCosts = applyExecutionCosts({
       atr,
       currency,
+      daysHeld: giorniTenuta(trade),
       fxToEur: exitFxToEur,
       marketId,
       notionalEur: closeNotionalEur,
@@ -368,13 +658,10 @@ export function restateClosedTradeExecutionCosts(trade) {
       type === 'LONG'
         ? (exitPriceEur - entryPriceEur) * quantity
         : (entryPriceEur - exitPriceEur) * quantity
-    const openCommissionEur = Number(openCosts.commissionEur) || 0
-    const closeCommissionEur = Number(closeCosts.commissionEur) || 0
-    const pnlEur = grossPnlEur - openCommissionEur - closeCommissionEur
-    const recoveredCapital = Math.max(
-      invested + grossPnlEur - closeCommissionEur,
-      0,
-    )
+    const openFeesEur = getExecutionFeesEur(openCosts)
+    const closeFeesEur = getExecutionFeesEur(closeCosts)
+    const pnlEur = grossPnlEur - openFeesEur - closeFeesEur
+    const recoveredCapital = Math.max(invested + grossPnlEur - closeFeesEur, 0)
 
     return {
       ...trade,
@@ -392,7 +679,7 @@ export function restateClosedTradeExecutionCosts(trade) {
       quantity: roundMoney(quantity),
       recoveredCapital: roundMoney(recoveredCapital),
       result: pnlEur >= 0 ? 'WIN' : 'LOSS',
-      totalCostsEur: roundMoney(openCommissionEur + closeCommissionEur),
+      totalCostsEur: roundMoney(openFeesEur + closeFeesEur),
       costModelRestated: true,
     }
   } catch {

@@ -10,6 +10,7 @@ import {
 } from '../services/positionSizing'
 import {
   applyExecutionCosts,
+  getExecutionFeesEur,
   getPositionOpenCommissionEur,
 } from '../services/executionCosts'
 import { getMarketCopy } from '../services/marketCopy'
@@ -323,7 +324,7 @@ function calculatePositionExecutionSnapshot(position, latestPrice, priceData = {
     ? (effectiveLatestPriceEur - entryPriceEur) * quantity
     : (entryPriceEur - effectiveLatestPriceEur) * quantity
   const openCommissionEur = getPositionOpenCommissionEur(position)
-  const closeCommissionEur = Number(closeExecutionCosts.commissionEur) || 0
+  const closeCommissionEur = getExecutionFeesEur(closeExecutionCosts)
   const pnlEur = grossPnlEur - openCommissionEur - closeCommissionEur
 
   return {
@@ -1224,7 +1225,7 @@ export function TradingProvider({ children }) {
       order,
       marketData,
     })
-    const openCommissionEur = Number(trade.executionCosts?.open?.commissionEur) || 0
+    const openCommissionEur = getExecutionFeesEur(trade.executionCosts?.open)
 
     if (marketState.capital < positionSize + openCommissionEur) {
       throw new Error('Capitale insufficiente per coprire importo e commissione di apertura')
@@ -1433,7 +1434,7 @@ export function TradingProvider({ children }) {
         order,
         marketData: row,
       })
-      const openCommissionEur = Number(trade.executionCosts?.open?.commissionEur) || 0
+      const openCommissionEur = getExecutionFeesEur(trade.executionCosts?.open)
 
       if (capital < positionSize + openCommissionEur) {
         const rejectedOrder = createSimulationOrder({

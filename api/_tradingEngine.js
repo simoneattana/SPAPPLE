@@ -33,6 +33,7 @@ import {
 } from '../src/services/positionSizing.js'
 import {
   applyExecutionCosts,
+  getExecutionFeesEur,
   getPositionOpenCommissionEur,
 } from '../src/services/executionCosts.js'
 import {
@@ -1070,7 +1071,7 @@ async function refillOpenSlots(state, excludedTickers = []) {
       order,
       marketData: row,
     })
-    const openCommissionEur = Number(trade.executionCosts?.open?.commissionEur) || 0
+    const openCommissionEur = getExecutionFeesEur(trade.executionCosts?.open)
 
     if (capital < positionSize + openCommissionEur) {
       const rejectedOrder = createSimulationOrder({
@@ -1166,7 +1167,7 @@ function evaluatePosition(
   const pricePnlEur = long
     ? (latestPriceEur - entryPriceEur) * quantity
     : (entryPriceEur - latestPriceEur) * quantity
-  const exitCommissionEur = Number(closeExecutionCosts.commissionEur) || 0
+  const exitCommissionEur = getExecutionFeesEur(closeExecutionCosts)
   const pnlEur = pricePnlEur - entryCommissionEur - exitCommissionEur
   const roundedPnl = roundPrice(pnlEur)
   const positionStrategy = getTradingStrategy(position.marketId)
