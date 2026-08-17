@@ -70,6 +70,7 @@ import {
   createInitialState,
   getNextScanAt,
   normalizeMarketState,
+  pickMarketState,
   syncActiveMarketState,
 } from '../src/services/engine/state.js'
 import {
@@ -1136,6 +1137,25 @@ async function refillOpenSlots(state, excludedTickers = []) {
   }
 }
 
+// I campi aggiornati dal motore vivono alla radice dello stato, ma
+// syncActiveMarketState legge le posizioni da markets[mercato]: senza questo
+// passaggio le modifiche appena calcolate vengono scartate in favore della
+// copia vecchia, e le aperture spariscono fra il calcolo e il salvataggio.
+// Il ramo principale del monitor lo faceva gia a mano; i rami di uscita
+// anticipata no, ed e per questo che le aperture si perdevano solo quando non
+// c'erano posizioni da valutare.
+export function withMarketState(current, updates = {}) {
+  const merged = { ...current, ...updates }
+
+  return syncActiveMarketState({
+    ...merged,
+    markets: {
+      ...(current.markets || {}),
+      [current.activeMarket]: pickMarketState(merged),
+    },
+  })
+}
+
 function evaluatePosition(
   position,
   latestPrice,
@@ -1326,8 +1346,7 @@ export async function runBackendMonitor(state) {
     })
 
     return {
-      state: syncActiveMarketState({
-        ...current,
+      state: withMarketState(current, {
         isChecking: false,
         isScanning: false,
         lastBackendCheckAt: new Date().toISOString(),
@@ -1354,8 +1373,7 @@ export async function runBackendMonitor(state) {
       })
 
       return {
-        state: syncActiveMarketState({
-          ...current,
+        state: withMarketState(current, {
           isChecking: false,
           isScanning: false,
           engineStatus: closeGuardActive
@@ -1384,8 +1402,7 @@ export async function runBackendMonitor(state) {
       })
 
       return {
-        state: syncActiveMarketState({
-          ...current,
+        state: withMarketState(current, {
           isChecking: false,
           isScanning: false,
           lastBackendCheckAt: new Date().toISOString(),
@@ -1447,8 +1464,7 @@ export async function runBackendMonitor(state) {
     })
 
     return {
-      state: syncActiveMarketState({
-        ...current,
+      state: withMarketState(current, {
         capital: refill ? refill.capital : current.capital,
         positions: refill ? refill.positions : current.positions,
         orders: refill ? refill.orders : current.orders,
