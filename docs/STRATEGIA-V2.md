@@ -171,7 +171,7 @@ i numeri si vedono:
 Non è una funzionalità decorativa: è la parte che impedisce di ri-ingannarsi, ed è
 esattamente l'errore che ho commesso io scrivendo la prima bozza di questo documento.
 
-### Fase C — Rimettere in moto, in modalità osservazione
+### Fase C — Rimettere in moto, in modalità osservazione ✅ fatta il 2026-08-17
 
 Il motore è pronto per ripartire: direzione corretta, blocchi che scadono, calendario
 vero, 87 test. Ma riaccenderlo per aprire posizioni produce altre giornate correlate e
@@ -184,6 +184,31 @@ aperto con prezzo e ora, e annota cosa succede a +1 ora, +1 giorno, +3 giorni,
 Costa poco da costruire, non rischia nulla, e produce la distribuzione dei rendimenti
 per orizzonte, che è l'unico dato che rende sensata una futura discussione sulla
 geometria. Nel frattempo l'app torna viva e ha qualcosa da mostrare.
+
+**Come è stata realizzata, con una variante.** Il motore è stato acceso *e* osserva
+insieme: apre come sempre, ma annota ogni segnale, compresi quelli che non ha aperto.
+Ogni annotazione porta prezzo, RSI, volatilità e la decisione presa — aperta, rifiutata
+dai costi, rifiutata dal rischio, non selezionata — e poi il prezzo viene seguito a
++1 ora, +1 giorno, +3 giorni, +1 settimana.
+
+La scelta che la rende gratuita: **le rilevazioni si riempiono dai prezzi che la
+scansione scarica già** ogni quindici minuti, quindi non c'è una sola chiamata dati in
+più. La conseguenza onesta è che una rilevazione avviene alla prima scansione utile e non
+al minuto esatto, perciò ogni rilevazione registra anche le ore davvero trascorse.
+
+Una sola annotazione per titolo, direzione e giorno: senza quel vincolo la scansione ogni
+quindici minuti registrerebbe lo stesso segnale decine di volte, gonfiando il campione
+senza aggiungere niente. È la disciplina della Fase B applicata a monte, prima ancora che
+i dati esistano.
+
+Il pannello nella dashboard mostra le rese medie per orizzonte con **giornate e
+osservazioni contate separatamente**, e dichiara che le rese sono al lordo dei costi:
+servono a capire se il movimento c'è, non se sarebbe stato conveniente inseguirlo.
+
+Primo giro reale sull'Europa: 8 segnali annotati, di cui 1 rifiutato dalla guardia sui
+costi (`ISP.MI`), 1 dal rischio (`ADYEN.AS`, in attesa dopo la chiusura del mattino) e 6
+non selezionati perché gli slot erano pieni. **Di quei 6 il trading da solo non avrebbe
+saputo mai niente.**
 
 ### Fase D — Il banco di prova, con i limiti dichiarati in partenza
 
