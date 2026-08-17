@@ -80,6 +80,11 @@ import {
 } from '../src/services/engine/risk.js'
 import { isMarketDataStale } from '../src/services/engine/marketCalendar.js'
 import {
+  pruneObservations,
+  registerObservations,
+  updateObservations,
+} from '../src/services/engine/observations.js'
+import {
   buildTrade,
   evaluateCostViability,
   evaluateProfitExit,
@@ -998,6 +1003,8 @@ async function refillOpenSlots(state, excludedTickers = []) {
   // i moltiplicatori e conosceva solo il blocco permanente.
   const riskState = getRiskGovernorState(state, strategy)
   let riskOpenings = 0
+  // Cosa e stato deciso su ogni titolo, per la modalita osservazione.
+  const decisioni = {}
 
   automaticRows.forEach((row) => {
     if (positions.length >= maxPositions || !canOpenPosition(capital, sizing)) {
@@ -1045,6 +1052,7 @@ async function refillOpenSlots(state, excludedTickers = []) {
         )
 
     if (blockReason) {
+      decisioni[row.ticker] = viability.viable ? 'rifiutata-rischio' : 'rifiutata-costi'
       const rejectedOrder = createSimulationOrder({
         action: 'OPEN',
         direction: type,
@@ -1121,8 +1129,31 @@ async function refillOpenSlots(state, excludedTickers = []) {
     positions.push(trade)
     capital = roundPrice(capital - positionSize - openCommissionEur)
     openedTrades.push(trade)
+    decisioni[row.ticker] = 'aperta'
     riskOpenings += 1
   })
+
+  // Modalita osservazione: si registra ogni segnale, anche quelli che non sono
+  // stati aperti, e si riempiono gli orizzonti scaduti di quelli gia registrati
+  // usando i prezzi appena scaricati. Nessuna chiamata dati in piu.
+  const prezziCorrenti = Object.fromEntries(
+    marketData
+      .filter((row) => Number.isFinite(Number(row.currentPrice)))
+      .map((row) => [row.ticker, Number(row.currentPrice)]),
+  )
+  const segnaliOsservati = actionableRows
+    .map((row) => ({
+      row,
+      type: strategy.id === 'crypto' ? getCryptoSignalType(row) : getSignalType(row, strategy),
+    }))
+    .filter((voce) => voce.type)
+  const observations = pruneObservations(
+    registerObservations(
+      updateObservations(state.observations || [], prezziCorrenti),
+      segnaliOsservati,
+      { marketId: strategy.id, decisioni },
+    ),
+  )
 
   return {
     capital: roundPrice(capital),
@@ -1132,6 +1163,7 @@ async function refillOpenSlots(state, excludedTickers = []) {
     rejectedOrders,
     usMarketContext,
     marketData,
+    observations,
     scannedCount: marketData.length,
     signalCount: actionableRows.length,
   }
@@ -1496,6 +1528,7 @@ export async function runBackendMonitor(state) {
               lastScanCount: refill.scannedCount,
               lastSignalCount: refill.signalCount,
               lastScanResults: refill.marketData,
+              observations: refill.observations || current.observations,
               usMarketContext: refill.usMarketContext || current.usMarketContext,
             }
           : {}),
@@ -1586,6 +1619,7 @@ export async function runBackendMonitor(state) {
         lastScanCount: refill.scannedCount,
         lastSignalCount: refill.signalCount,
         lastScanResults: refill.marketData,
+        observations: refill.observations || current.observations,
         usMarketContext: refill.usMarketContext || current.usMarketContext,
         lastSyncAt: new Date().toISOString(),
         nextScanAt: getNextScanAt(current.activeMarket, now),

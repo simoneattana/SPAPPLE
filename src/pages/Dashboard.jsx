@@ -30,6 +30,7 @@ import {
 import { getMarketCopy } from '../services/marketCopy'
 import { getMarketDisplayStatus } from '../services/marketHours'
 import { Campione, NotaModello } from '../components/EtichetteDati'
+import { PannelloOsservazioni } from '../components/PannelloOsservazioni'
 import {
   calculateRealizedTotals,
   calculateSampleSize,
@@ -590,6 +591,9 @@ export default function Dashboard({ marketId }) {
   const recentClosedTrades = displayHistory.slice(0, 5)
   const currentMonthTrades = filterTradesByCurrentMonth(displayHistory)
   const todayClosedTrades = filterTradesByToday(displayHistory)
+  const observations = Array.isArray(routeMarketState.observations)
+    ? routeMarketState.observations
+    : EMPTY_ARRAY
   const lastScanAt = routeMarketState.lastScanAt || null
   const lastScanCount = Number(routeMarketState.lastScanCount || 0)
   const lastSignalCount = Number(routeMarketState.lastSignalCount || 0)
@@ -1097,6 +1101,8 @@ export default function Dashboard({ marketId }) {
             </CardContent>
           </Card>
         </div>
+
+        <PannelloOsservazioni observations={observations} />
 
         <Card>
           <CardHeader className="items-center justify-between gap-3 p-4 pb-2">

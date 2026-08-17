@@ -39,6 +39,7 @@ export const MARKET_STATE_FIELDS = [
   'lastScanCount',
   'lastSignalCount',
   'lastScanResults',
+  'observations',
   'engineStatus',
   'isChecking',
   'isScanning',
@@ -116,6 +117,7 @@ export function createInitialMarketState(strategy = getTradingStrategy()) {
     lastScanCount: 0,
     lastSignalCount: 0,
     lastScanResults: [],
+    observations: [],
     engineStatus: 'In attesa',
     isChecking: false,
     isScanning: false,
@@ -348,6 +350,9 @@ export function normalizeMarketState(marketId, rawMarketState = {}) {
       ? Number(rawMarketState.lastSignalCount)
       : fallback.lastSignalCount,
     lastScanResults: sanitizeScanResults(rawMarketState.lastScanResults, marketId),
+    observations: Array.isArray(rawMarketState.observations)
+      ? rawMarketState.observations
+      : fallback.observations,
     engineStatus: rawMarketState.engineStatus || fallback.engineStatus,
     isChecking: Boolean(rawMarketState.isChecking),
     isScanning: Boolean(rawMarketState.isScanning),
