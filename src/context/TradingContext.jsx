@@ -81,6 +81,7 @@ import {
 import { isMarketDataStale } from '../services/engine/marketCalendar'
 import {
   buildTrade,
+  evaluateCostViability,
   evaluateProfitExit,
   getCloseReasonText,
   getProtectedStopLoss,
@@ -1377,11 +1378,26 @@ export function TradingProvider({ children }) {
       }
 
       const positionSize = getRiskAdjustedPositionSize(capital, sizing, riskState)
-      const blockReason = getOpeningOrderBlockReason(
-        { ...marketState, capital, positions, orders, pendingTicker: row.ticker },
-        positionSize,
+
+      // Guardia sui costi: un bersaglio che non copre il costo del giro e una
+      // scommessa persa in partenza, qualunque cosa faccia il segnale.
+      const viability = evaluateCostViability({
+        ticker: row.ticker,
+        price: row.currentPrice,
+        atr: row.atr,
+        type,
+        invested: positionSize,
         strategy,
-      )
+        marketData: row,
+      })
+
+      const blockReason = !viability.viable
+        ? viability.reason
+        : getOpeningOrderBlockReason(
+            { ...marketState, capital, positions, orders, pendingTicker: row.ticker },
+            positionSize,
+            strategy,
+          )
 
       if (blockReason) {
         const rejectedOrder = createSimulationOrder({

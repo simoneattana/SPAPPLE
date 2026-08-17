@@ -52,6 +52,101 @@ export function getMarketCurrencyData(ticker, price, atr, marketData = {}) {
   }
 }
 
+// La geometria vive qui e solo qui: buildTrade la usa per costruire
+// l'operazione, la guardia sui costi per sapere quanto punta a guadagnare.
+// Tenerne due copie sarebbe il modo piu rapido per farle divergere.
+export function getTradeGeometry(atrPct, strategy = getTradingStrategy()) {
+  const isCrypto = strategy.id === 'crypto'
+  const targetPct = isCrypto ? (atrPct < 4 ? 0.45 : 0.65) : atrPct < 1.5 ? 0.35 : 0.6
+
+  return {
+    targetPct,
+    maxTargetPct: isCrypto ? targetPct : atrPct < 1.5 ? 0.8 : 1.2,
+    trailingPct: isCrypto ? null : atrPct < 1.5 ? 0.2 : 0.3,
+    stopMultiplier: isCrypto ? 1.8 : atrPct < 1.5 ? 1.2 : 1.5,
+  }
+}
+
+// Costo pieno di un giro completo, in percentuale del controvalore: esborsi in
+// contanti piu quanto il prezzo peggiora fra spread e slittamento.
+export function getRoundTripCostPct({
+  ticker,
+  price,
+  atr,
+  type,
+  invested,
+  strategy = getTradingStrategy(),
+  marketData = {},
+}) {
+  const currencyData = getMarketCurrencyData(ticker, price, atr, marketData)
+  const lati = ['OPEN', 'CLOSE'].map((phase) =>
+    applyExecutionCosts({
+      atr,
+      currency: currencyData.currency,
+      daysHeld: 0,
+      fxToEur: currencyData.entryFxToEur,
+      marketId: strategy.id,
+      notionalEur: invested,
+      phase,
+      price,
+      ticker,
+      type,
+    }),
+  )
+  const contantiEur = lati.reduce((somma, lato) => somma + (lato.feesEur || 0), 0)
+  const quantita = invested / (price * currencyData.entryFxToEur)
+  const impattoPrezzoEur = lati.reduce(
+    (somma, lato) => somma + (lato.pricePenaltyEur || 0),
+    0,
+  ) * quantita
+
+  return {
+    costPct: ((contantiEur + impattoPrezzoEur) / invested) * 100,
+    cashEur: roundPrice(contantiEur),
+    priceImpactEur: roundPrice(impattoPrezzoEur),
+  }
+}
+
+// Un'operazione il cui bersaglio non copre il costo del giro e persa in
+// partenza, e non serve sapere se il segnale funziona per stabilirlo. Il metro
+// e il bersaglio vicino, non quello massimo: una regola di sicurezza si misura
+// sullo scenario normale, non su quello migliore.
+export function evaluateCostViability({
+  ticker,
+  price,
+  atr,
+  type,
+  invested,
+  strategy = getTradingStrategy(),
+  marketData = {},
+}) {
+  const atrPct = (atr / price) * 100
+  const { targetPct } = getTradeGeometry(atrPct, strategy)
+  const { costPct, cashEur, priceImpactEur } = getRoundTripCostPct({
+    ticker,
+    price,
+    atr,
+    type,
+    invested,
+    strategy,
+    marketData,
+  })
+  const marginPct = targetPct - costPct
+
+  return {
+    viable: marginPct > 0,
+    targetPct,
+    costPct,
+    marginPct,
+    cashEur,
+    priceImpactEur,
+    reason:
+      marginPct > 0
+        ? null
+        : `${ticker}: il bersaglio dello ${targetPct.toFixed(2)}% non copre il costo del giro, stimato allo ${costPct.toFixed(2)}%.`,
+  }
+}
+
 export function buildTrade({
   ticker,
   price,
@@ -64,11 +159,10 @@ export function buildTrade({
   marketData = {},
 }) {
   const atrPct = (atr / price) * 100
-  const isCrypto = strategy.id === 'crypto'
-  const targetPct = isCrypto ? (atrPct < 4 ? 0.45 : 0.65) : atrPct < 1.5 ? 0.35 : 0.6
-  const maxTargetPct = isCrypto ? targetPct : atrPct < 1.5 ? 0.8 : 1.2
-  const trailingPct = isCrypto ? null : atrPct < 1.5 ? 0.2 : 0.3
-  const stopMultiplier = isCrypto ? 1.8 : atrPct < 1.5 ? 1.2 : 1.5
+  const { targetPct, maxTargetPct, trailingPct, stopMultiplier } = getTradeGeometry(
+    atrPct,
+    strategy,
+  )
   const long = type === 'LONG'
   const openedAt = new Date().toISOString()
   const currencyData = getMarketCurrencyData(ticker, price, atr, marketData)
