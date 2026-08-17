@@ -1,8 +1,8 @@
-// Cron sospeso il 2026-08-16: il blocco "crons" e stato tolto da vercel.json
-// finche geometria e modello costi non sono allineati al broker IBKR.
-// Per riaccendere il pilota automatico: rimettere in vercel.json
-//   "crons": [{ "path": "/api/cron/monitor", "schedule": "*/5 * * * *" }]
-// L'endpoint resta invocabile a mano con il CRON_SECRET.
+// Riacceso il 2026-08-17, dopo che il modello costi e passato a IBKR e la
+// guardia sui costi rifiuta le operazioni che non ripagano il proprio giro.
+// Era stato sospeso il 2026-08-16 proprio in attesa di quelle due cose.
+//
+// Il crypto resta fermo per scelta: non e mai stato acceso da quando esiste.
 import {
   DEFAULT_MARKET_ID,
   getSupabaseClient,

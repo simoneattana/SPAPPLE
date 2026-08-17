@@ -1,4 +1,10 @@
 {
+  "crons": [
+    {
+      "path": "/api/cron/monitor",
+      "schedule": "*/5 * * * *"
+    }
+  ],
   "functions": {
     "api/cron/monitor.js": {
       "maxDuration": 120
